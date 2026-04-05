@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HatmasBot Control Panel</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: #0a0b12;
+  color: #c4a882;
+  font-family: 'Inter', sans-serif;
+  min-height: 100vh;
+  padding: 20px;
+}
+
+h1 {
+  font-size: 20px;
+  font-weight: 300;
+  letter-spacing: 4px;
+  text-align: center;
+  margin-bottom: 20px;
+  color: #e8ddd0;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(196,168,130,0.1);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.card-title {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: rgba(196,168,130,0.5);
+  margin-bottom: 12px;
+}
+
+.big-btn {
+  width: 100%;
+  padding: 14px;
+  border: 1px solid rgba(196,168,130,0.3);
+  background: transparent;
+  color: #c4a882;
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 1px;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: all 0.2s;
+  margin-bottom: 8px;
+}
+
+.big-btn:hover {
+  background: rgba(196,168,130,0.1);
+  border-color: #c4a882;
+}
+
+.big-btn.go-live {
+  border-color: rgba(80,200,120,0.4);
+  color: #50c878;
+}
+
+.big-btn.go-live:hover {
+  background: rgba(80,200,120,0.1);
+}
+
+.big-btn.stop {
+  border-color: rgba(200,80,80,0.4);
+  color: #c85050;
+}
+
+.big-btn.stop:hover {
+  background: rgba(200,80,80,0.1);
+}
+
+.big-btn.snap-btn {
+  border-color: rgba(180,130,255,0.4);
+  color: #b482ff;
+}
+
+.big-btn.snap-btn:hover {
+  background: rgba(180,130,255,0.1);
+}
+
+.toggle-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(196,168,130,0.05);
+}
+
+.toggle-label {
+  font-size: 13px;
+  color: rgba(196,168,130,0.7);
+}
+
+.toggle {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  cursor: pointer;
+}
+
+.toggle input {
+  display: none;
+}
+
+.toggle-slider {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(196,168,130,0.15);
+  border-radius: 11px;
+  transition: 0.3s;
+}
+
+.toggle-slider:before {
+  content: "";
+  position: absolute;
+  height: 16px;
+  width: 16px;
+  left: 3px;
+  bottom: 3px;
+  background: rgba(196,168,130,0.5);
+  border-radius: 50%;
+  transition: 0.3s;
+}
+
+.toggle input:checked + .toggle-slider {
+  background: rgba(80,200,120,0.3);
+}
+
+.toggle input:checked + .toggle-slider:before {
+  transform: translateX(18px);
+  background: #50c878;
+}
+
+.stat-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: 13px;
+}
+
+.stat-label { color: rgba(196,168,130,0.5); }
+.stat-value { color: #e8ddd0; font-weight: 500; }
+
+.queue-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(196,168,130,0.05);
+  font-size: 12px;
+}
+
+.queue-song { color: #e8ddd0; flex: 1; }
+.queue-user { color: rgba(196,168,130,0.5); margin-left: 8px; }
+
+.queue-empty {
+  color: rgba(196,168,130,0.3);
+  font-style: italic;
+  padding: 12px 0;
+  text-align: center;
+  font-size: 12px;
+}
+
+.prediction-btns {
+  display: flex;
+  gap: 8px;
+}
+
+.prediction-btns button {
+  flex: 1;
+  padding: 10px;
+  border: 1px solid rgba(196,168,130,0.2);
+  background: transparent;
+  color: #c4a882;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.prediction-btns .win:hover {
+  background: rgba(80,200,120,0.1);
+  border-color: #50c878;
+  color: #50c878;
+}
+
+.prediction-btns .loss:hover {
+  background: rgba(200,80,80,0.1);
+  border-color: #c85050;
+  color: #c85050;
+}
+
+.prediction-btns .cancel:hover {
+  background: rgba(196,168,130,0.1);
+}
+
+.chat-input {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.chat-input input {
+  flex: 1;
+  padding: 8px 12px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(196,168,130,0.15);
+  border-radius: 4px;
+  color: #e8ddd0;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  outline: none;
+}
+
+.chat-input input:focus {
+  border-color: rgba(196,168,130,0.3);
+}
+
+.chat-input button {
+  padding: 8px 16px;
+  background: transparent;
+  border: 1px solid rgba(196,168,130,0.2);
+  color: #c4a882;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.now-playing-display {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+}
+
+.np-art {
+  width: 48px;
+  height: 48px;
+  border-radius: 4px;
+  background: rgba(196,168,130,0.1);
+  object-fit: cover;
+}
+
+.np-info { flex: 1; }
+.np-title { font-size: 13px; color: #e8ddd0; font-weight: 500; }
+.np-artist { font-size: 11px; color: rgba(196,168,130,0.5); }
+.np-requester { font-size: 11px; color: rgba(196,168,130,0.3); }
+</style>
+</head>
+<body>
+
+<h1>HATMASBOT</h1>
+
+<div class="grid">
+  <!-- Stream Control -->
+  <div class="card">
+    <div class="card-title">stream control</div>
+    <button class="big-btn go-live" onclick="action('go_live')">GO LIVE</button>
+    <button class="big-btn stop" onclick="action('stop_stream')">STOP STREAM</button>
+    <button class="big-btn snap-btn" onclick="action('snap')">⚡ SNAP</button>
+  </div>
+
+  <!-- Now Playing -->
+  <div class="card">
+    <div class="card-title">now playing</div>
+    <div id="nowPlaying">
+      <div class="queue-empty">Nothing playing</div>
+    </div>
+    <button class="big-btn" onclick="action('skip_song')" style="margin-top:8px">SKIP SONG</button>
+  </div>
+
+  <!-- Predictions -->
+  <div class="card">
+    <div class="card-title">resolve prediction</div>
+    <div class="prediction-btns">
+      <button class="win" onclick="action('resolve_prediction', {outcome:'win'})">WIN</button>
+      <button class="loss" onclick="action('resolve_prediction', {outcome:'loss'})">LOSS</button>
+      <button class="cancel" onclick="action('resolve_prediction', {outcome:'cancel'})">CANCEL</button>
+    </div>
+    <div style="margin-top:16px">
+      <div class="card-title">send chat message</div>
+      <div class="chat-input">
+        <input type="text" id="chatMsg" placeholder="Type a message..."
+               onkeypress="if(event.key==='Enter')sendChat()">
+        <button onclick="sendChat()">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Feature Toggles -->
+  <div class="card">
+    <div class="card-title">features</div>
+    <div id="featureToggles"></div>
+  </div>
+
+  <!-- Song Queue -->
+  <div class="card">
+    <div class="card-title">song queue</div>
+    <div id="songQueue">
+      <div class="queue-empty">Queue empty</div>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="card">
+    <div class="card-title">session stats</div>
+    <div id="sessionStats">
+      <div class="stat-item">
+        <span class="stat-label">Uptime</span>
+        <span class="stat-value" id="statUptime">—</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Commands</span>
+        <span class="stat-value" id="statCommands">0</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Plugins</span>
+        <span class="stat-value" id="statPlugins">—</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = 'http://localhost:8069';
+
+async function action(name, extra = {}) {
+  try {
+    await fetch(`${API}/api/action`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({action: name, ...extra})
+    });
+  } catch(e) { console.error(e); }
+}
+
+async function sendChat() {
+  const input = document.getElementById('chatMsg');
+  const msg = input.value.trim();
+  if (!msg) return;
+  await action('send_chat', {message: msg});
+  input.value = '';
+}
+
+function renderFeatures(features) {
+  const el = document.getElementById('featureToggles');
+  el.innerHTML = '';
+  const names = {
+    song_requests: 'Song Requests',
+    predictions: 'Auto Predictions',
+    snap: 'Snap',
+    claude_chat: 'Claude Chat',
+    smite_tracking: 'Smite Tracking',
+    now_playing_overlay: 'Now Playing',
+    auto_scene_switch: 'Auto Scene Switch',
+  };
+  for (const [key, enabled] of Object.entries(features)) {
+    const label = names[key] || key;
+    const row = document.createElement('div');
+    row.className = 'toggle-row';
+    row.innerHTML = `
+      <span class="toggle-label">${label}</span>
+      <label class="toggle">
+        <input type="checkbox" ${enabled ? 'checked' : ''}
+               onchange="action('toggle_feature', {feature:'${key}', enabled:this.checked})">
+        <span class="toggle-slider"></span>
+      </label>
+    `;
+    el.appendChild(row);
+  }
+}
+
+function renderNowPlaying(np) {
+  const el = document.getElementById('nowPlaying');
+  if (!np) {
+    el.innerHTML = '<div class="queue-empty">Nothing playing</div>';
+    return;
+  }
+  el.innerHTML = `
+    <div class="now-playing-display">
+      ${np.album_art ? `<img class="np-art" src="${np.album_art}">` : ''}
+      <div class="np-info">
+        <div class="np-title">${np.title || '—'}</div>
+        <div class="np-artist">${np.artist || '—'}</div>
+        <div class="np-requester">${np.requester ? `by ${np.requester} | ♡ ${np.likes || 0}` : 'playlist'}</div>
+      </div>
+    </div>
+  `;
+}
+
+function renderQueue(queue) {
+  const el = document.getElementById('songQueue');
+  if (!queue || queue.length === 0) {
+    el.innerHTML = '<div class="queue-empty">Queue empty</div>';
+    return;
+  }
+  el.innerHTML = queue.map((s, i) => `
+    <div class="queue-item">
+      <span class="queue-song">${i+1}. ${s.title}</span>
+      <span class="queue-user">${s.requester}</span>
+    </div>
+  `).join('');
+}
+
+async function poll() {
+  try {
+    const resp = await fetch(`${API}/api/state`);
+    const data = await resp.json();
+    
+    renderFeatures(data.features || {});
+    renderNowPlaying(data.now_playing);
+    renderQueue(data.queue || []);
+    
+    if (data.stats) {
+      document.getElementById('statUptime').textContent = data.stats.uptime || '—';
+      document.getElementById('statCommands').textContent = data.stats.commands || 0;
+      document.getElementById('statPlugins').textContent = (data.stats.plugins || []).join(', ');
+    }
+  } catch(e) {}
+}
+
+setInterval(poll, 2000);
+poll();
+</script>
+</body>
+</html>

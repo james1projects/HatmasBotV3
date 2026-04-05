@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500&family=Inter:wght@300;400;500&display=swap');
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: transparent;
+  overflow: hidden;
+  width: 450px;
+  height: 120px;
+}
+
+.now-playing {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  width: 430px;
+  height: 100px;
+  background: rgba(10, 11, 18, 0.92);
+  border: 1px solid rgba(196, 168, 130, 0.2);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  transform: translateX(-460px);
+  transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  backdrop-filter: blur(10px);
+}
+
+.now-playing.visible {
+  transform: translateX(0);
+}
+
+.album-art {
+  width: 80px;
+  height: 80px;
+  border-radius: 6px;
+  background: rgba(196, 168, 130, 0.1);
+  flex-shrink: 0;
+  object-fit: cover;
+}
+
+.info {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+}
+
+.label {
+  font-family: 'Inter', sans-serif;
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(196, 168, 130, 0.5);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+.title {
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  color: #e8ddd0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.artist {
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 300;
+  color: rgba(196, 168, 130, 0.7);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.meta-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.requester {
+  font-family: 'Inter', sans-serif;
+  font-size: 11px;
+  color: rgba(196, 168, 130, 0.5);
+}
+
+.likes {
+  font-family: 'Inter', sans-serif;
+  font-size: 11px;
+  color: rgba(232, 168, 124, 0.8);
+  transition: transform 0.3s ease;
+}
+
+.likes.pulse {
+  transform: scale(1.3);
+}
+
+.progress-bar {
+  position: absolute;
+  bottom: 0;
+  left: 14px;
+  right: 14px;
+  height: 2px;
+  background: rgba(196, 168, 130, 0.1);
+  border-radius: 1px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: rgba(196, 168, 130, 0.5);
+  border-radius: 1px;
+  width: 0%;
+  transition: width 1s linear;
+}
+
+.time {
+  font-family: 'Inter', sans-serif;
+  font-size: 10px;
+  color: rgba(196, 168, 130, 0.3);
+  position: absolute;
+  bottom: 6px;
+  right: 14px;
+}
+</style>
+</head>
+<body>
+
+<div class="now-playing" id="nowPlaying">
+  <img class="album-art" id="albumArt" src="" alt="">
+  <div class="info">
+    <div class="label">now playing</div>
+    <div class="title" id="songTitle">—</div>
+    <div class="artist" id="songArtist">—</div>
+    <div class="meta-row">
+      <span class="requester" id="requester">—</span>
+      <span class="likes" id="likes">♡ 0</span>
+    </div>
+  </div>
+  <div class="progress-bar">
+    <div class="progress-fill" id="progressFill"></div>
+  </div>
+  <div class="time" id="timeDisplay">0:00 / 0:00</div>
+</div>
+
+<script>
+const API_URL = 'http://localhost:8069/api/state';
+const el = {
+  container: document.getElementById('nowPlaying'),
+  art: document.getElementById('albumArt'),
+  title: document.getElementById('songTitle'),
+  artist: document.getElementById('songArtist'),
+  requester: document.getElementById('requester'),
+  likes: document.getElementById('likes'),
+  progress: document.getElementById('progressFill'),
+  time: document.getElementById('timeDisplay'),
+};
+
+let currentSong = null;
+let lastLikes = 0;
+
+function formatTime(ms) {
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return `${m}:${sec.toString().padStart(2, '0')}`;
+}
+
+function updateDisplay(data) {
+  const np = data.now_playing;
+
+  if (!np) {
+    el.container.classList.remove('visible');
+    currentSong = null;
+    return;
+  }
+
+  const songKey = `${np.title}_${np.artist}`;
+
+  if (songKey !== currentSong) {
+    currentSong = songKey;
+    el.title.textContent = np.title || '—';
+    el.artist.textContent = np.artist || '—';
+    el.requester.textContent = np.requester ? `requested by ${np.requester}` : '';
+    el.art.src = np.album_art || '';
+    el.art.style.display = np.album_art ? 'block' : 'none';
+    el.container.classList.add('visible');
+  }
+
+  // Update likes with pulse animation
+  const likeCount = np.likes || 0;
+  if (likeCount !== lastLikes) {
+    el.likes.textContent = `♡ ${likeCount}`;
+    if (likeCount > lastLikes) {
+      el.likes.classList.add('pulse');
+      setTimeout(() => el.likes.classList.remove('pulse'), 300);
+    }
+    lastLikes = likeCount;
+  }
+
+  // Update progress
+  if (np.duration_ms && np.started_at) {
+    const elapsed = (Date.now() / 1000 - np.started_at) * 1000;
+    const pct = Math.min((elapsed / np.duration_ms) * 100, 100);
+    el.progress.style.width = `${pct}%`;
+    el.time.textContent = `${formatTime(elapsed)} / ${formatTime(np.duration_ms)}`;
+  }
+}
+
+async function poll() {
+  try {
+    const resp = await fetch(API_URL);
+    const data = await resp.json();
+    updateDisplay(data);
+  } catch (e) {
+    // Server not ready yet
+  }
+}
+
+setInterval(poll, 1000);
+poll();
+</script>
+</body>
+</html>

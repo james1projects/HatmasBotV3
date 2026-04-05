@@ -1,0 +1,30 @@
+# === SECRETS (NEVER COMMIT) ===
+.tio.tokens.json
+core/config_local.py
+data/twitch_token.json
+data/spotify_token.json
+
+# === RUNTIME DATA ===
+data/*.json
+
+# === PYTHON ===
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+venv/
+env/
+.venv/
+
+# === IDE ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# === OS ===
+Thumbs.db
+.DS_Store
+desktop.ini
