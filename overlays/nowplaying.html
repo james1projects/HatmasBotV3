@@ -210,10 +210,26 @@ function updateDisplay(data) {
     lastLikes = likeCount;
   }
 
-  // Update progress
-  if (np.duration_ms && np.started_at) {
-    const elapsed = (Date.now() / 1000 - np.started_at) * 1000;
-    const pct = Math.min((elapsed / np.duration_ms) * 100, 100);
+  // Update progress — use server-provided progress when available,
+  // interpolating forward between polls. Handles Spotify pause correctly
+  // and works for both Spotify and YouTube sources.
+  if (np.duration_ms) {
+    let elapsed;
+
+    if (np.progress_ms !== undefined && np.last_updated) {
+      // Server provides real progress from Spotify API or YouTube player.
+      // Interpolate forward only if the song is actively playing.
+      const sincePoll = (Date.now() / 1000 - np.last_updated) * 1000;
+      elapsed = np.progress_ms + (np.is_playing !== false ? sincePoll : 0);
+    } else if (np.started_at) {
+      // Fallback: estimate from start timestamp (legacy / first poll)
+      elapsed = (Date.now() / 1000 - np.started_at) * 1000;
+    } else {
+      elapsed = 0;
+    }
+
+    elapsed = Math.max(0, Math.min(elapsed, np.duration_ms));
+    const pct = (elapsed / np.duration_ms) * 100;
     el.progress.style.width = `${pct}%`;
     el.time.textContent = `${formatTime(elapsed)} / ${formatTime(np.duration_ms)}`;
   }

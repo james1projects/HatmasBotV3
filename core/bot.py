@@ -172,7 +172,9 @@ class HatmasBot(commands.Bot):
                 except Exception as e:
                     print(f"[Command Error] !{cmd_name}: {e}")
                     traceback.print_exc()
+                return  # Custom command handled — skip TwitchIO's process_commands
 
+        # Only reach here for non-custom commands (e.g. TwitchIO @commands.command() decorated methods)
         await self.process_commands(payload)
 
     # =============================================================

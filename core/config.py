@@ -70,9 +70,13 @@ Never be mean, but playful roasting is fine. One emoji max per message."""
 # === SONG REQUEST ===
 SR_MAX_PER_USER = 2
 SR_MAX_PER_SUB = 4
+SR_MAX_DURATION_MS = 600000       # 10 minutes
+SR_VOTESKIP_THRESHOLD = 5         # Votes needed to skip
 SR_QUEUE_FILE = DATA_DIR / "song_queue.json"
 SR_HISTORY_FILE = DATA_DIR / "song_history.json"
 SR_LIKES_FILE = DATA_DIR / "song_likes.json"
+SR_BLACKLIST_FILE = DATA_DIR / "song_blacklist.json"
+SR_STATE_FILE = DATA_DIR / "song_state.json"
 
 # === SNAP ===
 SNAP_TIMEOUT_DURATION = 600
