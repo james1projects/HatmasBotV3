@@ -85,6 +85,13 @@ TITLE_TEMPLATE_GOD = "Playing {god} | !god for stats"     # Template when god is
 TITLE_TEMPLATE_LOBBY = "Chilling in lobby | Come hang out"  # Template when not in a match
 TITLE_FADE_DURATION = 1.0         # Seconds for god portrait fade in/out
 
+# {command} placeholder rotation — cycles through commands in the title
+TITLE_COMMAND_ROTATION = [
+    "!gamble", "!sr", "!god", "!stats", "!rank", "!like",
+    "!godrequest", "!kda", "!voteskip",
+]
+TITLE_COMMAND_ROTATION_INTERVAL = 300  # Seconds between command rotations (default: 5 min)
+
 # === CLAUDE API ===
 CLAUDE_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "YOUR_CLAUDE_API_KEY")
 CLAUDE_MODEL = "claude-opus-4-6"
@@ -131,6 +138,13 @@ OBS_SOURCE_GODREQ_TEXT = "GodReqText"         # OBS text source for god name / "
 OBS_GODREQ_SCENE = ""                        # Scene containing the god request sources
 OBS_GODREQ_GROUP = ""                        # Group name if sources are in a group
 
+# === GAMBLE ===
+GAMBLE_CURRENCY_NAME = "Hats"                # Must match the currency name in MixItUp
+GAMBLE_MIN_BET = 10                          # Minimum wager
+GAMBLE_COOLDOWN = 10                         # Seconds between gambles per user
+GAMBLE_JACKPOT_FILE = DATA_DIR / "gamble_jackpot.json"
+GAMBLE_ALERT_MIN_WAGER = 1000               # Min wager to trigger sound + visual alerts (jackpot always triggers)
+
 # === WEB SERVER ===
 WEB_HOST = "localhost"
 WEB_PORT = 8069
@@ -138,7 +152,7 @@ WEB_PORT = 8069
 # === FEATURE TOGGLES ===
 DEFAULT_FEATURES = {
     "song_requests": True, "predictions": True, "snap": True,
-    "claude_chat": True, "smite_tracking": True,
+    "claude_chat": True, "smite_tracking": True, "gamble": True,
     "now_playing_overlay": True, "auto_scene_switch": True,
     "auto_title": True, "god_requests": True,
 }

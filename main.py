@@ -13,6 +13,7 @@ sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
 
 from core.bot import HatmasBot
 from core.webserver import WebServer
+from core.token_manager import TokenManager
 from core.config import (
     TWITCH_BOT_TOKEN, TWITCH_BOT_REFRESH_TOKEN,
     TWITCH_BROADCASTER_TOKEN, TWITCH_BROADCASTER_REFRESH_TOKEN,
@@ -25,6 +26,7 @@ from plugins.songrequest import SongRequestPlugin
 from plugins.obs import OBSPlugin
 from plugins.claude_chat import ClaudeChatPlugin
 from plugins.godrequest import GodRequestPlugin
+from plugins.gamble import GamblePlugin
 
 
 async def main():
@@ -34,6 +36,9 @@ async def main():
     print("  April 2026")
     print("=" * 50)
     print()
+
+    # Initialize token manager (auto-refreshes OAuth tokens)
+    token_mgr = TokenManager()
 
     # Initialize web server
     web = WebServer()
@@ -48,12 +53,13 @@ async def main():
 
     # Register plugins (uncomment as you set them up)
     bot.register_plugin("basic", BasicPlugin())
-    bot.register_plugin("smite", SmitePlugin())
+    bot.register_plugin("smite", SmitePlugin(token_manager=token_mgr))
     bot.register_plugin("songrequest", SongRequestPlugin())
     # bot.register_plugin("snap", SnapPlugin())
     bot.register_plugin("obs", OBSPlugin())
     bot.register_plugin("godrequest", GodRequestPlugin())
     bot.register_plugin("claude", ClaudeChatPlugin())
+    bot.register_plugin("gamble", GamblePlugin())
 
     # Start web server
     await web.start()
@@ -62,13 +68,18 @@ async def main():
     print()
 
     try:
+        # Start token manager (validates and refreshes tokens on startup)
+        await token_mgr.start()
+
         # Add the bot's OAuth token before starting
-        await bot.add_token(TWITCH_BOT_TOKEN, TWITCH_BOT_REFRESH_TOKEN)
+        # (uses the potentially-refreshed token from config module)
+        from core import config as _cfg
+        await bot.add_token(_cfg.TWITCH_BOT_TOKEN, _cfg.TWITCH_BOT_REFRESH_TOKEN)
         print("[HatmasBot] Bot token added")
 
         # Add the broadcaster's OAuth token for channel-level EventSub
         # (subscribe, resub, gift sub events require broadcaster auth)
-        await bot.add_token(TWITCH_BROADCASTER_TOKEN, TWITCH_BROADCASTER_REFRESH_TOKEN)
+        await bot.add_token(_cfg.TWITCH_BROADCASTER_TOKEN, _cfg.TWITCH_BROADCASTER_REFRESH_TOKEN)
         print("[HatmasBot] Broadcaster token added")
 
         # Start the bot (this blocks)
@@ -83,6 +94,7 @@ async def main():
         for name, plugin in bot.plugins.items():
             if hasattr(plugin, "cleanup"):
                 await plugin.cleanup()
+        await token_mgr.close()
         await web.stop()
         print("[HatmasBot] Goodbye.")
 

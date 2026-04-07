@@ -39,6 +39,8 @@ class WebServer:
             "features": {},
             "stats": {},
             "like_event": 0,  # Timestamp of last like — overlay uses this to trigger hearts
+            "sound_alert": {"type": None, "timestamp": 0},  # Current sound alert for overlay
+            "gamble_result_queue": [],  # Queue of gamble results for visual overlay
             "youtube_playback": {
                 "video_id": None,
                 "status": "idle",  # idle | pending | playing
@@ -65,6 +67,8 @@ class WebServer:
         self.app.router.add_get("/overlay/youtube_player", self.handle_youtube_player_overlay)
         self.app.router.add_get("/overlay/snap", self.handle_snap_overlay)
         self.app.router.add_get("/overlay/god", self.handle_god_overlay)
+        self.app.router.add_get("/overlay/sound_alerts", self.handle_sound_alerts_overlay)
+        self.app.router.add_get("/api/gamble_queue", self.handle_gamble_queue)
         self.app.router.add_get("/api/state", self.handle_get_state)
         self.app.router.add_post("/api/state", self.handle_update_state)
         self.app.router.add_post("/api/action", self.handle_action)
@@ -77,6 +81,33 @@ class WebServer:
         import time
         self._state["like_event"] = time.time()
 
+    def trigger_sound_alert(self, alert_type):
+        """Trigger a sound alert for the overlay.
+        Types: 'jackpot', 'big_win', 'win', 'loss'"""
+        import time
+        self._state["sound_alert"] = {
+            "type": alert_type,
+            "timestamp": time.time(),
+        }
+        print(f"[WebServer] Sound alert triggered: {alert_type}")
+
+    def trigger_gamble_result(self, result):
+        """Push a gamble result onto the queue for the visual overlay.
+        result: {type, player, roll, winnings, wager}"""
+        import time
+        result["timestamp"] = time.time()
+        self._state["gamble_result_queue"].append(result)
+        # Cap queue at 20 to prevent unbounded growth
+        if len(self._state["gamble_result_queue"]) > 20:
+            self._state["gamble_result_queue"] = self._state["gamble_result_queue"][-20:]
+
+    async def handle_gamble_queue(self, request):
+        """Return and drain the gamble result queue. The overlay calls this to
+        pick up all pending results without missing any."""
+        queue = list(self._state["gamble_result_queue"])
+        self._state["gamble_result_queue"] = []
+        return web.json_response(queue)
+
     async def handle_get_state(self, request):
         state = dict(self._state)
         if self.bot:
@@ -86,12 +117,18 @@ class WebServer:
                 "commands": self.bot.command_count,
                 "plugins": list(self.bot.plugins.keys()),
             }
-            # Include current title templates for the dashboard
+            # Include current title templates and command rotation for the dashboard
             if "smite" in self.bot.plugins:
                 from core.config import TITLE_TEMPLATE_GOD, TITLE_TEMPLATE_LOBBY
                 state["title_templates"] = {
                     "god": TITLE_TEMPLATE_GOD,
                     "lobby": TITLE_TEMPLATE_LOBBY,
+                }
+                state["command_rotation"] = self.bot.plugins["smite"].get_rotation_commands()
+                state["daily_record"] = {
+                    "record": self.bot.plugins["smite"].get_record_string(),
+                    "wins": self.bot.plugins["smite"]._session_wins,
+                    "losses": self.bot.plugins["smite"]._session_losses,
                 }
         state["playlist_auto_hide_seconds"] = SR_PLAYLIST_AUTO_HIDE_SECONDS
         return web.json_response(state)
@@ -186,6 +223,51 @@ class WebServer:
                 await smite._update_stream_title(god_name)
             return web.json_response({"ok": True})
 
+        elif action == "record_result":
+            # Manually record a win or loss (updates daily record + title)
+            outcome = data.get("outcome", "").lower()
+            if outcome in ("win", "loss") and "smite" in self.bot.plugins:
+                record = self.bot.plugins["smite"].record_result(outcome)
+                # Update title with new record
+                smite = self.bot.plugins["smite"]
+                god = smite.current_god["name"] if smite.current_god else None
+                await smite._update_stream_title(god)
+                return web.json_response({"ok": True, "record": record})
+            return web.json_response({"error": "Invalid outcome (use 'win' or 'loss')"}, status=400)
+
+        elif action == "test_sound":
+            # Test a sound + visual alert from the dashboard
+            sound_type = data.get("type", "jackpot")
+            self.trigger_sound_alert(sound_type)
+            # Also send a test gamble result for the visual popup
+            test_results = {
+                "jackpot": {"winnings": 50000, "roll": 100, "wager": 1000},
+                "big_win": {"winnings": 3000, "roll": 99, "wager": 1000},
+                "win":     {"winnings": 2000, "roll": 75, "wager": 1000},
+                "loss":    {"winnings": 0, "roll": 23, "wager": 1000},
+            }
+            test_data = test_results.get(sound_type, test_results["win"])
+            self.trigger_gamble_result({
+                "type": sound_type,
+                "player": "TestUser",
+                **test_data
+            })
+            return web.json_response({"ok": True, "type": sound_type})
+
+        elif action == "add_rotation_command":
+            command = data.get("command", "").strip()
+            if command and "smite" in self.bot.plugins:
+                added = self.bot.plugins["smite"].add_rotation_command(command)
+                return web.json_response({"ok": True, "added": added})
+            return web.json_response({"error": "Missing command"}, status=400)
+
+        elif action == "remove_rotation_command":
+            command = data.get("command", "").strip()
+            if command and "smite" in self.bot.plugins:
+                removed = self.bot.plugins["smite"].remove_rotation_command(command)
+                return web.json_response({"ok": True, "removed": removed})
+            return web.json_response({"error": "Missing command"}, status=400)
+
         elif action == "send_chat":
             msg = data.get("message", "")
             if msg:
@@ -253,6 +335,12 @@ class WebServer:
         if html_path.exists():
             return web.FileResponse(html_path)
         return web.Response(text="God overlay not found", status=404)
+
+    async def handle_sound_alerts_overlay(self, request):
+        html_path = OVERLAY_DIR / "sound_alerts.html"
+        if html_path.exists():
+            return web.FileResponse(html_path)
+        return web.Response(text="Sound alerts overlay not found", status=404)
 
     # === CONTROL PANEL ===
 

@@ -1216,6 +1216,12 @@ class SongRequestPlugin:
                         [{"title": s["title"], "artist": s["artist"],
                           "requester": s["requester"]} for s in self.queue]
                     )
+
+                # Update stream title with new song (for {song} placeholder)
+                if "smite" in self.bot.plugins:
+                    smite = self.bot.plugins["smite"]
+                    god = smite.current_god["name"] if smite.current_god else None
+                    await smite._update_stream_title(god)
             else:
                 was_requested = self.current_song is not None
                 if self.current_song:

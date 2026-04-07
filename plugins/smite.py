@@ -36,7 +36,7 @@ from core.config import (
     TWITCH_CHANNEL, TWITCH_CLIENT_ID, TWITCH_BOT_TOKEN,
     TWITCH_BROADCASTER_TOKEN, TWITCH_OWNER_ID,
     TITLE_AUTO_UPDATE, TITLE_TEMPLATE_GOD, TITLE_TEMPLATE_LOBBY,
-    TITLE_FADE_DURATION,
+    TITLE_FADE_DURATION, TITLE_COMMAND_ROTATION, TITLE_COMMAND_ROTATION_INTERVAL,
     DATA_DIR
 )
 from core.cache import Cache
@@ -64,11 +64,12 @@ class SmitePlugin:
         "Origin": "https://tracker.gg",
     }
 
-    def __init__(self):
+    def __init__(self, token_manager=None):
         self.bot = None
         self.cache = Cache()
         self.session = None           # aiohttp session for Twitch API calls
         self._cffi_session = None     # curl_cffi session for tracker.gg (Cloudflare bypass)
+        self._token_manager = token_manager  # Auto-refresh token manager
         self._cffi_executor = ThreadPoolExecutor(max_workers=2)
 
         # Match state
@@ -89,6 +90,16 @@ class SmitePlugin:
         # Background task
         self._poll_task = None
 
+        # Command rotation for {command} title placeholder
+        self._command_index = 0
+        self._current_command = TITLE_COMMAND_ROTATION[0] if TITLE_COMMAND_ROTATION else ""
+        self._command_rotation_task = None
+
+        # Daily session record (auto-resets each day)
+        self._session_wins = 0
+        self._session_losses = 0
+        self._session_date = None  # date string "YYYY-MM-DD"
+
         # Event callbacks — other plugins can register here
         self._on_match_start_callbacks = []
         self._on_god_detected_callbacks = []
@@ -106,15 +117,59 @@ class SmitePlugin:
                 with open(SMITE2_STATE_FILE) as f:
                     state = json.load(f)
                     self.last_match_result = state.get("last_match_result")
+                    # Load daily record — auto-reset if it's a new day
+                    today = datetime.now().strftime("%Y-%m-%d")
+                    saved_date = state.get("session_date")
+                    if saved_date == today:
+                        self._session_wins = state.get("session_wins", 0)
+                        self._session_losses = state.get("session_losses", 0)
+                        self._session_date = today
+                        print(f"[Smite] Restored daily record: {self._session_wins}-{self._session_losses}")
+                    else:
+                        self._session_date = today
+                        print(f"[Smite] New day — daily record reset to 0-0")
             except Exception:
                 pass
 
     def _save_state(self):
         state = {
             "last_match_result": self.last_match_result,
+            "session_wins": self._session_wins,
+            "session_losses": self._session_losses,
+            "session_date": self._session_date or datetime.now().strftime("%Y-%m-%d"),
         }
         with open(SMITE2_STATE_FILE, "w") as f:
             json.dump(state, f, indent=2)
+
+    # === DAILY RECORD ===
+
+    def _check_day_reset(self):
+        """Reset record if it's a new day."""
+        today = datetime.now().strftime("%Y-%m-%d")
+        if self._session_date != today:
+            self._session_wins = 0
+            self._session_losses = 0
+            self._session_date = today
+            self._save_state()
+            print(f"[Smite] New day detected — daily record reset to 0-0")
+
+    def record_result(self, outcome):
+        """Record a win or loss. Called from resolve_prediction or manually.
+        outcome: 'win' or 'loss'"""
+        self._check_day_reset()
+        if outcome == "win":
+            self._session_wins += 1
+        elif outcome == "loss":
+            self._session_losses += 1
+        self._save_state()
+        record = self.get_record_string()
+        print(f"[Smite] Daily record updated: {record}")
+        return record
+
+    def get_record_string(self):
+        """Get the current daily record as a string like '3-1'."""
+        self._check_day_reset()
+        return f"{self._session_wins}-{self._session_losses}"
 
     # === SETUP ===
 
@@ -129,6 +184,7 @@ class SmitePlugin:
         bot.register_command("damage", self.cmd_damage)
         bot.register_command("team", self.cmd_team)
         bot.register_command("lastmatch", self.cmd_lastmatch)
+        bot.register_command("record", self.cmd_record)
 
     async def on_ready(self):
         # aiohttp for Twitch API (predictions, broadcaster ID)
@@ -140,6 +196,10 @@ class SmitePlugin:
         )
         if self.bot.is_feature_enabled("smite_tracking"):
             self._poll_task = asyncio.create_task(self._poll_loop())
+
+        # Start command rotation task
+        if TITLE_COMMAND_ROTATION and TITLE_AUTO_UPDATE:
+            self._command_rotation_task = asyncio.create_task(self._command_rotation_loop())
 
     # === EVENT REGISTRATION ===
 
@@ -738,18 +798,22 @@ class SmitePlugin:
 
     # === PREDICTIONS ===
 
-    def _twitch_headers(self):
+    async def _twitch_headers(self):
         """Headers for Twitch Helix API calls using the bot token."""
+        if self._token_manager:
+            return await self._token_manager.get_bot_headers()
         return {
             "Client-ID": TWITCH_CLIENT_ID,
             "Authorization": f"Bearer {TWITCH_BOT_TOKEN}",
             "Content-Type": "application/json",
         }
 
-    def _broadcaster_headers(self):
+    async def _broadcaster_headers(self):
         """Headers for Twitch Helix API calls that require broadcaster auth.
         Used for channel title updates, predictions, etc.
         Falls back to bot token if no broadcaster token is configured."""
+        if self._token_manager:
+            return await self._token_manager.get_broadcaster_headers()
         token = TWITCH_BROADCASTER_TOKEN or TWITCH_BOT_TOKEN
         return {
             "Client-ID": TWITCH_CLIENT_ID,
@@ -759,10 +823,48 @@ class SmitePlugin:
 
     # === STREAM TITLE ===
 
+    async def _command_rotation_loop(self):
+        """Background task that rotates the {command} placeholder at a fixed interval."""
+        await asyncio.sleep(5)  # Short startup delay
+        print(f"[Smite] Command rotation started — {len(TITLE_COMMAND_ROTATION)} commands, "
+              f"rotating every {TITLE_COMMAND_ROTATION_INTERVAL}s")
+        while True:
+            try:
+                await asyncio.sleep(TITLE_COMMAND_ROTATION_INTERVAL)
+                if not TITLE_COMMAND_ROTATION:
+                    continue
+                # Advance to next command
+                self._command_index = (self._command_index + 1) % len(TITLE_COMMAND_ROTATION)
+                self._current_command = TITLE_COMMAND_ROTATION[self._command_index]
+                print(f"[Smite] Command rotation → {self._current_command}")
+                # Re-apply the current title with the new command
+                god = self.current_god["name"] if self.current_god else None
+                await self._update_stream_title(god)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"[Smite] Command rotation error: {e}")
+                await asyncio.sleep(30)
+
+    def _get_current_song(self):
+        """Get the currently playing song from the SR plugin, or None."""
+        if self.bot and "songrequest" in self.bot.plugins:
+            sr = self.bot.plugins["songrequest"]
+            if sr.current_song:
+                title = sr.current_song.get("title", "")
+                artist = sr.current_song.get("artist", "")
+                if title and artist:
+                    return f"{title} - {artist}"
+                return title or None
+        return None
+
     async def _update_stream_title(self, god_name=None):
         """Update the Twitch stream title based on current god or lobby state.
-        Uses TITLE_TEMPLATE_GOD with {god} placeholder when a god is detected,
-        or TITLE_TEMPLATE_LOBBY when not in a match.
+        Placeholders:
+          {god}     — current god name (only in god template)
+          {command} — rotating featured command
+          {record}  — daily win/loss record (e.g. "3-1")
+          {song}    — currently playing song request
         Respects the TITLE_AUTO_UPDATE toggle and the 'auto_title' feature flag."""
         if not TITLE_AUTO_UPDATE:
             return
@@ -775,19 +877,40 @@ class SmitePlugin:
             else:
                 title = TITLE_TEMPLATE_LOBBY
 
-            async with self.session.patch(
-                "https://api.twitch.tv/helix/channels",
-                headers=self._broadcaster_headers(),
-                json={
-                    "broadcaster_id": TWITCH_OWNER_ID,
-                    "title": title,
-                }
-            ) as resp:
-                if resp.status == 204:
-                    print(f"[Smite] Stream title updated: {title}")
-                else:
+            # Replace {command} with the current rotating command
+            if "{command}" in title and self._current_command:
+                title = title.replace("{command}", self._current_command)
+
+            # Replace {record} with today's win/loss
+            if "{record}" in title:
+                title = title.replace("{record}", self.get_record_string())
+
+            # Replace {song} with the currently playing song
+            if "{song}" in title:
+                song = self._get_current_song()
+                title = title.replace("{song}", song or "No song playing")
+
+            # Try the request, auto-refresh on 401 and retry once
+            for attempt in range(2):
+                async with self.session.patch(
+                    "https://api.twitch.tv/helix/channels",
+                    headers=await self._broadcaster_headers(),
+                    json={
+                        "broadcaster_id": TWITCH_OWNER_ID,
+                        "title": title,
+                    }
+                ) as resp:
+                    if resp.status == 204:
+                        print(f"[Smite] Stream title updated: {title}")
+                        return
+                    elif resp.status == 401 and attempt == 0 and self._token_manager:
+                        print("[Smite] Title update got 401, refreshing token...")
+                        refreshed = await self._token_manager.handle_401("broadcaster")
+                        if refreshed:
+                            continue  # Retry with new token
                     body = await resp.text()
                     print(f"[Smite] Title update failed: {resp.status} {body}")
+                    return
         except Exception as e:
             print(f"[Smite] Title update error: {e}")
 
@@ -801,6 +924,37 @@ class SmitePlugin:
         if lobby_template is not None:
             TITLE_TEMPLATE_LOBBY = lobby_template
             print(f"[Smite] Lobby title template: {lobby_template}")
+
+    def add_rotation_command(self, command):
+        """Add a command to the rotation list at runtime."""
+        if command not in TITLE_COMMAND_ROTATION:
+            TITLE_COMMAND_ROTATION.append(command)
+            print(f"[Smite] Added '{command}' to command rotation ({len(TITLE_COMMAND_ROTATION)} total)")
+            return True
+        return False
+
+    def remove_rotation_command(self, command):
+        """Remove a command from the rotation list at runtime."""
+        if command in TITLE_COMMAND_ROTATION:
+            TITLE_COMMAND_ROTATION.remove(command)
+            # Adjust index if needed
+            if TITLE_COMMAND_ROTATION:
+                self._command_index = self._command_index % len(TITLE_COMMAND_ROTATION)
+                self._current_command = TITLE_COMMAND_ROTATION[self._command_index]
+            else:
+                self._command_index = 0
+                self._current_command = ""
+            print(f"[Smite] Removed '{command}' from command rotation ({len(TITLE_COMMAND_ROTATION)} remaining)")
+            return True
+        return False
+
+    def get_rotation_commands(self):
+        """Return the current command rotation list and active command."""
+        return {
+            "commands": list(TITLE_COMMAND_ROTATION),
+            "current": self._current_command,
+            "interval": TITLE_COMMAND_ROTATION_INTERVAL,
+        }
 
     # === PREDICTIONS ===
 
@@ -816,33 +970,46 @@ class SmitePlugin:
                 ],
                 "prediction_window": 120,
             }
-            async with self.session.post(
-                "https://api.twitch.tv/helix/predictions",
-                headers=self._broadcaster_headers(),
-                json=payload
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    pred = data["data"][0]
-                    self.prediction_id = pred["id"]
-                    self._prediction_outcomes = {
-                        o["id"]: o["title"] for o in pred.get("outcomes", [])
-                    }
-                    print(f"[Smite] Prediction created: {self.prediction_id}")
-                    await self.bot.send_chat(
-                        "Place your bets! Will Hatmaster win? "
-                        "Prediction closes in 2 minutes."
-                    )
-                else:
+            for attempt in range(2):
+                async with self.session.post(
+                    "https://api.twitch.tv/helix/predictions",
+                    headers=await self._broadcaster_headers(),
+                    json=payload
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        pred = data["data"][0]
+                        self.prediction_id = pred["id"]
+                        self._prediction_outcomes = {
+                            o["id"]: o["title"] for o in pred.get("outcomes", [])
+                        }
+                        print(f"[Smite] Prediction created: {self.prediction_id}")
+                        await self.bot.send_chat(
+                            "Place your bets! Will Hatmaster win? "
+                            "Prediction closes in 2 minutes."
+                        )
+                        break
+                    elif resp.status == 401 and attempt == 0 and self._token_manager:
+                        print("[Smite] Prediction create got 401, refreshing token...")
+                        if await self._token_manager.handle_401("broadcaster"):
+                            continue
                     body = await resp.text()
                     print(f"[Smite] Prediction creation failed: {resp.status} {body}")
+                    break
         except Exception as e:
             print(f"[Smite] Prediction error: {e}")
 
     async def resolve_prediction(self, outcome):
-        """Resolve prediction. outcome = 'win' or 'loss'"""
+        """Resolve prediction. outcome = 'win' or 'loss'.
+        Also records the result in the daily session record."""
+        # Always record the result, even if prediction has expired
+        record = self.record_result(outcome)
+
         if not self.prediction_id:
-            print("[Smite] No active prediction to resolve")
+            print(f"[Smite] No active prediction — recorded {outcome} anyway ({record})")
+            # Still update the title with the new record
+            god = self.current_god["name"] if self.current_god else None
+            await self._update_stream_title(god)
             return
 
         try:
@@ -864,20 +1031,31 @@ class SmitePlugin:
                 "status": "RESOLVED",
                 "winning_outcome_id": winning_id,
             }
-            async with self.session.patch(
-                "https://api.twitch.tv/helix/predictions",
-                headers=self._broadcaster_headers(),
-                json=payload
-            ) as resp:
-                if resp.status == 200:
-                    result_text = "Hatmaster won!" if outcome == "win" else "Hatmaster lost!"
-                    await self.bot.send_chat(f"Prediction resolved — {result_text}")
-                    print(f"[Smite] Prediction resolved: {outcome}")
-                    self.prediction_id = None
-                    self._prediction_outcomes = {}
-                else:
+            for attempt in range(2):
+                async with self.session.patch(
+                    "https://api.twitch.tv/helix/predictions",
+                    headers=await self._broadcaster_headers(),
+                    json=payload
+                ) as resp:
+                    if resp.status == 200:
+                        result_text = "Hatmaster won!" if outcome == "win" else "Hatmaster lost!"
+                        await self.bot.send_chat(
+                            f"Prediction resolved — {result_text} (Today: {record})"
+                        )
+                        print(f"[Smite] Prediction resolved: {outcome} ({record})")
+                        self.prediction_id = None
+                        self._prediction_outcomes = {}
+                        # Update title with new record
+                        god = self.current_god["name"] if self.current_god else None
+                        await self._update_stream_title(god)
+                        break
+                    elif resp.status == 401 and attempt == 0 and self._token_manager:
+                        print("[Smite] Prediction resolve got 401, refreshing token...")
+                        if await self._token_manager.handle_401("broadcaster"):
+                            continue
                     body = await resp.text()
                     print(f"[Smite] Resolve failed: {resp.status} {body}")
+                    break
         except Exception as e:
             print(f"[Smite] Resolve error: {e}")
 
@@ -1092,11 +1270,27 @@ class SmitePlugin:
             whisper
         )
 
+    async def cmd_record(self, message, args, whisper=False):
+        """!record — Show today's win/loss record."""
+        record = self.get_record_string()
+        total = self._session_wins + self._session_losses
+        if total == 0:
+            await self.bot.send_reply(message, "No games played today yet!", whisper)
+        else:
+            pct = round(self._session_wins / total * 100) if total > 0 else 0
+            await self.bot.send_reply(
+                message,
+                f"Today's record: {record} ({pct}% WR across {total} games)",
+                whisper
+            )
+
     # === CLEANUP ===
 
     async def cleanup(self):
         if self._poll_task:
             self._poll_task.cancel()
+        if self._command_rotation_task:
+            self._command_rotation_task.cancel()
         if self.session:
             await self.session.close()
         if self._cffi_session:

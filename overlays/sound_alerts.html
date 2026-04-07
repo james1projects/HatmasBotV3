@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>HatmasBot Sound &amp; Gamble Alerts</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: transparent;
+    font-family: 'Segoe UI', 'Inter', sans-serif;
+    overflow: hidden;
+  }
+
+  /* === GAMBLE RESULT POPUP === */
+  #gamble-popup {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    min-width: 280px;
+    max-width: 360px;
+    border-radius: 12px;
+    padding: 16px 20px;
+    opacity: 0;
+    transform: translateY(20px) scale(0.95);
+    transition: opacity 0.4s ease, transform 0.4s ease;
+    pointer-events: none;
+    z-index: 100;
+    border: 2px solid transparent;
+  }
+
+  #gamble-popup.visible {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  #gamble-popup.hiding {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.95);
+  }
+
+  /* Result type themes */
+  #gamble-popup.jackpot {
+    background: linear-gradient(135deg, #1a0f00 0%, #2a1800 100%);
+    border-color: #f0b030;
+    box-shadow: 0 0 30px rgba(240, 176, 48, 0.4), 0 4px 20px rgba(0,0,0,0.5);
+  }
+  #gamble-popup.big_win {
+    background: linear-gradient(135deg, #0a1a0a 0%, #0f2a0f 100%);
+    border-color: #40d060;
+    box-shadow: 0 0 20px rgba(64, 208, 96, 0.3), 0 4px 20px rgba(0,0,0,0.5);
+  }
+  #gamble-popup.win {
+    background: linear-gradient(135deg, #0a0f1a 0%, #0f1a2a 100%);
+    border-color: #50a0e0;
+    box-shadow: 0 0 15px rgba(80, 160, 224, 0.25), 0 4px 20px rgba(0,0,0,0.5);
+  }
+  #gamble-popup.loss {
+    background: linear-gradient(135deg, #1a0a0a 0%, #2a0f0f 100%);
+    border-color: #c04040;
+    box-shadow: 0 0 15px rgba(192, 64, 64, 0.25), 0 4px 20px rgba(0,0,0,0.5);
+  }
+
+  /* Neutral theme during rolling */
+  #gamble-popup.rolling {
+    background: linear-gradient(135deg, #0a0b12 0%, #151620 100%);
+    border-color: #888;
+    box-shadow: 0 0 15px rgba(136, 136, 136, 0.2), 0 4px 20px rgba(0,0,0,0.5);
+  }
+
+  .popup-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 6px;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+  .popup-label.show { opacity: 1; }
+  .jackpot .popup-label { color: #f0b030; }
+  .big_win .popup-label { color: #40d060; }
+  .win .popup-label     { color: #50a0e0; }
+  .loss .popup-label    { color: #c04040; }
+
+  .popup-player {
+    font-size: 18px;
+    font-weight: 600;
+    color: #e8e0d4;
+    margin-bottom: 8px;
+  }
+
+  .popup-details {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+  }
+
+  .popup-roll {
+    font-size: 32px;
+    font-weight: 800;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    min-width: 60px;
+    color: #e8e0d4;
+  }
+  .jackpot .popup-roll { color: #f0b030; }
+  .big_win .popup-roll { color: #40d060; }
+  .win .popup-roll     { color: #50a0e0; }
+  .loss .popup-roll    { color: #c04040; }
+
+  .popup-amount {
+    font-size: 15px;
+    font-weight: 600;
+    color: #b0a898;
+    text-align: right;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+  .popup-amount.show { opacity: 1; }
+  .popup-amount .value {
+    font-size: 20px;
+    display: block;
+  }
+  .jackpot .popup-amount .value { color: #f0b030; }
+  .big_win .popup-amount .value { color: #40d060; }
+  .win .popup-amount .value     { color: #50a0e0; }
+  .loss .popup-amount .value    { color: #c04040; }
+</style>
+</head>
+<body>
+
+<div id="gamble-popup">
+  <div class="popup-label" id="popup-label"></div>
+  <div class="popup-player" id="popup-player"></div>
+  <div class="popup-details">
+    <div class="popup-roll" id="popup-roll"></div>
+    <div class="popup-amount" id="popup-amount">
+      <span id="popup-amount-label">won</span>
+      <span class="value" id="popup-amount-value"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// HatmasBot Sound & Gamble Alerts
+// ============================================================
+
+const API_BASE = 'http://localhost:8069';
+const POLL_INTERVAL = 500;
+const POPUP_SHOW_DURATION = 5000;
+const ROLL_ANIMATION_MS = 1500;
+const POPUP_FADE_TIME = 400;
+
+let audioCtx = null;
+
+// === QUEUE ===
+const localQueue = [];
+let isShowingPopup = false;
+let popupTimeout = null;
+let rollInterval = null;
+
+function getAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+
+// ============================================================
+// SOUNDS
+// ============================================================
+
+function playJackpotSound() {
+  const ctx = getAudioCtx();
+  const now = ctx.currentTime;
+  const notes = [523, 659, 784, 1047, 1319, 1568];
+  notes.forEach((freq, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, now + i * 0.1);
+    gain.gain.setValueAtTime(0, now + i * 0.1);
+    gain.gain.linearRampToValueAtTime(0.3, now + i * 0.1 + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.1 + 0.6);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(now + i * 0.1); osc.stop(now + i * 0.1 + 0.7);
+  });
+  const s = now + notes.length * 0.1 + 0.1;
+  [1047, 1319, 1568, 2093].forEach(freq => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(freq, s);
+    const lfo = ctx.createOscillator();
+    const lg = ctx.createGain();
+    lfo.frequency.value = 6; lg.gain.value = 8;
+    lfo.connect(lg); lg.connect(osc.frequency);
+    lfo.start(s); lfo.stop(s + 1.5);
+    gain.gain.setValueAtTime(0, s);
+    gain.gain.linearRampToValueAtTime(0.2, s + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.001, s + 1.5);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(s); osc.stop(s + 1.6);
+  });
+  for (let i = 0; i < 20; i++) {
+    const t = s + 0.2 + Math.random();
+    const f = 2000 + Math.random() * 3000;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(f, t);
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.08 + Math.random() * 0.08, t + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(t); osc.stop(t + 0.2);
+  }
+}
+
+function playBigWinSound() {
+  const ctx = getAudioCtx();
+  const now = ctx.currentTime;
+  [523, 659, 784, 1047].forEach((freq, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(freq, now + i * 0.12);
+    gain.gain.setValueAtTime(0, now + i * 0.12);
+    gain.gain.linearRampToValueAtTime(0.15, now + i * 0.12 + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.12 + 0.4);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(now + i * 0.12); osc.stop(now + i * 0.12 + 0.5);
+  });
+}
+
+function playWinSound() {
+  const ctx = getAudioCtx();
+  const now = ctx.currentTime;
+  [784, 1047].forEach((freq, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, now + i * 0.15);
+    gain.gain.setValueAtTime(0, now + i * 0.15);
+    gain.gain.linearRampToValueAtTime(0.2, now + i * 0.15 + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.15 + 0.4);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(now + i * 0.15); osc.stop(now + i * 0.15 + 0.5);
+  });
+}
+
+function playLossSound() {
+  const ctx = getAudioCtx();
+  const now = ctx.currentTime;
+  [440, 370, 330].forEach((freq, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, now + i * 0.2);
+    gain.gain.setValueAtTime(0, now + i * 0.2);
+    gain.gain.linearRampToValueAtTime(0.15, now + i * 0.2 + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.2 + 0.5);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(now + i * 0.2); osc.stop(now + i * 0.2 + 0.6);
+  });
+}
+
+function playTickSound() {
+  const ctx = getAudioCtx();
+  const now = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(800 + Math.random() * 400, now);
+  gain.gain.setValueAtTime(0.06, now);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+  osc.connect(gain); gain.connect(ctx.destination);
+  osc.start(now); osc.stop(now + 0.06);
+}
+
+const SOUND_MAP = {
+  'jackpot': playJackpotSound,
+  'big_win': playBigWinSound,
+  'win':     playWinSound,
+  'loss':    playLossSound,
+};
+
+// ============================================================
+// VISUAL POPUP WITH DICE ANIMATION + QUEUE
+// ============================================================
+
+const LABELS = {
+  'jackpot': 'JACKPOT',
+  'big_win': 'TRIPLE WIN',
+  'win':     'WIN',
+  'loss':    'LOSS',
+};
+
+function enqueueResult(result) {
+  localQueue.push(result);
+  if (!isShowingPopup) processQueue();
+}
+
+function processQueue() {
+  if (localQueue.length === 0) {
+    isShowingPopup = false;
+    return;
+  }
+  isShowingPopup = true;
+  showGamblePopup(localQueue.shift());
+}
+
+function showGamblePopup(result) {
+  const popup = document.getElementById('gamble-popup');
+  const label = document.getElementById('popup-label');
+  const player = document.getElementById('popup-player');
+  const rollEl = document.getElementById('popup-roll');
+  const amountDiv = document.getElementById('popup-amount');
+
+  // Clear pending timers
+  if (popupTimeout) { clearTimeout(popupTimeout); popupTimeout = null; }
+  if (rollInterval) { clearInterval(rollInterval); rollInterval = null; }
+
+  // Reset
+  popup.className = '';
+  popup.id = 'gamble-popup';
+  label.className = 'popup-label';
+  amountDiv.className = 'popup-amount';
+
+  // Neutral rolling theme
+  popup.classList.add('rolling');
+  player.textContent = result.player + ' is rolling...';
+  rollEl.textContent = Math.floor(Math.random() * 100) + 1;
+  label.textContent = '';
+
+  // Show popup
+  requestAnimationFrame(() => { popup.classList.add('visible'); });
+
+  // Dice animation
+  const startTime = Date.now();
+  let tickCount = 0;
+
+  rollInterval = setInterval(() => {
+    const elapsed = Date.now() - startTime;
+    const progress = Math.min(elapsed / ROLL_ANIMATION_MS, 1);
+    tickCount++;
+    rollEl.textContent = Math.floor(Math.random() * 100) + 1;
+    if (tickCount % 2 === 0) playTickSound();
+
+    if (progress >= 1) {
+      clearInterval(rollInterval);
+      rollInterval = null;
+      revealResult(result);
+    }
+  }, 60);
+}
+
+function revealResult(result) {
+  const popup = document.getElementById('gamble-popup');
+  const label = document.getElementById('popup-label');
+  const player = document.getElementById('popup-player');
+  const rollEl = document.getElementById('popup-roll');
+  const amountDiv = document.getElementById('popup-amount');
+  const amountLabel = document.getElementById('popup-amount-label');
+  const amountValue = document.getElementById('popup-amount-value');
+
+  const type = result.type;
+
+  // Switch theme
+  popup.classList.remove('rolling');
+  popup.classList.add(type);
+
+  // Show real values
+  rollEl.textContent = result.roll;
+  player.textContent = result.player;
+  label.textContent = LABELS[type] || type.toUpperCase();
+  label.classList.add('show');
+
+  if (type === 'loss') {
+    amountLabel.textContent = 'lost';
+    amountValue.textContent = '-' + Number(result.wager).toLocaleString() + ' hats';
+  } else {
+    amountLabel.textContent = 'won';
+    amountValue.textContent = '+' + Number(result.winnings).toLocaleString() + ' hats';
+  }
+  amountDiv.classList.add('show');
+
+  // Play result sound
+  const fn = SOUND_MAP[type];
+  if (fn) fn();
+
+  // Auto-hide, then next in queue
+  popupTimeout = setTimeout(() => {
+    popup.classList.remove('visible');
+    popup.classList.add('hiding');
+    setTimeout(() => {
+      popup.classList.remove('hiding', type);
+      processQueue();
+    }, POPUP_FADE_TIME);
+  }, POPUP_SHOW_DURATION);
+}
+
+// ============================================================
+// POLLING — drains the server-side queue each tick
+// ============================================================
+
+async function poll() {
+  try {
+    const resp = await fetch(API_BASE + '/api/gamble_queue');
+    const results = await resp.json();
+    // Enqueue all new results locally
+    for (const r of results) {
+      enqueueResult(r);
+    }
+  } catch (e) {
+    // Server not running
+  }
+}
+
+setInterval(poll, POLL_INTERVAL);
+poll();
+
+// Auto-resume audio context
+window.addEventListener('load', () => {
+  getAudioCtx();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+});
+document.addEventListener('click', () => {
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+});
+</script>
+</body>
+</html>
