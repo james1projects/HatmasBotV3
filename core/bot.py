@@ -20,6 +20,44 @@ from core.config import (
 )
 
 
+class _WhisperChatterAdapter:
+    """Mimics the ChatMessage.chatter interface using a Whisper's sender PartialUser."""
+
+    def __init__(self, sender):
+        self._user = sender
+        self.name = sender.name
+        self.display_name = getattr(sender, "display_name", None) or sender.name
+        # Whisper users don't have badge info — safe defaults
+        self.moderator = False
+        self.broadcaster = False
+        self.subscriber = False
+        self.badges = []
+
+    async def send_whisper(self, *, to_user, message):
+        """Send a whisper back to this user."""
+        await self._user.send_whisper(to_user=to_user, message=message)
+
+    def __getattr__(self, item):
+        # Forward anything else (like .id) to the underlying PartialUser
+        return getattr(self._user, item)
+
+
+class _WhisperMessageAdapter:
+    """Wraps a Whisper payload to look like a ChatMessage for command handlers."""
+
+    def __init__(self, original, sender, text):
+        self._original = original
+        self.chatter = _WhisperChatterAdapter(sender)
+        self.text = text
+
+    async def respond(self, text):
+        """Whispers can't be replied to inline — no-op (send_reply handles it)."""
+        pass
+
+    def __getattr__(self, item):
+        return getattr(self._original, item)
+
+
 class HatmasBot(commands.Bot):
     def __init__(self, web_server=None, bot_id=None, owner_id=None):
         super().__init__(
@@ -55,13 +93,41 @@ class HatmasBot(commands.Bot):
             print(f"[HatmasBot] Subscribed to chat events")
 
             try:
-                whisper_payload = eventsub.UserWhisperMessageSubscription(
+                whisper_payload = eventsub.WhisperReceivedSubscription(
                     user_id=self._bot_id,
                 )
                 await self.subscribe_websocket(payload=whisper_payload)
                 print(f"[HatmasBot] Subscribed to whisper events")
             except Exception as e:
                 print(f"[HatmasBot] Whisper subscription failed (non-critical): {e}")
+
+            # Subscribe to channel events for god token auto-awards
+            try:
+                sub_payload = eventsub.ChannelSubscribeSubscription(
+                    broadcaster_user_id=self._owner_id,
+                )
+                await self.subscribe_websocket(payload=sub_payload)
+                print(f"[HatmasBot] Subscribed to channel subscribe events")
+            except Exception as e:
+                print(f"[HatmasBot] Subscribe event subscription failed: {e}")
+
+            try:
+                resub_payload = eventsub.ChannelSubscribeMessageSubscription(
+                    broadcaster_user_id=self._owner_id,
+                )
+                await self.subscribe_websocket(payload=resub_payload)
+                print(f"[HatmasBot] Subscribed to channel resub message events")
+            except Exception as e:
+                print(f"[HatmasBot] Resub message subscription failed: {e}")
+
+            try:
+                gift_payload = eventsub.ChannelSubscriptionGiftSubscription(
+                    broadcaster_user_id=self._owner_id,
+                )
+                await self.subscribe_websocket(payload=gift_payload)
+                print(f"[HatmasBot] Subscribed to channel gift sub events")
+            except Exception as e:
+                print(f"[HatmasBot] Gift sub subscription failed: {e}")
 
         print(f"[HatmasBot] Commands: {list(self._custom_commands.keys())}")
         print(f"[HatmasBot] Plugins: {list(self.plugins.keys())}")
@@ -177,6 +243,116 @@ class HatmasBot(commands.Bot):
         # Only reach here for non-custom commands (e.g. TwitchIO @commands.command() decorated methods)
         await self.process_commands(payload)
 
+    async def event_message_whisper(self, payload):
+        """Handle incoming whisper messages (user.whisper.message EventSub).
+
+        The Whisper payload has a different shape than ChatMessage (no .chatter,
+        no .text at top level, etc.), so we wrap it in a lightweight adapter
+        that gives command handlers the same interface they expect.
+        """
+        try:
+            # Whisper payload attributes:
+            #   .sender    — PartialUser who sent the whisper
+            #   .recipient — PartialUser who received it (the bot)
+            #   .text      — the whisper message text
+            text = (payload.text or "").strip()
+            sender = payload.sender
+            sender_name = sender.name if sender else "unknown"
+
+            print(f"[Whisper] From {sender_name}: {text}")
+
+            if not text:
+                return
+
+            # Build a lightweight wrapper so command handlers can use
+            # message.chatter.name / message.chatter.display_name / message.text
+            # just like they do for normal chat messages.
+            wrapped = _WhisperMessageAdapter(payload, sender, text)
+
+            # Check for @HatmasBot mentions (route to mention handlers)
+            if TWITCH_BOT_USERNAME.lower() in text.lower():
+                for handler in self._mention_handlers:
+                    try:
+                        await handler(wrapped, whisper=True)
+                    except Exception as e:
+                        print(f"[Whisper Mention Error] {e}")
+                        traceback.print_exc()
+                return
+
+            if not text.startswith("!"):
+                return
+
+            self.command_count += 1
+            parts = text[1:].split(maxsplit=1)
+            cmd_name = parts[0].lower()
+            args = parts[1] if len(parts) > 1 else ""
+
+            if cmd_name in self._custom_commands:
+                cmd = self._custom_commands[cmd_name]
+                try:
+                    await cmd["handler"](wrapped, args, whisper=True)
+                except Exception as e:
+                    print(f"[Whisper Command Error] !{cmd_name}: {e}")
+                    traceback.print_exc()
+        except Exception as e:
+            print(f"[Whisper Event Error] {e}")
+            traceback.print_exc()
+            print(f"[Whisper Debug] Payload type: {type(payload)}")
+            print(f"[Whisper Debug] Payload attrs: {[a for a in dir(payload) if not a.startswith('_')]}")
+
+    # =============================================================
+    # SUBSCRIPTION / DONATION EVENT HANDLERS
+    # =============================================================
+
+    async def _award_god_tokens_for_sub(self, username):
+        """Award God Tokens when someone subscribes (new, resub, or gifted)."""
+        if "godrequest" in self.plugins and self.is_feature_enabled("god_requests"):
+            try:
+                await self.plugins["godrequest"].award_sub_tokens(username)
+            except Exception as e:
+                print(f"[HatmasBot] God token award failed for {username}: {e}")
+
+    async def event_subscribe(self, payload):
+        """Fired on new subscriptions (channel.subscribe)."""
+        try:
+            user = payload.user
+            username = user.name if hasattr(user, "name") else str(user)
+            print(f"[HatmasBot] New subscriber: {username}")
+            await self._award_god_tokens_for_sub(username)
+        except Exception as e:
+            print(f"[HatmasBot] event_subscribe error: {e}")
+
+    async def event_subscription_message(self, payload):
+        """Fired on resub messages (channel.subscription.message)."""
+        try:
+            user = payload.user
+            username = user.name if hasattr(user, "name") else str(user)
+            print(f"[HatmasBot] Resub message from: {username}")
+            await self._award_god_tokens_for_sub(username)
+        except Exception as e:
+            print(f"[HatmasBot] event_subscription_message error: {e}")
+
+    async def event_subscription_gift(self, payload):
+        """Fired on gift subs (channel.subscription.gift) — award to the gifter."""
+        try:
+            user = payload.user
+            username = user.name if hasattr(user, "name") else str(user)
+            total = getattr(payload, "total", 1)
+            print(f"[HatmasBot] Gift sub from {username} (x{total})")
+            # Award tokens for each gifted sub
+            if "godrequest" in self.plugins and self.is_feature_enabled("god_requests"):
+                from core.config import GODREQ_SUB_TOKENS
+                try:
+                    await self.plugins["godrequest"]._award_token(username, GODREQ_SUB_TOKENS * total)
+                    await self.send_chat(
+                        f"{username} earned {GODREQ_SUB_TOKENS * total} God Token(s) "
+                        f"for gifting {total} sub(s)! Use !godrequest <god>."
+                    )
+                except Exception as e:
+                    print(f"[HatmasBot] Gift sub token award failed: {e}")
+        except Exception as e:
+            print(f"[HatmasBot] event_subscription_gift error: {e}")
+
     # =============================================================
     # UTILITY METHODS
     # =============================================================
@@ -196,11 +372,15 @@ class HatmasBot(commands.Bot):
 
         if whisper and chatter:
             try:
-                sender = self.create_partialuser(int(self._bot_id))
-                await chatter.send_whisper(sender=sender, message=text)
+                bot_user = self.create_partialuser(int(self._bot_id))
+                # TwitchIO v3: send_whisper(*, to_user, message) — both keyword-only
+                target = chatter._user if hasattr(chatter, "_user") else chatter
+                await bot_user.send_whisper(to_user=target, message=text)
                 return
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[Whisper Reply] Failed to whisper {chatter_name}: {e}")
+                traceback.print_exc()
+                # Fall through to chat reply
 
         try:
             await message.respond(f"@{chatter_name} {text}")

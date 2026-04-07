@@ -25,8 +25,11 @@ from core.config import (
     SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REDIRECT_URI,
     SPOTIFY_SCOPES, SR_MAX_PER_USER, SR_MAX_PER_SUB, SR_MAX_DURATION_MS,
     SR_VOTESKIP_THRESHOLD, SR_QUEUE_FILE, SR_HISTORY_FILE, SR_LIKES_FILE,
-    SR_BLACKLIST_FILE, SR_STATE_FILE, DATA_DIR
+    SR_BLACKLIST_FILE, SR_STATE_FILE, DATA_DIR, CLAUDE_API_KEY, WEB_PORT, WEB_HOST
 )
+from core.nsfw_check import NSFWChecker
+
+NSFW_PLACEHOLDER_URL = f"http://localhost:{WEB_PORT}/overlays/nsfw_placeholder.svg"
 
 
 class SongRequestPlugin:
@@ -61,6 +64,13 @@ class SongRequestPlugin:
 
         # Cached playback info for wait-time estimates (updated by monitor)
         self._current_remaining_ms = 0
+
+        # NSFW album art checker (requires Claude API key)
+        if CLAUDE_API_KEY and not CLAUDE_API_KEY.startswith("YOUR_"):
+            self._nsfw_checker = NSFWChecker(CLAUDE_API_KEY)
+        else:
+            self._nsfw_checker = None
+            print("[SongRequest] NSFW art check disabled (no Claude API key)")
 
         self._load_data()
 
@@ -221,7 +231,7 @@ class SongRequestPlugin:
 
     async def _search_spotify(self, query):
         headers = await self._spotify_headers()
-        params = {"q": query, "type": "track", "limit": 1}
+        params = {"q": query, "type": "track", "limit": 10}
         async with self.session.get(
             "https://api.spotify.com/v1/search",
             headers=headers, params=params
@@ -230,7 +240,24 @@ class SongRequestPlugin:
                 data = await resp.json()
                 tracks = data.get("tracks", {}).get("items", [])
                 if tracks:
-                    track = tracks[0]
+                    # Pick the best match: prefer tracks whose name contains the query
+                    query_lower = query.lower()
+                    track = tracks[0]  # default to first result
+                    for t in tracks:
+                        name_lower = t["name"].lower()
+                        artist_lower = ", ".join(a["name"] for a in t["artists"]).lower()
+                        # Exact title match (or query fully in title) is the strongest signal
+                        if query_lower == name_lower:
+                            track = t
+                            break
+                        if query_lower in name_lower:
+                            track = t
+                            break
+                        # Also check "artist - title" or "title artist" patterns
+                        combined = f"{name_lower} {artist_lower}"
+                        if query_lower in combined:
+                            track = t
+                            break
                     return {
                         "title": track["name"],
                         "artist": ", ".join(a["name"] for a in track["artists"]),
@@ -239,6 +266,7 @@ class SongRequestPlugin:
                         "source": "spotify",
                         "duration_ms": track["duration_ms"],
                         "album_art": track["album"]["images"][0]["url"] if track["album"]["images"] else None,
+                        "explicit": track.get("explicit", False),
                     }
         return None
 
@@ -309,6 +337,7 @@ class SongRequestPlugin:
                     "source": "spotify",
                     "duration_ms": track["duration_ms"],
                     "album_art": track["album"]["images"][0]["url"] if track["album"]["images"] else None,
+                    "explicit": track.get("explicit", False),
                 }
         return None
 
@@ -403,7 +432,7 @@ class SongRequestPlugin:
         await self.bot.send_chat(
             f"♫ Now playing: {self.current_song['title']} by "
             f"{self.current_song['artist']} | "
-            f"Requested by: {self.current_song['requester']} | ♡ {like_count}"
+            f"Requested by: {self.current_song['requester']} | ♡ !like {like_count}"
         )
 
     async def on_youtube_ended(self):
@@ -571,6 +600,18 @@ class SongRequestPlugin:
             )
             return
 
+        # --- NSFW album art check (all songs with art) ---
+        if self._nsfw_checker and song.get("album_art"):
+            try:
+                is_nsfw = await self._nsfw_checker.check_album_art(song)
+                if is_nsfw:
+                    song["album_art_original"] = song["album_art"]
+                    song["album_art"] = NSFW_PLACEHOLDER_URL
+                    song["nsfw_art"] = True
+                    print(f"[SongRequest] NSFW art detected, using placeholder: {song['title']}")
+            except Exception as e:
+                print(f"[SongRequest] NSFW check failed (allowing art): {e}")
+
         # --- Add to queue ---
         song["requester"] = message.chatter.name
         song["requester_id"] = str(message.chatter.id) if hasattr(message.chatter, "id") else ""
@@ -632,13 +673,12 @@ class SongRequestPlugin:
                 await self._add_to_spotify_queue(next_song["uri"])
                 next_song["pushed_to_spotify"] = True
                 await self._skip_track()
-                if self.bot.web_server:
-                    self.bot.web_server.update_now_playing(None)
+                # Don't clear now_playing — _on_track_change will update it
                 return
 
+        # No queue — resume Spotify playlist. The monitor will detect the
+        # track change and push the playlist song to the overlay.
         await self._resume_spotify()
-        if self.bot.web_server:
-            self.bot.web_server.update_now_playing(None)
 
     async def skip_current(self):
         """Skip the current song, whether Spotify or YouTube."""
@@ -742,19 +782,35 @@ class SongRequestPlugin:
                 await self.bot.send_reply(message, "Nothing is playing right now.", whisper)
 
     async def cmd_like(self, message, args, whisper=False):
-        if not self.current_song:
-            await self.bot.send_reply(message, "No requested song is playing right now.", whisper)
-            return
+        # Determine which song to like — queued song or current Spotify playback
+        song_title = None
+        song_artist = None
+        song_requester = None
+
+        if self.current_song:
+            song_title = self.current_song["title"]
+            song_artist = self.current_song["artist"]
+            song_requester = self.current_song.get("requester", "")
+        else:
+            # No queued song — check if Spotify is playing a playlist song
+            playback = await self._get_current_playback()
+            if playback and playback.get("item"):
+                track = playback["item"]
+                song_title = track["name"]
+                song_artist = ", ".join(a["name"] for a in track.get("artists", []))
+            else:
+                await self.bot.send_reply(message, "Nothing is playing right now.", whisper)
+                return
 
         username = message.chatter.name.lower()
-        likes_key = self._song_key(self.current_song["title"], self.current_song["artist"])
+        likes_key = self._song_key(song_title, song_artist)
 
         if likes_key not in self.likes:
             self.likes[likes_key] = {
                 "count": 0, "users": [],
-                "requester": self.current_song.get("requester", ""),
-                "title": self.current_song["title"],
-                "artist": self.current_song["artist"],
+                "requester": song_requester or "",
+                "title": song_title,
+                "artist": song_artist,
             }
 
         if username in self.likes[likes_key]["users"]:
@@ -764,9 +820,8 @@ class SongRequestPlugin:
         self.likes[likes_key]["count"] += 1
         self.likes[likes_key]["users"].append(username)
 
-        requester = self.current_song.get("requester", "").lower()
-        if requester:
-            self.user_likes[requester] = self.user_likes.get(requester, 0) + 1
+        if song_requester:
+            self.user_likes[song_requester.lower()] = self.user_likes.get(song_requester.lower(), 0) + 1
 
         self._save_data()
 
@@ -776,10 +831,29 @@ class SongRequestPlugin:
         )
 
         if self.bot.web_server:
-            now_playing = self.bot.web_server._state.get("now_playing", {})
+            now_playing = self.bot.web_server._state.get("now_playing")
             if now_playing:
+                # Overlay still has song data — just update the likes count
                 now_playing["likes"] = count
                 self.bot.web_server.update_now_playing(now_playing)
+            else:
+                # Overlay has no song data (e.g., playlist song auto-hid)
+                # Re-populate it so the overlay can re-show with the liked song
+                self.bot.web_server.update_now_playing({
+                    "title": song_title,
+                    "artist": song_artist,
+                    "requester": song_requester,
+                    "album_art": None,
+                    "duration_ms": 0,
+                    "likes": count,
+                    "started_at": time.time(),
+                    "source": "spotify",
+                    "is_playlist": not bool(song_requester),
+                    "progress_ms": 0,
+                    "is_playing": True,
+                    "last_updated": time.time(),
+                })
+            self.bot.web_server.trigger_like_event()
 
     async def cmd_mysongs(self, message, args, whisper=False):
         username = message.chatter.name.lower()
@@ -1023,6 +1097,9 @@ class SongRequestPlugin:
                 self._spotify_errors = 0
 
                 if not playback.get("item"):
+                    # Nothing playing — clear overlay (it will auto-hide after 5s)
+                    if self.bot.web_server:
+                        self.bot.web_server.update_now_playing(None)
                     if self.queue and self.queue[0]["source"] == "youtube":
                         await self._start_youtube_playback(self.queue[0])
                     await asyncio.sleep(3)
@@ -1043,8 +1120,8 @@ class SongRequestPlugin:
                     # Playlist song — still useful for first-in-queue wait estimate
                     self._current_remaining_ms = max(0, remaining_ms)
 
-                # Update overlay progress
-                if self.bot.web_server and self.current_song:
+                # Update overlay progress (for both requested and playlist songs)
+                if self.bot.web_server:
                     now_playing = self.bot.web_server._state.get("now_playing")
                     if now_playing:
                         now_playing["progress_ms"] = progress_ms
@@ -1140,19 +1217,68 @@ class SongRequestPlugin:
                           "requester": s["requester"]} for s in self.queue]
                     )
             else:
+                was_requested = self.current_song is not None
                 if self.current_song:
                     self.current_song = None
                     self._voteskip_users.clear()
                     self._save_state()
+                if was_requested:
+                    # Requested song just ended — clear overlay so it hides,
+                    # then show the playlist song after a delay
                     if self.bot.web_server:
                         self.bot.web_server.update_now_playing(None)
+                    asyncio.create_task(self._delayed_playlist_show(track, playback))
+                else:
+                    # Playlist-to-playlist transition — show immediately
+                    self._show_playlist_song(track, playback)
         else:
+            was_requested = self.current_song is not None
             if self.current_song:
                 self.current_song = None
                 self._voteskip_users.clear()
                 self._save_state()
+            if was_requested:
                 if self.bot.web_server:
                     self.bot.web_server.update_now_playing(None)
+                asyncio.create_task(self._delayed_playlist_show(track, playback))
+            else:
+                self._show_playlist_song(track, playback)
+
+    async def _delayed_playlist_show(self, track, playback=None):
+        """Wait for the overlay to hide, then show the playlist song."""
+        await asyncio.sleep(8)  # 5s hide timer + 3s buffer for slide-out animation
+        # Only show if no requested song has started in the meantime
+        if not self.current_song:
+            self._show_playlist_song(track, playback)
+
+    def _show_playlist_song(self, track, playback=None):
+        """Push the current Spotify playlist song to the Now Playing overlay."""
+        if not self.bot.web_server:
+            return
+        progress_ms = playback.get("progress_ms", 0) if playback else 0
+        is_playing = playback.get("is_playing", True) if playback else True
+        album_art = None
+        if track.get("album", {}).get("images"):
+            album_art = track["album"]["images"][0]["url"]
+        title = track.get("name", "Unknown")
+        artist = ", ".join(a["name"] for a in track.get("artists", []))
+        # Check if this song has been liked before (may overlap with a past request)
+        likes_key = self._song_key(title, artist)
+        like_count = self.likes.get(likes_key, {}).get("count", 0)
+        self.bot.web_server.update_now_playing({
+            "title": title,
+            "artist": artist,
+            "requester": None,
+            "album_art": album_art,
+            "duration_ms": track.get("duration_ms", 0),
+            "likes": like_count,
+            "started_at": time.time(),
+            "source": "spotify",
+            "is_playlist": True,
+            "progress_ms": progress_ms,
+            "is_playing": is_playing,
+            "last_updated": time.time(),
+        })
 
     async def cleanup(self):
         if self._monitor_task:
@@ -1160,4 +1286,4 @@ class SongRequestPlugin:
         if self.session:
             await self.session.close()
         self._yt_executor.shutdown(wait=False)
-        self._save_state()
+        self._save_st

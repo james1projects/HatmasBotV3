@@ -21,7 +21,7 @@ class BasicPlugin:
         name = message.chatter.display_name if message.chatter else "friend"
         await self.bot.send_reply(
             message,
-            f"Hello {name}! The damage builds await.",
+            f"Hello {name}!",
             whisper
         )
 

@@ -1,0 +1,2073 @@
+{
+  "openapi": "3.0.0",
+  "servers": [
+    {
+      "url": "http://localhost:8911/api/v2",
+      "description": "Developer API Base URL"
+    }
+  ],
+  "info": {
+    "description": "# Introduction\nThe Developer API allows our more advanced users to interact with Mix It Up using external or customized programs. To use this feature, ensure the Developer API is enabled on the Services page. All APIs are REST-like endpoints that you can perform calls receiving/using JSON text. All endpoints begin with the base address of http://localhost:8911/api/v2/\n",
+    "version": "2.0.0",
+    "title": "Mix It Up Developer API",
+    "contact": {
+      "name": "Mix It Up Support",
+      "url": "https://mixitupapp.com/discord"
+    }
+  },
+  "tags": [
+    {
+      "name": "Status",
+      "description": "Operations related to application status"
+    },
+    {
+      "name": "Users",
+      "description": "Operations related to Mix It Up User data"
+    },
+    {
+      "name": "Currency",
+      "description": "Operations related to Mix It Up Currency data"
+    },
+    {
+      "name": "Inventory",
+      "description": "Operations related to Mix It Up Inventory data"
+    },
+    {
+      "name": "Counters",
+      "description": "Operations related to Mix It Up Counter data"
+    },
+    {
+      "name": "Chat",
+      "description": "Operations related to Mix It Up Chat"
+    },
+    {
+      "name": "Commands",
+      "description": "Operations related to Mix It Up Commands"
+    }
+  ],
+  "paths": {
+    "/status/version": {
+      "get": {
+        "tags": [
+          "Status"
+        ],
+        "summary": "Gets the Mix It Up version number",
+        "operationId": "getVersion",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": "1.0.0.0"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/{userId}": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Get user data by Mix It Up user ID",
+        "operationId": "getUserById",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "description": "The Mix It Up user ID that needs to be fetched",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "example": "137CD793-F4E7-4330-8282-B06E52644F78"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSingleUserResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "User not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                "example": {
+                  "status": 404,
+                  "title": "Not Found",
+                  "detail": "User with ID '137CD793-F4E7-4330-8282-B06E52644F78' not found"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Delete user by Mix It Up user ID",
+        "operationId": "deleteUserById",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "description": "The Mix It Up user ID to delete",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "404": {
+            "description": "User not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                "example": {
+                  "status": 404,
+                  "title": "Not Found",
+                  "detail": "User with ID '137CD793-F4E7-4330-8282-B06E52644F78' not found"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/{platform}/{usernameOrID}": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Get user data by platform username or ID",
+        "operationId": "getUserByPlatformUsername",
+        "parameters": [
+          {
+            "name": "platform",
+            "in": "path",
+            "description": "The name of the streaming platform (e.g., Twitch, YouTube)",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "Twitch"
+            }
+          },
+          {
+            "name": "usernameOrID",
+            "in": "path",
+            "description": "The platform username or ID that needs to be fetched",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "saviorxtanren"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSingleUserResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                "example": {
+                  "status": 400,
+                  "title": "Bad Request",
+                  "detail": "Unknown platform: InvalidPlatform"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "User not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                "example": {
+                  "status": 404,
+                  "title": "Not Found",
+                  "detail": "User 'username' not found on platform 'Twitch'"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Get multiple users with pagination",
+        "operationId": "getAllUsers",
+        "parameters": [
+          {
+            "name": "skip",
+            "in": "query",
+            "description": "How many users to skip",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "example": 0
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "description": "The total number of users to return",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "example": 25
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetListOfUsersResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/active": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Get multiple active users with pagination",
+        "operationId": "getAllActiveUsers",
+        "parameters": [
+          {
+            "name": "skip",
+            "in": "query",
+            "description": "How many users to skip",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "example": 0
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "description": "The total number of users to return",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "example": 25
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetListOfUsersResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/add": {
+      "post": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Add a new user by platform username",
+        "operationId": "addUser",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewUser"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSingleUserResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                "example": {
+                  "status": 400,
+                  "title": "Bad Request",
+                  "detail": "Unknown platform: InvalidPlatform"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "User not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                "example": {
+                  "status": 404,
+                  "title": "Not Found",
+                  "detail": "User 'username' not found on platform 'Twitch'"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/currency": {
+      "get": {
+        "tags": [
+          "Currency"
+        ],
+        "summary": "Gets a list of all currencies available",
+        "operationId": "getCurrencies",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GetCurrencyResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/currency/{currencyId}/{userId}": {
+      "get": {
+        "tags": [
+          "Currency"
+        ],
+        "summary": "Gets the currency amount for a specific user",
+        "operationId": "getCurrencyAmountForUser",
+        "parameters": [
+          {
+            "name": "currencyId",
+            "in": "path",
+            "description": "The currency ID to query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "example": "1783e5d9-c2ab-423a-ae64-7dc9a086b194"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "description": "The Mix It Up user ID to query for",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "example": "137CD793-F4E7-4330-8282-B06E52644F78"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetCurrencyAmountResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Currency or user not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                "examples": {
+                  "currencyNotFound": {
+                    "value": {
+                      "status": 404,
+                      "title": "Not Found",
+                      "detail": "Currency with ID '1783e5d9-c2ab-423a-ae64-7dc9a086b194' not found"
+                    }
+                  },
+                  "userNotFound": {
+                    "value": {
+                      "status": 404,
+                      "title": "Not Found",
+                      "detail": "User with ID '137CD793-F4E7-4330-8282-B06E52644F78' not found"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Currency"
+        ],
+        "summary": "Updates the currency amount for a specific user (add or subtract)",
+        "operationId": "updateCurrencyAmountForUser",
+        "parameters": [
+          {
+            "name": "currencyId",
+            "in": "path",
+            "description": "The currency ID to query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "description": "The Mix It Up user ID to query for",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCurrencyAmount"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetCurrencyAmountResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Currency or user not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Currency"
+        ],
+        "summary": "Set the currency amount for a specific user",
+        "operationId": "setCurrencyAmountForUser",
+        "parameters": [
+          {
+            "name": "currencyId",
+            "in": "path",
+            "description": "The currency ID to query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "description": "The Mix It Up user ID to query for",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCurrencyAmount"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetCurrencyAmountResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Currency or user not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/inventory": {
+      "get": {
+        "tags": [
+          "Inventory"
+        ],
+        "summary": "Gets a list of all inventories available",
+        "operationId": "getInventories",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GetInventoryResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/inventory/{inventoryId}/{userId}": {
+      "get": {
+        "tags": [
+          "Inventory"
+        ],
+        "summary": "Gets all inventory item amounts for a specific user",
+        "operationId": "getInventoryItemAmountsForUser",
+        "parameters": [
+          {
+            "name": "inventoryId",
+            "in": "path",
+            "description": "The inventory ID to query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "description": "The Mix It Up user ID to query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GetInventoryItemAmountResponse"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Inventory or user not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/inventory/{inventoryId}/{itemId}/{userId}": {
+      "get": {
+        "tags": [
+          "Inventory"
+        ],
+        "summary": "Gets the inventory item amount for a specific user",
+        "operationId": "getInventoryItemAmountForUser",
+        "parameters": [
+          {
+            "name": "inventoryId",
+            "in": "path",
+            "description": "The inventory ID to query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "itemId",
+            "in": "path",
+            "description": "The inventory item ID to query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "description": "The Mix It Up user ID to query for",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetInventoryItemAmountResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Inventory, item, or user not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Inventory"
+        ],
+        "summary": "Updates the inventory item amount for a specific user (add or subtract)",
+        "operationId": "updateInventoryItemAmountForUser",
+        "parameters": [
+          {
+            "name": "inventoryId",
+            "in": "path",
+            "description": "The inventory ID to query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "itemId",
+            "in": "path",
+            "description": "The inventory item ID to query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "description": "The Mix It Up user ID to query for",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateInventoryAmount"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetInventoryItemAmountResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Inventory, item, or user not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Inventory"
+        ],
+        "summary": "Set the inventory item amount for a specific user",
+        "operationId": "setInventoryItemAmountForUser",
+        "parameters": [
+          {
+            "name": "inventoryId",
+            "in": "path",
+            "description": "The inventory ID to query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "itemId",
+            "in": "path",
+            "description": "The inventory item ID to query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "description": "The Mix It Up user ID to query for",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateInventoryAmount"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetInventoryItemAmountResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Inventory, item, or user not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/counters": {
+      "get": {
+        "tags": [
+          "Counters"
+        ],
+        "summary": "Gets a list of all counters",
+        "operationId": "getAllCounters",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetListOfCountersResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Counters"
+        ],
+        "summary": "Creates a new counter",
+        "operationId": "createCounter",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCounterRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSingleCounterResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                "examples": {
+                  "nameRequired": {
+                    "value": {
+                      "status": 400,
+                      "title": "Bad Request",
+                      "detail": "Counter name is required"
+                    }
+                  },
+                  "alreadyExists": {
+                    "value": {
+                      "status": 400,
+                      "title": "Bad Request",
+                      "detail": "Counter 'MyCounter' already exists"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/counters/{counterName}": {
+      "get": {
+        "tags": [
+          "Counters"
+        ],
+        "summary": "Gets a specific counter by name",
+        "operationId": "getCounterByName",
+        "parameters": [
+          {
+            "name": "counterName",
+            "in": "path",
+            "description": "The counter name to query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "MyCounter"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSingleCounterResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Counter not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                "example": {
+                  "status": 404,
+                  "title": "Not Found",
+                  "detail": "Counter 'MyCounter' not found"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Counters"
+        ],
+        "summary": "Deletes a counter",
+        "operationId": "deleteCounter",
+        "parameters": [
+          {
+            "name": "counterName",
+            "in": "path",
+            "description": "The counter name to delete",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "404": {
+            "description": "Counter not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                "example": {
+                  "status": 404,
+                  "title": "Not Found",
+                  "detail": "Counter 'MyCounter' not found"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/counters/{counterName}/set": {
+      "post": {
+        "tags": [
+          "Counters"
+        ],
+        "summary": "Sets the counter to a specific value",
+        "operationId": "setCounter",
+        "parameters": [
+          {
+            "name": "counterName",
+            "in": "path",
+            "description": "The counter name to update",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCounterRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSingleCounterResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                "example": {
+                  "status": 400,
+                  "title": "Bad Request",
+                  "detail": "Amount is required"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Counter not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                "example": {
+                  "status": 404,
+                  "title": "Not Found",
+                  "detail": "Counter 'MyCounter' not found"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/counters/{counterName}/update": {
+      "post": {
+        "tags": [
+          "Counters"
+        ],
+        "summary": "Updates the counter by adding or subtracting a value",
+        "operationId": "updateCounter",
+        "parameters": [
+          {
+            "name": "counterName",
+            "in": "path",
+            "description": "The counter name to update",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCounterRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSingleCounterResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Counter not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                "example": {
+                  "status": 404,
+                  "title": "Not Found",
+                  "detail": "Counter 'MyCounter' not found"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/counters/{counterName}/reset": {
+      "post": {
+        "tags": [
+          "Counters"
+        ],
+        "summary": "Resets the counter to zero",
+        "operationId": "resetCounter",
+        "parameters": [
+          {
+            "name": "counterName",
+            "in": "path",
+            "description": "The counter name to reset",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSingleCounterResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Counter not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                "example": {
+                  "status": 404,
+                  "title": "Not Found",
+                  "detail": "Counter 'MyCounter' not found"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/message": {
+      "post": {
+        "tags": [
+          "Chat"
+        ],
+        "summary": "Sends a message to the chat",
+        "operationId": "sendChatMessage",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendChatMessage"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                "examples": {
+                  "missingMessage": {
+                    "value": {
+                      "status": 400,
+                      "title": "Bad Request",
+                      "detail": "Missing chat message"
+                    }
+                  },
+                  "unknownPlatform": {
+                    "value": {
+                      "status": 400,
+                      "title": "Bad Request",
+                      "detail": "Unknown platform: InvalidPlatform"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/clear": {
+      "post": {
+        "tags": [
+          "Chat"
+        ],
+        "summary": "Clears the chat for all connected platforms",
+        "operationId": "clearChat",
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        }
+      }
+    },
+    "/commands": {
+      "get": {
+        "tags": [
+          "Commands"
+        ],
+        "summary": "Gets a list of all commands with pagination",
+        "operationId": "getAllCommands",
+        "parameters": [
+          {
+            "name": "skip",
+            "in": "query",
+            "description": "How many commands to skip",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "example": 0
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "description": "The total number of commands to return",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "example": 25
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetListOfCommandsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/commands/{commandId}": {
+      "get": {
+        "tags": [
+          "Commands"
+        ],
+        "summary": "Gets a specific command by ID",
+        "operationId": "getCommandById",
+        "parameters": [
+          {
+            "name": "commandId",
+            "in": "path",
+            "description": "The command ID to query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSingleCommandResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Command not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                "example": {
+                  "status": 404,
+                  "title": "Not Found",
+                  "detail": "Command with ID '1783e5d9-c2ab-423a-ae64-7dc9a086b194' not found"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Commands"
+        ],
+        "summary": "Runs a command",
+        "operationId": "runCommand",
+        "parameters": [
+          {
+            "name": "commandId",
+            "in": "path",
+            "description": "The command ID to run",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunCommandParameters"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                "example": {
+                  "status": 400,
+                  "title": "Bad Request",
+                  "detail": "Unknown platform: InvalidPlatform"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Command not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                "example": {
+                  "status": 404,
+                  "title": "Not Found",
+                  "detail": "Command with ID '1783e5d9-c2ab-423a-ae64-7dc9a086b194' not found"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/commands/{commandId}/state/{state}": {
+      "patch": {
+        "tags": [
+          "Commands"
+        ],
+        "summary": "Updates the command's enabled state",
+        "operationId": "updateCommandState",
+        "parameters": [
+          {
+            "name": "commandId",
+            "in": "path",
+            "description": "The command ID to update",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "state",
+            "in": "path",
+            "description": "The state to update the command to (0 = Disable, 1 = Enable, 2 = Toggle)",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "enum": [
+                0,
+                1,
+                2
+              ],
+              "example": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetSingleCommandResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                "example": {
+                  "status": 400,
+                  "title": "Bad Request",
+                  "detail": "Invalid command state option"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Command not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                },
+                "example": {
+                  "status": 404,
+                  "title": "Not Found",
+                  "detail": "Command with ID '1783e5d9-c2ab-423a-ae64-7dc9a086b194' not found"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ProblemDetails": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer",
+            "description": "The HTTP status code",
+            "example": 404
+          },
+          "title": {
+            "type": "string",
+            "description": "A short, human-readable summary of the problem",
+            "example": "Not Found"
+          },
+          "detail": {
+            "type": "string",
+            "description": "A human-readable explanation specific to this occurrence of the problem",
+            "example": "User with ID '137CD793-F4E7-4330-8282-B06E52644F78' not found"
+          }
+        }
+      },
+      "User": {
+        "type": "object",
+        "required": [
+          "ID"
+        ],
+        "properties": {
+          "ID": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The Mix It Up User ID",
+            "example": "137CD793-F4E7-4330-8282-B06E52644F78"
+          },
+          "PlatformData": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/UserPlatformData"
+            },
+            "description": "Platform-specific user data"
+          },
+          "LastActivity": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The last date time of activity"
+          },
+          "LastUpdated": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The last date time of updates"
+          },
+          "OnlineViewingMinutes": {
+            "type": "integer",
+            "description": "The total number of online viewing minutes in your stream",
+            "example": 1234567890
+          },
+          "CustomTitle": {
+            "type": "string",
+            "description": "The user's custom title",
+            "example": "Ultimate"
+          },
+          "IsSpecialtyExcluded": {
+            "type": "boolean",
+            "description": "Whether the user is a specialty excluded user",
+            "example": false
+          },
+          "Notes": {
+            "type": "string",
+            "description": "The notes for the user",
+            "example": "Is a lovely person"
+          },
+          "CurrencyAmounts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Map of currency IDs to amounts"
+          },
+          "InventoryAmounts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer"
+              }
+            },
+            "description": "Map of inventory IDs to item amounts"
+          },
+          "StreamPassAmounts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Map of stream pass IDs to amounts"
+          }
+        }
+      },
+      "UserPlatformData": {
+        "type": "object",
+        "properties": {
+          "Platform": {
+            "type": "string",
+            "description": "The Platform name",
+            "example": "Twitch"
+          },
+          "ID": {
+            "type": "string",
+            "description": "The Platform user ID",
+            "example": "1234567890"
+          },
+          "Username": {
+            "type": "string",
+            "description": "The Platform username",
+            "example": "saviorxtanren"
+          },
+          "DisplayName": {
+            "type": "string",
+            "description": "The Platform display name",
+            "example": "SaviorXTanren"
+          },
+          "AvatarLink": {
+            "type": "string",
+            "description": "The Platform avatar URL"
+          },
+          "SubscriberBadgeLink": {
+            "type": "string",
+            "description": "The Platform subscriber badge URL"
+          },
+          "RoleBadgeLink": {
+            "type": "string",
+            "description": "The Platform role badge URL"
+          },
+          "SpecialtyBadgeLink": {
+            "type": "string",
+            "description": "The Platform specialty badge URL"
+          },
+          "Roles": {
+            "type": "array",
+            "description": "The list of Platform roles",
+            "items": {
+              "type": "string"
+            }
+          },
+          "AccountDate": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The platform account date"
+          },
+          "FollowDate": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The platform follow date"
+          },
+          "SubscribeDate": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The platform subscriber date"
+          },
+          "SubscriberTier": {
+            "type": "integer",
+            "description": "The platform subscriber tier"
+          }
+        }
+      },
+      "GetSingleUserResponse": {
+        "type": "object",
+        "properties": {
+          "User": {
+            "$ref": "#/components/schemas/User"
+          }
+        }
+      },
+      "GetListOfUsersResponse": {
+        "type": "object",
+        "properties": {
+          "TotalCount": {
+            "type": "integer",
+            "description": "Total number of users"
+          },
+          "Users": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/User"
+            }
+          }
+        }
+      },
+      "NewUser": {
+        "type": "object",
+        "required": [
+          "Platform",
+          "Username"
+        ],
+        "properties": {
+          "Platform": {
+            "type": "string",
+            "description": "The streaming platform name",
+            "example": "Twitch"
+          },
+          "Username": {
+            "type": "string",
+            "description": "The platform username",
+            "example": "saviorxtanren"
+          }
+        }
+      },
+      "GetCurrencyResponse": {
+        "type": "object",
+        "required": [
+          "ID",
+          "Name"
+        ],
+        "properties": {
+          "ID": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The Mix It Up currency ID",
+            "example": "1783e5d9-c2ab-423a-ae64-7dc9a086b194"
+          },
+          "Name": {
+            "type": "string",
+            "description": "The Mix It Up currency name",
+            "example": "Influence"
+          }
+        }
+      },
+      "GetCurrencyAmountResponse": {
+        "type": "object",
+        "required": [
+          "CurrencyID",
+          "CurrencyName",
+          "UserID",
+          "Amount"
+        ],
+        "properties": {
+          "CurrencyID": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The currency ID"
+          },
+          "CurrencyName": {
+            "type": "string",
+            "description": "The currency name"
+          },
+          "UserID": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The user ID"
+          },
+          "Amount": {
+            "type": "integer",
+            "description": "The currency amount"
+          }
+        }
+      },
+      "UpdateCurrencyAmount": {
+        "type": "object",
+        "required": [
+          "Amount"
+        ],
+        "properties": {
+          "Amount": {
+            "type": "integer",
+            "description": "The amount to adjust or set the user's currency. For PATCH operations, this can be positive (add) or negative (subtract). For PUT operations, this sets the absolute value.",
+            "example": 100
+          }
+        }
+      },
+      "GetInventoryResponse": {
+        "type": "object",
+        "required": [
+          "ID",
+          "Name",
+          "Items"
+        ],
+        "properties": {
+          "ID": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The Mix It Up inventory ID",
+            "example": "1783e5d9-c2ab-423a-ae64-7dc9a086b194"
+          },
+          "Name": {
+            "type": "string",
+            "description": "The Mix It Up inventory name",
+            "example": "Equipment"
+          },
+          "Items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GetInventoryItemResponse"
+            }
+          }
+        }
+      },
+      "GetInventoryItemResponse": {
+        "type": "object",
+        "required": [
+          "ID",
+          "Name"
+        ],
+        "properties": {
+          "ID": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The Mix It Up inventory item ID"
+          },
+          "Name": {
+            "type": "string",
+            "description": "The Mix It Up inventory item name",
+            "example": "Sword"
+          }
+        }
+      },
+      "GetInventoryItemAmountResponse": {
+        "type": "object",
+        "required": [
+          "ID",
+          "Name",
+          "Amount"
+        ],
+        "properties": {
+          "ID": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The inventory item ID"
+          },
+          "Name": {
+            "type": "string",
+            "description": "The inventory item name"
+          },
+          "Amount": {
+            "type": "integer",
+            "description": "The amount of this item the user has",
+            "example": 5
+          }
+        }
+      },
+      "UpdateInventoryAmount": {
+        "type": "object",
+        "required": [
+          "Amount"
+        ],
+        "properties": {
+          "Amount": {
+            "type": "integer",
+            "description": "The amount to adjust or set the user's inventory item. For PATCH operations, this can be positive (add) or negative (subtract). For PUT operations, this sets the absolute value.",
+            "example": 10
+          }
+        }
+      },
+      "Counter": {
+        "type": "object",
+        "required": [
+          "Name",
+          "Amount"
+        ],
+        "properties": {
+          "Name": {
+            "type": "string",
+            "description": "The counter name",
+            "example": "DeathCounter"
+          },
+          "Amount": {
+            "type": "number",
+            "format": "double",
+            "description": "The current counter value",
+            "example": 42.5
+          }
+        }
+      },
+      "GetListOfCountersResponse": {
+        "type": "object",
+        "properties": {
+          "TotalCount": {
+            "type": "integer",
+            "description": "Total number of counters"
+          },
+          "Counters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Counter"
+            }
+          }
+        }
+      },
+      "GetSingleCounterResponse": {
+        "type": "object",
+        "properties": {
+          "Counter": {
+            "$ref": "#/components/schemas/Counter"
+          }
+        }
+      },
+      "CreateCounterRequest": {
+        "type": "object",
+        "required": [
+          "Name"
+        ],
+        "properties": {
+          "Name": {
+            "type": "string",
+            "description": "The name for the new counter",
+            "example": "DeathCounter"
+          }
+        }
+      },
+      "SetCounterRequest": {
+        "type": "object",
+        "required": [
+          "Amount"
+        ],
+        "properties": {
+          "Amount": {
+            "type": "number",
+            "format": "double",
+            "description": "The value to set the counter to",
+            "example": 100
+          }
+        }
+      },
+      "UpdateCounterRequest": {
+        "type": "object",
+        "properties": {
+          "Amount": {
+            "type": "number",
+            "format": "double",
+            "description": "The amount to add to the counter (defaults to 1 if not provided). Can be negative to subtract.",
+            "example": 5,
+            "default": 1
+          }
+        }
+      },
+      "Command": {
+        "type": "object",
+        "required": [
+          "ID",
+          "Name",
+          "Type",
+          "IsEnabled"
+        ],
+        "properties": {
+          "ID": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The Mix It Up command ID",
+            "example": "1783e5d9-c2ab-423a-ae64-7dc9a086b194"
+          },
+          "Name": {
+            "type": "string",
+            "description": "The Mix It Up command name",
+            "example": "MyCommand"
+          },
+          "Type": {
+            "type": "string",
+            "description": "The Mix It Up command type",
+            "example": "Chat"
+          },
+          "IsEnabled": {
+            "type": "boolean",
+            "description": "True if enabled, false otherwise",
+            "example": true
+          },
+          "Unlocked": {
+            "type": "boolean",
+            "description": "Whether the command is unlocked or not"
+          },
+          "GroupName": {
+            "type": "string",
+            "description": "The name of the group the command belongs to, if any"
+          }
+        }
+      },
+      "GetSingleCommandResponse": {
+        "type": "object",
+        "properties": {
+          "Command": {
+            "$ref": "#/components/schemas/Command"
+          }
+        }
+      },
+      "GetListOfCommandsResponse": {
+        "type": "object",
+        "properties": {
+          "TotalCount": {
+            "type": "integer",
+            "description": "Total number of commands"
+          },
+          "Commands": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Command"
+            }
+          }
+        }
+      },
+      "RunCommandParameters": {
+        "type": "object",
+        "properties": {
+          "Platform": {
+            "type": "string",
+            "description": "The streaming platform to run the command for",
+            "example": "Twitch"
+          },
+          "Arguments": {
+            "type": "string",
+            "description": "The arguments for the command",
+            "example": "arg1 arg2 arg3"
+          },
+          "SpecialIdentifiers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Special identifiers replacements to pass to the command"
+          },
+          "IgnoreRequirements": {
+            "type": "boolean",
+            "description": "If true, bypasses all command requirements (cooldowns, roles, costs). Defaults to false.",
+            "example": false,
+            "default": false
+          }
+        }
+      },
+      "SendChatMessage": {
+        "type": "object",
+        "required": [
+          "Message"
+        ],
+        "properties": {
+          "Message": {
+            "type": "string",
+            "description": "The message to send to chat",
+            "example": "This is a test of the emergency broadcast system!"
+          },
+          "Platform": {
+            "type": "string",
+            "description": "The streaming platform to send the message to (e.g., Twitch, YouTube, All)",
+            "example": "Twitch"
+          },
+          "SendAsStreamer": {
+            "type": "boolean",
+            "description": "True will force the message to send as the streamer. False will try to send as the registered bot, if available.",
+            "example": false,
+            "default": false
+          }
+        }
+      }
+    }
+  }
+}

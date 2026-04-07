@@ -28,3 +28,9 @@ env/
 Thumbs.db
 .DS_Store
 desktop.ini
+
+# === DIRECTORIES TO IGNORE ===
+Custom God Icons/
+unpacked_doc/
+Table Reference — TwitchIO 3.2.1 documentation_files/
+data/

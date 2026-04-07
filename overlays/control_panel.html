@@ -267,6 +267,22 @@ h1 {
 .np-title { font-size: 13px; color: #e8ddd0; font-weight: 500; }
 .np-artist { font-size: 11px; color: rgba(196,168,130,0.5); }
 .np-requester { font-size: 11px; color: rgba(196,168,130,0.3); }
+
+.title-input {
+  width: 100%;
+  padding: 8px 12px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(196,168,130,0.15);
+  border-radius: 4px;
+  color: #e8ddd0;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  outline: none;
+}
+
+.title-input:focus {
+  border-color: rgba(196,168,130,0.3);
+}
 </style>
 </head>
 <body>
@@ -309,6 +325,26 @@ h1 {
     </div>
   </div>
 
+  <!-- Stream Title -->
+  <div class="card">
+    <div class="card-title">stream title</div>
+    <div style="margin-bottom:8px">
+      <label style="font-size:11px;color:rgba(196,168,130,0.5);display:block;margin-bottom:4px">God Template ({god} = god name)</label>
+      <input type="text" id="titleGodTemplate" class="title-input"
+             placeholder="Playing {god} | !god for stats">
+    </div>
+    <div style="margin-bottom:8px">
+      <label style="font-size:11px;color:rgba(196,168,130,0.5);display:block;margin-bottom:4px">Lobby Template (no match)</label>
+      <input type="text" id="titleLobbyTemplate" class="title-input"
+             placeholder="Chilling in lobby">
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="big-btn" onclick="saveTitleTemplates()" style="margin:0;flex:1">SAVE TEMPLATES</button>
+      <button class="big-btn" onclick="action('update_title_now')" style="margin:0;flex:1">UPDATE NOW</button>
+    </div>
+    <div id="titleStatus" style="font-size:11px;color:rgba(80,200,120,0.7);margin-top:6px;text-align:center"></div>
+  </div>
+
   <!-- Feature Toggles -->
   <div class="card">
     <div class="card-title">features</div>
@@ -321,6 +357,19 @@ h1 {
     <div id="songQueue">
       <div class="queue-empty">Queue empty</div>
     </div>
+  </div>
+
+  <!-- God Request Queue -->
+  <div class="card">
+    <div class="card-title">god request queue</div>
+    <div id="godQueue">
+      <div class="queue-empty">Queue empty</div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="big-btn snap-btn" onclick="action('god_skip')" style="margin:0;flex:1">SKIP NEXT</button>
+      <button class="big-btn stop" onclick="action('god_clear')" style="margin:0;flex:1">CLEAR ALL</button>
+    </div>
+    <div id="godMiuStatus" style="font-size:11px;color:rgba(196,168,130,0.3);margin-top:6px;text-align:center"></div>
   </div>
 
   <!-- Stats -->
@@ -364,6 +413,18 @@ async function sendChat() {
   input.value = '';
 }
 
+async function saveTitleTemplates() {
+  const god = document.getElementById('titleGodTemplate').value.trim();
+  const lobby = document.getElementById('titleLobbyTemplate').value.trim();
+  const payload = {};
+  if (god) payload.god_template = god;
+  if (lobby) payload.lobby_template = lobby;
+  await action('set_title_templates', payload);
+  const status = document.getElementById('titleStatus');
+  status.textContent = 'Templates saved!';
+  setTimeout(() => { status.textContent = ''; }, 3000);
+}
+
 function renderFeatures(features) {
   const el = document.getElementById('featureToggles');
   el.innerHTML = '';
@@ -375,6 +436,8 @@ function renderFeatures(features) {
     smite_tracking: 'Smite Tracking',
     now_playing_overlay: 'Now Playing',
     auto_scene_switch: 'Auto Scene Switch',
+    auto_title: 'Auto Title Update',
+    god_requests: 'God Requests',
   };
   for (const [key, enabled] of Object.entries(features)) {
     const label = names[key] || key;
@@ -424,19 +487,48 @@ function renderQueue(queue) {
   `).join('');
 }
 
+function renderGodQueue(godReqs) {
+  const el = document.getElementById('godQueue');
+  const statusEl = document.getElementById('godMiuStatus');
+  if (!godReqs || !godReqs.queue || godReqs.queue.length === 0) {
+    el.innerHTML = '<div class="queue-empty">Queue empty — !godrequest &lt;god&gt;</div>';
+  } else {
+    el.innerHTML = godReqs.queue.map((g, i) => `
+      <div class="queue-item">
+        <span class="queue-song">${i+1}. ${g.god}</span>
+        <span class="queue-user">${g.requester}${g.token_spent ? '' : ' (mod)'}</span>
+      </div>
+    `).join('');
+  }
+  if (statusEl) {
+    statusEl.textContent = godReqs.mixitup_connected ? 'MixItUp connected' : 'MixItUp not connected';
+    statusEl.style.color = godReqs.mixitup_connected ? 'rgba(80,200,120,0.5)' : 'rgba(200,80,80,0.5)';
+  }
+}
+
+let titleTemplatesLoaded = false;
+
 async function poll() {
   try {
     const resp = await fetch(`${API}/api/state`);
     const data = await resp.json();
-    
+
     renderFeatures(data.features || {});
     renderNowPlaying(data.now_playing);
     renderQueue(data.queue || []);
-    
+    renderGodQueue(data.god_requests || {});
+
     if (data.stats) {
       document.getElementById('statUptime').textContent = data.stats.uptime || '—';
       document.getElementById('statCommands').textContent = data.stats.commands || 0;
       document.getElementById('statPlugins').textContent = (data.stats.plugins || []).join(', ');
+    }
+
+    // Populate title templates on first load only (don't overwrite user edits)
+    if (!titleTemplatesLoaded && data.title_templates) {
+      document.getElementById('titleGodTemplate').value = data.title_templates.god || '';
+      document.getElementById('titleLobbyTemplate').value = data.title_templates.lobby || '';
+      titleTemplatesLoaded = true;
     }
   } catch(e) {}
 }

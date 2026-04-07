@@ -15,14 +15,16 @@ from core.bot import HatmasBot
 from core.webserver import WebServer
 from core.config import (
     TWITCH_BOT_TOKEN, TWITCH_BOT_REFRESH_TOKEN,
+    TWITCH_BROADCASTER_TOKEN, TWITCH_BROADCASTER_REFRESH_TOKEN,
     TWITCH_BOT_ID, TWITCH_OWNER_ID
 )
 from plugins.basic import BasicPlugin
-# from plugins.smite import SmitePlugin
+from plugins.smite import SmitePlugin
 from plugins.songrequest import SongRequestPlugin
 # from plugins.snap import SnapPlugin
-# from plugins.obs import OBSPlugin
-# from plugins.claude_chat import ClaudeChatPlugin
+from plugins.obs import OBSPlugin
+from plugins.claude_chat import ClaudeChatPlugin
+from plugins.godrequest import GodRequestPlugin
 
 
 async def main():
@@ -46,11 +48,12 @@ async def main():
 
     # Register plugins (uncomment as you set them up)
     bot.register_plugin("basic", BasicPlugin())
-    # bot.register_plugin("smite", SmitePlugin())
+    bot.register_plugin("smite", SmitePlugin())
     bot.register_plugin("songrequest", SongRequestPlugin())
     # bot.register_plugin("snap", SnapPlugin())
-    # bot.register_plugin("obs", OBSPlugin())
-    # bot.register_plugin("claude", ClaudeChatPlugin())
+    bot.register_plugin("obs", OBSPlugin())
+    bot.register_plugin("godrequest", GodRequestPlugin())
+    bot.register_plugin("claude", ClaudeChatPlugin())
 
     # Start web server
     await web.start()
@@ -61,7 +64,12 @@ async def main():
     try:
         # Add the bot's OAuth token before starting
         await bot.add_token(TWITCH_BOT_TOKEN, TWITCH_BOT_REFRESH_TOKEN)
-        print("[HatmasBot] Token added")
+        print("[HatmasBot] Bot token added")
+
+        # Add the broadcaster's OAuth token for channel-level EventSub
+        # (subscribe, resub, gift sub events require broadcaster auth)
+        await bot.add_token(TWITCH_BROADCASTER_TOKEN, TWITCH_BROADCASTER_REFRESH_TOKEN)
+        print("[HatmasBot] Broadcaster token added")
 
         # Start the bot (this blocks)
         await bot.start()
