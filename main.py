@@ -27,6 +27,7 @@ from plugins.obs import OBSPlugin
 from plugins.claude_chat import ClaudeChatPlugin
 from plugins.godrequest import GodRequestPlugin
 from plugins.gamble import GamblePlugin
+from plugins.killdetector import KillDeathDetector
 
 
 async def main():
@@ -43,11 +44,12 @@ async def main():
     # Initialize web server
     web = WebServer()
 
-    # Initialize bot with IDs
+    # Initialize bot with IDs and token manager
     bot = HatmasBot(
         web_server=web,
         bot_id=TWITCH_BOT_ID,
         owner_id=TWITCH_OWNER_ID,
+        token_manager=token_mgr,
     )
     web.bot = bot
 
@@ -60,6 +62,39 @@ async def main():
     bot.register_plugin("godrequest", GodRequestPlugin())
     bot.register_plugin("claude", ClaudeChatPlugin())
     bot.register_plugin("gamble", GamblePlugin())
+
+    # Kill/death detector — hooks into smite match state
+    kd = KillDeathDetector(debug=True)
+
+    async def on_kill(kill_type):
+        web.trigger_kill_event("kill", kill_type)
+
+    async def on_multikill(kill_type):
+        web.trigger_kill_event("kill", kill_type)
+
+    async def on_death():
+        web.trigger_kill_event("death")
+
+    kd.on_kill = on_kill
+    kd.on_multikill = on_multikill
+    kd.on_death = on_death
+    bot.register_plugin("killdetector", kd)
+
+    # Hook kill detector into smite match lifecycle
+    smite_plugin = bot.plugins.get("smite")
+    if smite_plugin:
+        async def _kd_match_start(data):
+            kd.reset_match_stats()
+            await kd.start_detection()
+
+        async def _kd_match_end(data):
+            await kd.stop_detection()
+            stats = kd.get_match_stats()
+            if stats["kills"] > 0 or stats["deaths"] > 0:
+                print(f"[KillDetector] Match stats: {stats['kills']}K / {stats['deaths']}D")
+
+        smite_plugin.on_match_start(_kd_match_start)
+        smite_plugin.on_match_end(_kd_match_end)
 
     # Start web server
     await web.start()

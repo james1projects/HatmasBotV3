@@ -430,9 +430,9 @@ class SongRequestPlugin:
         like_count = self.likes.get(likes_key, {}).get("count", 0)
 
         await self.bot.send_chat(
-            f"♫ Now playing: {self.current_song['title']} by "
+            f"Now playing: {self.current_song['title']} by "
             f"{self.current_song['artist']} | "
-            f"Requested by: {self.current_song['requester']} | ♡ !like {like_count}"
+            f"Requested by: {self.current_song['requester']} | !like ({like_count})"
         )
 
     async def on_youtube_ended(self):
@@ -766,7 +766,7 @@ class SongRequestPlugin:
                 f"Now playing: {self.current_song['title']} by "
                 f"{self.current_song['artist']} [{source_label}] | Requested by: "
                 f"{self.current_song.get('requester', 'playlist')} | "
-                f"♡ {like_count}",
+                f"{like_count} likes",
                 whisper
             )
         else:
@@ -827,7 +827,7 @@ class SongRequestPlugin:
 
         count = self.likes[likes_key]["count"]
         await self.bot.send_chat(
-            f"♡ {message.chatter.name} liked this song! ({count} total likes)"
+            f"{message.chatter.name} liked this song! ({count} total likes)"
         )
 
         if self.bot.web_server:
@@ -914,7 +914,7 @@ class SongRequestPlugin:
             await self.skip_current()
         else:
             await self.bot.send_chat(
-                f"♫ {message.chatter.name} voted to skip ({votes}/{needed})"
+                f"{message.chatter.name} voted to skip ({votes}/{needed})"
             )
 
     async def cmd_blacklistsong(self, message, args, whisper=False):
@@ -972,7 +972,7 @@ class SongRequestPlugin:
         self._save_blacklist()
 
         await self.bot.send_chat(
-            f"🚫 {song['title']} by {song['artist']} has been blacklisted."
+            f"{song['title']} by {song['artist']} has been blacklisted."
         )
 
         # If this song is currently playing, skip it
@@ -1078,7 +1078,7 @@ class SongRequestPlugin:
                         self._spotify_notified_disconnect = True
                         print("[SongRequest] Spotify connection lost")
                         await self.bot.send_chat(
-                            "⚠ Spotify connection lost — song requests paused until reconnected."
+                            "Spotify connection lost. Song requests paused."
                         )
                     # Backoff: poll slower when disconnected
                     sleep_time = 15 if self._spotify_errors >= 3 else 3
@@ -1093,7 +1093,7 @@ class SongRequestPlugin:
                     self._spotify_connected = True
                     self._spotify_notified_disconnect = False
                     print("[SongRequest] Spotify connection restored")
-                    await self.bot.send_chat("✓ Spotify reconnected — song requests are back!")
+                    await self.bot.send_chat("Spotify reconnected. Song requests are back!")
                 self._spotify_errors = 0
 
                 if not playback.get("item"):
@@ -1189,9 +1189,9 @@ class SongRequestPlugin:
                 like_count = self.likes.get(likes_key, {}).get("count", 0)
 
                 await self.bot.send_chat(
-                    f"♫ Now playing: {self.current_song['title']} by "
+                    f"Now playing: {self.current_song['title']} by "
                     f"{self.current_song['artist']} | "
-                    f"Requested by: {self.current_song['requester']} | ♡ {like_count}"
+                    f"Requested by: {self.current_song['requester']} | {like_count} likes"
                 )
 
                 if self.bot.web_server:

@@ -1,0 +1,31 @@
+Future Feature Ideas
+====================
+
+1. Hats Stock Market
+--------------------
+Hats have a floating exchange rate. 1 Hat isn't always worth 1 Hat.
+The market value starts at 1.0x each stream and ticks up or down every few
+minutes based on weighted factors:
+
+  - Chat activity pushes it up (more chatters = stronger economy)
+  - Wins push it up, losses pull it down
+  - Big gambling wins inflate the market, jackpots cause a spike
+  - Low chat activity slowly deflates it
+  - Random events (market crash, gold rush) fire occasionally
+
+Viewer commands:
+  !invest <amount>  - Convert Hats into "shares" at the current rate
+  !sell             - Convert shares back to Hats at current rate (profit or loss)
+  !market           - Show current rate and trend (up/down/stable)
+  !portfolio        - Show holdings and current P/L
+  !short <amount>   - Bet the market goes DOWN (advanced/degenerate option)
+
+Visual overlay: A line chart in OBS showing last 30 min of market movement.
+Green when trending up, red when trending down. Ticker at the bottom showing
+recent trades.
+
+Why it's good: Ties every system together. Predictions, gamble, song requests,
+raids, gameplay all feed into one shared economy. Turns passive viewers into
+active participants. Chat splits into bulls and bears.
+
+Estimated effort: ~2 sessions. Market engine first, then overlay and commands.

@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Kill/Death Overlay</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: transparent;
+    overflow: hidden;
+    font-family: 'Segoe UI', Arial, sans-serif;
+  }
+
+  .event-container {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    pointer-events: none;
+    z-index: 100;
+  }
+
+  .event-box {
+    display: none;
+    padding: 16px 40px;
+    border-radius: 12px;
+    font-size: 28px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    animation: eventPop 0.4s ease-out;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.6);
+  }
+
+  .event-box.kill {
+    background: linear-gradient(135deg, rgba(255,50,50,0.85), rgba(200,30,30,0.85));
+    color: #fff;
+    border: 2px solid rgba(255,100,100,0.6);
+    box-shadow: 0 0 30px rgba(255,50,50,0.5);
+  }
+
+  .event-box.death {
+    background: linear-gradient(135deg, rgba(60,60,60,0.9), rgba(30,30,30,0.9));
+    color: #888;
+    border: 2px solid rgba(100,100,100,0.4);
+    box-shadow: 0 0 30px rgba(0,0,0,0.5);
+  }
+
+  .event-box.multikill {
+    background: linear-gradient(135deg, rgba(255,180,0,0.9), rgba(255,100,0,0.9));
+    color: #fff;
+    border: 2px solid rgba(255,220,100,0.6);
+    box-shadow: 0 0 40px rgba(255,180,0,0.6);
+    font-size: 36px;
+  }
+
+  .event-box.show {
+    display: block;
+  }
+
+  .kill-type {
+    font-size: 16px;
+    margin-top: 4px;
+    opacity: 0.8;
+    letter-spacing: 1px;
+  }
+
+  /* Stats counter in bottom corner */
+  .stats-bar {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    display: flex;
+    gap: 16px;
+    font-size: 20px;
+    font-weight: 600;
+    pointer-events: none;
+  }
+
+  .stat {
+    padding: 6px 14px;
+    border-radius: 8px;
+    background: rgba(0,0,0,0.6);
+    color: #fff;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+  }
+
+  .stat.kills { border-left: 3px solid #ff4444; }
+  .stat.deaths { border-left: 3px solid #666; }
+
+  @keyframes eventPop {
+    0% { transform: scale(0.3); opacity: 0; }
+    60% { transform: scale(1.1); }
+    100% { transform: scale(1); opacity: 1; }
+  }
+
+  @keyframes eventFade {
+    0% { opacity: 1; transform: scale(1); }
+    100% { opacity: 0; transform: scale(0.8) translateY(-20px); }
+  }
+</style>
+</head>
+<body>
+
+<div class="event-container">
+  <div id="eventBox" class="event-box">
+    <div id="eventText"></div>
+    <div id="killType" class="kill-type"></div>
+  </div>
+</div>
+
+<div class="stats-bar" id="statsBar" style="display:none;">
+  <div class="stat kills">K: <span id="killCount">0</span></div>
+  <div class="stat deaths">D: <span id="deathCount">0</span></div>
+</div>
+
+<script>
+const eventBox = document.getElementById('eventBox');
+const eventText = document.getElementById('eventText');
+const killTypeEl = document.getElementById('killType');
+const statsBar = document.getElementById('statsBar');
+const killCount = document.getElementById('killCount');
+const deathCount = document.getElementById('deathCount');
+
+let eventQueue = [];
+let showingEvent = false;
+let totalKills = 0;
+let totalDeaths = 0;
+
+const KILL_TYPE_LABELS = {
+  'player_kill': '',
+  'first_blood': 'FIRST BLOOD',
+  'double_kill': 'DOUBLE KILL',
+  'triple_kill': 'TRIPLE KILL',
+  'quadra_kill': 'QUADRA KILL',
+  'penta_kill': 'PENTA KILL',
+};
+
+function showEvent(event) {
+  showingEvent = true;
+  const isMulti = ['double_kill','triple_kill','quadra_kill','penta_kill'].includes(event.kill_type);
+  const isDeath = event.event === 'death';
+
+  eventBox.className = 'event-box show ' + (isDeath ? 'death' : (isMulti ? 'multikill' : 'kill'));
+
+  if (isDeath) {
+    eventText.textContent = 'SLAIN';
+    killTypeEl.textContent = '';
+    totalDeaths++;
+    deathCount.textContent = totalDeaths;
+  } else {
+    const label = KILL_TYPE_LABELS[event.kill_type] || '';
+    if (label) {
+      eventText.textContent = label;
+      killTypeEl.textContent = '';
+    } else {
+      eventText.textContent = 'KILL';
+      killTypeEl.textContent = '';
+    }
+    totalKills++;
+    killCount.textContent = totalKills;
+  }
+
+  statsBar.style.display = 'flex';
+
+  // Auto-hide after delay
+  const displayTime = isMulti ? 3500 : 2500;
+  setTimeout(() => {
+    eventBox.style.animation = 'eventFade 0.5s ease-in forwards';
+    setTimeout(() => {
+      eventBox.className = 'event-box';
+      eventBox.style.animation = '';
+      showingEvent = false;
+      processQueue();
+    }, 500);
+  }, displayTime);
+}
+
+function processQueue() {
+  if (showingEvent || eventQueue.length === 0) return;
+  const next = eventQueue.shift();
+  showEvent(next);
+}
+
+// Poll for events
+async function pollEvents() {
+  try {
+    const resp = await fetch('/api/kill_events');
+    const events = await resp.json();
+    for (const ev of events) {
+      eventQueue.push(ev);
+    }
+    processQueue();
+  } catch (e) {}
+}
+
+// Also sync stats periodically
+async function syncStats() {
+  try {
+    const resp = await fetch('/api/kill_stats');
+    const stats = await resp.json();
+    if (stats.kills > 0 || stats.deaths > 0) {
+      totalKills = stats.kills;
+      totalDeaths = stats.deaths;
+      killCount.textContent = totalKills;
+      deathCount.textContent = totalDeaths;
+      statsBar.style.display = 'flex';
+    }
+  } catch (e) {}
+}
+
+setInterval(pollEvents, 500);
+setInterval(syncStats, 10000);
+</script>
+</body>
+</html>

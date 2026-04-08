@@ -16,7 +16,8 @@ from twitchio.ext import commands
 from core.config import (
     TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET,
     TWITCH_BOT_TOKEN, TWITCH_BOT_USERNAME, TWITCH_CHANNEL,
-    DEFAULT_FEATURES
+    DEFAULT_FEATURES, SHOUTOUT_ENABLED, SHOUTOUT_MIN_VIEWERS,
+    SHOUTOUT_COOLDOWN, TWITCH_OWNER_ID, TTS_MAX_LENGTH,
 )
 
 
@@ -59,7 +60,7 @@ class _WhisperMessageAdapter:
 
 
 class HatmasBot(commands.Bot):
-    def __init__(self, web_server=None, bot_id=None, owner_id=None):
+    def __init__(self, web_server=None, bot_id=None, owner_id=None, token_manager=None):
         super().__init__(
             client_id=TWITCH_CLIENT_ID,
             client_secret=TWITCH_CLIENT_SECRET,
@@ -70,6 +71,7 @@ class HatmasBot(commands.Bot):
         self.plugins = {}
         self.features = dict(DEFAULT_FEATURES)
         self.web_server = web_server
+        self.token_manager = token_manager
         self.start_time = datetime.now()
         self.command_count = 0
         self._custom_commands = {}
@@ -77,6 +79,7 @@ class HatmasBot(commands.Bot):
         self._raw_handlers = []
         self._owner_id = owner_id
         self._bot_id = bot_id
+        self._shoutout_cooldowns = {}  # raider_id -> last shoutout timestamp
 
     # =============================================================
     # SETUP
@@ -128,6 +131,16 @@ class HatmasBot(commands.Bot):
                 print(f"[HatmasBot] Subscribed to channel gift sub events")
             except Exception as e:
                 print(f"[HatmasBot] Gift sub subscription failed: {e}")
+
+            # Subscribe to incoming raids for auto-shoutout
+            try:
+                raid_payload = eventsub.ChannelRaidSubscription(
+                    to_broadcaster_user_id=self._owner_id,
+                )
+                await self.subscribe_websocket(payload=raid_payload)
+                print(f"[HatmasBot] Subscribed to channel raid events")
+            except Exception as e:
+                print(f"[HatmasBot] Raid subscription failed: {e}")
 
         print(f"[HatmasBot] Commands: {list(self._custom_commands.keys())}")
         print(f"[HatmasBot] Plugins: {list(self.plugins.keys())}")
@@ -204,6 +217,20 @@ class HatmasBot(commands.Bot):
             return
 
         content = payload.text.strip()
+
+        # Check for highlighted message (channel points) → TTS
+        try:
+            msg_type = getattr(payload, "type", None)
+            if msg_type == "channel_points_highlighted" and self.is_feature_enabled("tts_highlights"):
+                display_name = chatter.display_name if hasattr(chatter, "display_name") else chatter.name
+                tts_text = content
+                if len(tts_text) > TTS_MAX_LENGTH:
+                    tts_text = tts_text[:TTS_MAX_LENGTH] + "..."
+                if tts_text and self.web_server:
+                    print(f"[TTS] Highlighted message from {display_name}: {tts_text[:80]}...")
+                    self.web_server.trigger_tts(display_name, tts_text)
+        except Exception as e:
+            print(f"[TTS] Error checking highlighted message: {e}")
 
         if content.startswith("!"):
             self.command_count += 1
@@ -352,6 +379,126 @@ class HatmasBot(commands.Bot):
                     print(f"[HatmasBot] Gift sub token award failed: {e}")
         except Exception as e:
             print(f"[HatmasBot] event_subscription_gift error: {e}")
+
+    # =============================================================
+    # RAID EVENT HANDLER — AUTO-SHOUTOUT
+    # =============================================================
+
+    async def event_channel_raid(self, payload):
+        """Fired when someone raids the channel. Sends a chat shoutout and
+        triggers the official Twitch /shoutout API."""
+        try:
+            raider = payload.from_broadcaster  # PartialUser
+            viewer_count = payload.viewer_count or 0
+            raider_name = raider.name if hasattr(raider, "name") else str(raider)
+            raider_id = str(raider.id) if hasattr(raider, "id") else None
+
+            print(f"[HatmasBot] Raid from {raider_name} with {viewer_count} viewers!")
+
+            if not self.is_feature_enabled("auto_shoutout"):
+                return
+
+            if viewer_count < SHOUTOUT_MIN_VIEWERS:
+                print(f"[HatmasBot] Raid below minimum viewers ({SHOUTOUT_MIN_VIEWERS}), skipping shoutout")
+                return
+
+            # Cooldown check — avoid spamming shoutouts to the same raider
+            import time
+            now = time.time()
+            if raider_id:
+                last_shoutout = self._shoutout_cooldowns.get(raider_id, 0)
+                if now - last_shoutout < SHOUTOUT_COOLDOWN:
+                    print(f"[HatmasBot] Shoutout cooldown active for {raider_name}")
+                    return
+                self._shoutout_cooldowns[raider_id] = now
+
+            # Fetch the raider's last game via Twitch API
+            last_game = await self._fetch_raider_game(raider_id)
+            game_text = f" They were last playing {last_game}." if last_game else ""
+
+            # Send chat message
+            await self.send_chat(
+                f"Welcome raiders! Shoutout to @{raider_name} "
+                f"bringing {viewer_count} viewers!{game_text} "
+                f"check them out at twitch.tv/{raider_name} hatmasLove"
+            )
+
+            # Trigger the official Twitch shoutout API
+            await self._send_official_shoutout(raider_id)
+
+        except Exception as e:
+            print(f"[HatmasBot] event_channel_raid error: {e}")
+            traceback.print_exc()
+
+    async def _fetch_raider_game(self, raider_id):
+        """Fetch what game a raider was last playing via Twitch API."""
+        if not raider_id or not self.token_manager:
+            return None
+
+        try:
+            import aiohttp
+            headers = await self.token_manager.get_broadcaster_headers()
+            url = f"https://api.twitch.tv/helix/channels?broadcaster_id={raider_id}"
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        channels = data.get("data", [])
+                        if channels:
+                            return channels[0].get("game_name") or None
+                    elif resp.status == 401 and self.token_manager:
+                        # Try refreshing and retrying once
+                        refreshed = await self.token_manager.handle_401("broadcaster")
+                        if refreshed:
+                            headers = await self.token_manager.get_broadcaster_headers()
+                            async with session.get(url, headers=headers) as retry_resp:
+                                if retry_resp.status == 200:
+                                    data = await retry_resp.json()
+                                    channels = data.get("data", [])
+                                    if channels:
+                                        return channels[0].get("game_name") or None
+        except Exception as e:
+            print(f"[HatmasBot] Failed to fetch raider game: {e}")
+
+        return None
+
+    async def _send_official_shoutout(self, raider_id):
+        """Call the Twitch /shoutout API to display the official shoutout card."""
+        if not raider_id or not self.token_manager or not self._owner_id:
+            return
+
+        try:
+            import aiohttp
+            headers = await self.token_manager.get_broadcaster_headers()
+            url = (
+                f"https://api.twitch.tv/helix/chat/shoutouts"
+                f"?from_broadcaster_id={self._owner_id}"
+                f"&to_broadcaster_id={raider_id}"
+                f"&moderator_id={self._owner_id}"
+            )
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers) as resp:
+                    if resp.status == 204:
+                        print(f"[HatmasBot] Official shoutout sent for user {raider_id}")
+                    elif resp.status == 401:
+                        refreshed = await self.token_manager.handle_401("broadcaster")
+                        if refreshed:
+                            headers = await self.token_manager.get_broadcaster_headers()
+                            async with session.post(url, headers=headers) as retry_resp:
+                                if retry_resp.status == 204:
+                                    print(f"[HatmasBot] Official shoutout sent (after refresh)")
+                                else:
+                                    body = await retry_resp.text()
+                                    print(f"[HatmasBot] Shoutout retry failed: {retry_resp.status} {body}")
+                    elif resp.status == 429:
+                        print(f"[HatmasBot] Shoutout rate-limited (Twitch allows 1 per 2 min)")
+                    else:
+                        body = await resp.text()
+                        print(f"[HatmasBot] Shoutout API error: {resp.status} {body}")
+        except Exception as e:
+            print(f"[HatmasBot] Official shoutout failed: {e}")
 
     # =============================================================
     # UTILITY METHODS

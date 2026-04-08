@@ -63,7 +63,7 @@ class SnapPlugin:
         if "obs" in self.bot.plugins:
             await self.bot.plugins["obs"].trigger_snap_scene()
 
-        await self.bot.send_chat("⚡ Hatmaster raises the gauntlet...")
+        await self.bot.send_chat("Hatmaster raises the gauntlet...")
         await asyncio.sleep(3)
 
         # Get chatters
@@ -95,7 +95,7 @@ class SnapPlugin:
         victims = snappable[:max(half, 1)]
 
         await self.bot.send_chat(
-            f"*snap* 💥 {len(victims)} of {len(snappable)} chatters "
+            f"*snap* {len(victims)} of {len(snappable)} chatters "
             f"have been eliminated."
         )
 

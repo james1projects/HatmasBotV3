@@ -16,15 +16,20 @@ Endpoints:
 
 import asyncio
 import json
+import uuid
+import os
 from datetime import datetime
 from aiohttp import web
 from pathlib import Path
 
 from core.config import (
-    WEB_HOST, WEB_PORT, OVERLAY_DIR,
+    WEB_HOST, WEB_PORT, OVERLAY_DIR, DATA_DIR,
     TITLE_TEMPLATE_GOD, TITLE_TEMPLATE_LOBBY,
     SR_PLAYLIST_AUTO_HIDE_SECONDS,
 )
+
+TTS_AUDIO_DIR = DATA_DIR / "tts_audio"
+TTS_AUDIO_DIR.mkdir(exist_ok=True)
 
 
 class WebServer:
@@ -41,6 +46,8 @@ class WebServer:
             "like_event": 0,  # Timestamp of last like — overlay uses this to trigger hearts
             "sound_alert": {"type": None, "timestamp": 0},  # Current sound alert for overlay
             "gamble_result_queue": [],  # Queue of gamble results for visual overlay
+            "tts_queue": [],              # Queue of TTS messages for highlighted message overlay
+            "kill_event_queue": [],       # Queue of kill/death events for overlay
             "youtube_playback": {
                 "video_id": None,
                 "status": "idle",  # idle | pending | playing
@@ -69,6 +76,13 @@ class WebServer:
         self.app.router.add_get("/overlay/god", self.handle_god_overlay)
         self.app.router.add_get("/overlay/sound_alerts", self.handle_sound_alerts_overlay)
         self.app.router.add_get("/api/gamble_queue", self.handle_gamble_queue)
+        self.app.router.add_get("/api/tts_queue", self.handle_tts_queue)
+        self.app.router.add_get("/api/tts_audio/{filename}", self.handle_tts_audio)
+        self.app.router.add_get("/overlay/tts", self.handle_tts_overlay)
+        self.app.router.add_get("/api/kill_events", self.handle_kill_event_queue)
+        self.app.router.add_get("/api/kill_stats", self.handle_kill_stats)
+        self.app.router.add_get("/overlay/kills", self.handle_kills_overlay)
+        self.app.router.add_get("/api/suggestions", self.handle_get_suggestions)
         self.app.router.add_get("/api/state", self.handle_get_state)
         self.app.router.add_post("/api/state", self.handle_update_state)
         self.app.router.add_post("/api/action", self.handle_action)
@@ -107,6 +121,124 @@ class WebServer:
         queue = list(self._state["gamble_result_queue"])
         self._state["gamble_result_queue"] = []
         return web.json_response(queue)
+
+    def trigger_tts(self, display_name, message):
+        """Generate TTS audio with gTTS and queue it for the overlay."""
+        import time
+        try:
+            from gtts import gTTS
+            audio_id = str(uuid.uuid4())[:8]
+            filename = f"tts_{audio_id}.mp3"
+            filepath = TTS_AUDIO_DIR / filename
+
+            tts = gTTS(text=message, lang='en', slow=False)
+            tts.save(str(filepath))
+
+            self._state["tts_queue"].append({
+                "user": display_name,
+                "message": message,
+                "audio": f"/api/tts_audio/{filename}",
+                "timestamp": time.time(),
+            })
+            # Cap queue at 20
+            if len(self._state["tts_queue"]) > 20:
+                self._state["tts_queue"] = self._state["tts_queue"][-20:]
+
+            # Clean up old audio files (keep last 30)
+            self._cleanup_tts_audio()
+
+            print(f"[WebServer] TTS queued: {display_name} — {message[:60]}...")
+        except Exception as e:
+            print(f"[WebServer] TTS generation failed: {e}")
+
+    def _cleanup_tts_audio(self):
+        """Remove old TTS audio files to prevent disk bloat."""
+        try:
+            files = sorted(TTS_AUDIO_DIR.glob("tts_*.mp3"), key=lambda f: f.stat().st_mtime)
+            if len(files) > 30:
+                for f in files[:-30]:
+                    f.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    async def handle_tts_queue(self, request):
+        """Return and drain the TTS queue. The overlay calls this to
+        pick up pending TTS messages."""
+        queue = list(self._state["tts_queue"])
+        self._state["tts_queue"] = []
+        return web.json_response(queue)
+
+    async def handle_tts_audio(self, request):
+        """Serve a generated TTS audio file."""
+        filename = request.match_info["filename"]
+        # Sanitize — only allow expected filenames
+        if not filename.startswith("tts_") or not filename.endswith(".mp3"):
+            return web.Response(text="Not found", status=404)
+        filepath = TTS_AUDIO_DIR / filename
+        if filepath.exists():
+            return web.FileResponse(filepath, headers={
+                "Content-Type": "audio/mpeg",
+                "Cache-Control": "no-cache",
+            })
+        return web.Response(text="Not found", status=404)
+
+    def trigger_kill_event(self, event_type, kill_type=None):
+        """Push a kill or death event onto the queue for the overlay.
+        event_type: 'kill' or 'death'
+        kill_type: 'player_kill', 'double_kill', 'triple_kill', etc."""
+        import time
+        self._state["kill_event_queue"].append({
+            "event": event_type,
+            "kill_type": kill_type,
+            "timestamp": time.time(),
+        })
+        if len(self._state["kill_event_queue"]) > 20:
+            self._state["kill_event_queue"] = self._state["kill_event_queue"][-20:]
+
+    async def handle_kill_event_queue(self, request):
+        """Return and drain the kill event queue for the overlay."""
+        queue = list(self._state["kill_event_queue"])
+        self._state["kill_event_queue"] = []
+        return web.json_response(queue)
+
+    async def handle_kill_stats(self, request):
+        """Return current match kill/death stats + detector status for dashboard."""
+        if self.bot and "killdetector" in self.bot.plugins:
+            kd = self.bot.plugins["killdetector"]
+            stats = kd.get_match_stats()
+            # Add detector status fields for the dashboard debug panel
+            stats["running"] = kd._running
+            stats["debug"] = kd._debug
+            stats["announce_chat"] = kd._announce_chat
+            stats["ocr_available"] = kd._ocr_available
+            stats["last_kda"] = list(kd._prev_kda) if kd._prev_kda else None
+            # How long ago was the last successful KDA read
+            import time
+            if kd._prev_kda is not None and hasattr(kd, '_last_kda_read_time'):
+                stats["last_read_ago"] = round(time.time() - kd._last_kda_read_time, 1)
+            else:
+                stats["last_read_ago"] = None
+            return web.json_response(stats)
+        return web.json_response({
+            "kills": 0, "deaths": 0, "assists": 0, "is_dead": False,
+            "kill_types": {}, "running": False, "debug": False,
+            "announce_chat": False, "ocr_available": False,
+            "last_kda": None, "last_read_ago": None, "kda_failures": 0,
+        })
+
+    async def handle_kills_overlay(self, request):
+        """Serve the kill/death overlay HTML."""
+        html_path = OVERLAY_DIR / "kills.html"
+        if html_path.exists():
+            return web.FileResponse(html_path)
+        return web.Response(text="Kill overlay not found", status=404)
+
+    async def handle_get_suggestions(self, request):
+        """Return all suggestions for the dashboard."""
+        if self.bot and "basic" in self.bot.plugins:
+            suggestions = self.bot.plugins["basic"]._suggestions
+            return web.json_response(suggestions)
+        return web.json_response([])
 
     async def handle_get_state(self, request):
         state = dict(self._state)
@@ -268,6 +400,59 @@ class WebServer:
                 return web.json_response({"ok": True, "removed": removed})
             return web.json_response({"error": "Missing command"}, status=400)
 
+        elif action == "clear_suggestions":
+            if "basic" in self.bot.plugins:
+                count = len(self.bot.plugins["basic"]._suggestions)
+                self.bot.plugins["basic"]._suggestions = []
+                self.bot.plugins["basic"]._save_suggestions()
+                return web.json_response({"ok": True, "cleared": count})
+            return web.json_response({"ok": True, "cleared": 0})
+
+        elif action == "start_kill_detect":
+            if "killdetector" in self.bot.plugins:
+                kd = self.bot.plugins["killdetector"]
+                kd.reset_match_stats()
+                await kd.start_detection(manual=True)
+                return web.json_response({"ok": True, "status": "started"})
+            return web.json_response({"error": "Kill detector not loaded"}, status=400)
+
+        elif action == "stop_kill_detect":
+            if "killdetector" in self.bot.plugins:
+                kd = self.bot.plugins["killdetector"]
+                await kd.stop_detection()
+                return web.json_response({"ok": True, "status": "stopped"})
+            return web.json_response({"error": "Kill detector not loaded"}, status=400)
+
+        elif action == "kd_toggle_debug":
+            if "killdetector" in self.bot.plugins:
+                enabled = data.get("enabled", False)
+                self.bot.plugins["killdetector"].set_debug(enabled)
+                return web.json_response({"ok": True, "debug": enabled})
+            return web.json_response({"error": "Kill detector not loaded"}, status=400)
+
+        elif action == "kd_toggle_announce":
+            if "killdetector" in self.bot.plugins:
+                enabled = data.get("enabled", False)
+                self.bot.plugins["killdetector"].set_announce_chat(enabled)
+                return web.json_response({"ok": True, "announce_chat": enabled})
+            return web.json_response({"error": "Kill detector not loaded"}, status=400)
+
+        elif action == "test_kill":
+            kill_type = data.get("kill_type", "player_kill")
+            self.trigger_kill_event("kill", kill_type)
+            return web.json_response({"ok": True, "kill_type": kill_type})
+
+        elif action == "test_death":
+            self.trigger_kill_event("death")
+            return web.json_response({"ok": True})
+
+        elif action == "test_tts":
+            # Test TTS from the dashboard
+            test_user = data.get("user", "TestViewer")
+            test_msg = data.get("message", "This is a test of the highlighted message text-to-speech system!")
+            self.trigger_tts(test_user, test_msg)
+            return web.json_response({"ok": True})
+
         elif action == "send_chat":
             msg = data.get("message", "")
             if msg:
@@ -342,6 +527,12 @@ class WebServer:
             return web.FileResponse(html_path)
         return web.Response(text="Sound alerts overlay not found", status=404)
 
+    async def handle_tts_overlay(self, request):
+        html_path = OVERLAY_DIR / "tts.html"
+        if html_path.exists():
+            return web.FileResponse(html_path)
+        return web.Response(text="TTS overlay not found", status=404)
+
     # === CONTROL PANEL ===
 
     async def handle_control_panel(self, request):
@@ -391,6 +582,8 @@ class WebServer:
         print(f"[WebServer] Now Playing:      http://{WEB_HOST}:{WEB_PORT}/overlay/nowplaying")
         print(f"[WebServer] YouTube Player:   http://{WEB_HOST}:{WEB_PORT}/overlay/youtube_player")
         print(f"[WebServer] God Overlay:      http://{WEB_HOST}:{WEB_PORT}/overlay/god")
+        print(f"[WebServer] TTS Overlay:      http://{WEB_HOST}:{WEB_PORT}/overlay/tts")
+        print(f"[WebServer] Kill Overlay:     http://{WEB_HOST}:{WEB_PORT}/overlay/kills")
 
     async def stop(self):
         if self.runner:

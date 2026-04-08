@@ -390,6 +390,73 @@ h1 {
       </div>
     </div>
   </div>
+
+  <!-- Debug -->
+  <div class="card" style="grid-column: 1 / -1;">
+    <div class="card-title">debug</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
+
+      <!-- Kill Detector -->
+      <div>
+        <div class="card-title" style="margin-top:0">kill detector</div>
+        <div class="stat-item">
+          <span class="stat-label">Status</span>
+          <span class="stat-value" id="kdStatus">—</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">K / D / A</span>
+          <span class="stat-value" id="kdKDA">—</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">OCR Fails</span>
+          <span class="stat-value" id="kdOcrFails">—</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Last Read</span>
+          <span class="stat-value" id="kdLastRead">—</span>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="big-btn go-live" id="kdStartBtn" onclick="kdStart()" style="margin:0;flex:1;padding:10px;font-size:12px">START</button>
+          <button class="big-btn stop" id="kdStopBtn" onclick="kdStop()" style="margin:0;flex:1;padding:10px;font-size:12px">STOP</button>
+        </div>
+        <div style="margin-top:8px">
+          <label class="toggle" style="display:inline-flex;align-items:center;gap:8px;width:auto">
+            <input type="checkbox" id="kdDebugToggle" onchange="kdToggleDebug(this.checked)">
+            <span class="toggle-slider"></span>
+            <span class="toggle-label" style="font-size:11px">Save debug crops</span>
+          </label>
+        </div>
+        <div style="margin-top:4px">
+          <label class="toggle" style="display:inline-flex;align-items:center;gap:8px;width:auto">
+            <input type="checkbox" id="kdAnnounceToggle" onchange="kdToggleAnnounce(this.checked)">
+            <span class="toggle-slider"></span>
+            <span class="toggle-label" style="font-size:11px">Announce K/D/A in chat</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Test Events -->
+      <div>
+        <div class="card-title" style="margin-top:0">test events</div>
+        <button class="big-btn" onclick="action('test_kill', {kill_type:'player_kill'})" style="padding:10px;font-size:12px">TEST KILL</button>
+        <button class="big-btn" onclick="action('test_kill', {kill_type:'double_kill'})" style="padding:10px;font-size:12px">TEST DOUBLE KILL</button>
+        <button class="big-btn" onclick="action('test_kill', {kill_type:'triple_kill'})" style="padding:10px;font-size:12px">TEST TRIPLE KILL</button>
+        <button class="big-btn" onclick="action('test_kill', {kill_type:'penta_kill'})" style="padding:10px;font-size:12px">TEST PENTA KILL</button>
+        <button class="big-btn stop" onclick="action('test_death')" style="padding:10px;font-size:12px">TEST DEATH</button>
+      </div>
+
+      <!-- Test Sounds / TTS -->
+      <div>
+        <div class="card-title" style="margin-top:0">test sounds</div>
+        <button class="big-btn" onclick="action('test_sound', {type:'jackpot'})" style="padding:10px;font-size:12px">TEST JACKPOT</button>
+        <button class="big-btn" onclick="action('test_sound', {type:'big_win'})" style="padding:10px;font-size:12px">TEST BIG WIN</button>
+        <button class="big-btn" onclick="action('test_sound', {type:'win'})" style="padding:10px;font-size:12px">TEST WIN</button>
+        <button class="big-btn" onclick="action('test_sound', {type:'loss'})" style="padding:10px;font-size:12px">TEST LOSS</button>
+        <button class="big-btn snap-btn" onclick="action('test_tts')" style="padding:10px;font-size:12px">TEST TTS</button>
+      </div>
+
+    </div>
+  </div>
 </div>
 
 <script>
@@ -506,6 +573,72 @@ function renderGodQueue(godReqs) {
   }
 }
 
+// --- Kill Detector controls ---
+async function kdStart() {
+  await action('start_kill_detect');
+}
+
+async function kdStop() {
+  await action('stop_kill_detect');
+}
+
+async function kdToggleDebug(enabled) {
+  await action('kd_toggle_debug', {enabled: enabled});
+}
+
+async function kdToggleAnnounce(enabled) {
+  await action('kd_toggle_announce', {enabled: enabled});
+}
+
+let kdDebugLoaded = false;
+let kdAnnounceLoaded = false;
+
+async function pollKillStats() {
+  try {
+    const resp = await fetch(`${API}/api/kill_stats`);
+    const s = await resp.json();
+
+    // Status
+    const statusEl = document.getElementById('kdStatus');
+    if (s.running) {
+      statusEl.textContent = s.debug ? 'Running (debug)' : 'Running';
+      statusEl.style.color = '#50c878';
+    } else {
+      statusEl.textContent = s.ocr_available ? 'Stopped' : 'No OCR';
+      statusEl.style.color = s.ocr_available ? 'rgba(196,168,130,0.5)' : '#c85050';
+    }
+
+    // KDA
+    const kdaEl = document.getElementById('kdKDA');
+    if (s.last_kda) {
+      kdaEl.textContent = `${s.last_kda[0]} / ${s.last_kda[1]} / ${s.last_kda[2]}`;
+    } else {
+      kdaEl.textContent = s.kills !== undefined ? `${s.kills} / ${s.deaths} / ?` : '—';
+    }
+
+    // OCR failures
+    document.getElementById('kdOcrFails').textContent = s.kda_failures || 0;
+
+    // Last read
+    const lastEl = document.getElementById('kdLastRead');
+    if (s.last_read_ago !== undefined && s.last_read_ago !== null) {
+      lastEl.textContent = s.last_read_ago < 2 ? 'just now' : `${Math.round(s.last_read_ago)}s ago`;
+    } else {
+      lastEl.textContent = '—';
+    }
+
+    // Sync toggles (only on first load)
+    if (!kdDebugLoaded && s.debug !== undefined) {
+      document.getElementById('kdDebugToggle').checked = s.debug;
+      kdDebugLoaded = true;
+    }
+    if (!kdAnnounceLoaded && s.announce_chat !== undefined) {
+      document.getElementById('kdAnnounceToggle').checked = s.announce_chat;
+      kdAnnounceLoaded = true;
+    }
+  } catch(e) {}
+}
+
 let titleTemplatesLoaded = false;
 
 async function poll() {
@@ -534,7 +667,9 @@ async function poll() {
 }
 
 setInterval(poll, 2000);
+setInterval(pollKillStats, 2000);
 poll();
+pollKillStats();
 </script>
 </body>
 </html>

@@ -35,8 +35,13 @@ TWITCH_BROADCASTER_TOKEN = os.environ.get("TWITCH_BROADCASTER_TOKEN", "5tdz6gvha
 TWITCH_BROADCASTER_REFRESH_TOKEN = os.environ.get("TWITCH_BROADCASTER_REFRESH_TOKEN", "iik6w9c3k0j22lmgffmy725bwbfhgzg579ti0y8isr4stbfc5k")
 TWITCH_BROADCASTER_SCOPES = [
     "channel:manage:broadcast", "channel:manage:predictions",
-    "channel:read:subscriptions",
+    "channel:read:subscriptions", "moderator:manage:shoutouts",
 ]
+
+# === AUTO-SHOUTOUT ===
+SHOUTOUT_ENABLED = True              # Enable/disable auto-shoutout on raid
+SHOUTOUT_MIN_VIEWERS = 1             # Minimum raid viewers to trigger shoutout
+SHOUTOUT_COOLDOWN = 120              # Seconds between shoutouts to same user
 
 # === SPOTIFY ===
 SPOTIFY_CLIENT_ID = os.environ.get("SPOTIFY_CLIENT_ID", "YOUR_SPOTIFY_CLIENT_ID")
@@ -145,6 +150,22 @@ GAMBLE_COOLDOWN = 10                         # Seconds between gambles per user
 GAMBLE_JACKPOT_FILE = DATA_DIR / "gamble_jackpot.json"
 GAMBLE_ALERT_MIN_WAGER = 1000               # Min wager to trigger sound + visual alerts (jackpot always triggers)
 
+# === KILL/DEATH DETECTION ===
+KILL_DETECT_ENABLED = True               # Enable/disable kill/death detection
+KILL_DETECT_OBS_SOURCE = "Smite 2"       # OBS source name to screenshot
+KILL_DETECT_OBS_SCENE = "-Main Game Capture"  # OBS scene containing the source
+KILL_DETECT_INTERVAL = 1.5               # Seconds between screenshot analysis
+KILL_DETECT_KILL_COOLDOWN = 4.0          # Seconds between kill detections
+KILL_DETECT_DEATH_COOLDOWN = 8.0         # Seconds between death detections
+TESSERACT_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"  # Path to Tesseract binary
+
+# === TTS (Text-to-Speech for Highlighted Messages) ===
+TTS_ENABLED = True                   # Enable/disable TTS for highlighted messages
+TTS_MAX_LENGTH = 300                 # Max characters to read (truncates longer messages)
+TTS_RATE = 1.0                       # Speech rate (0.5 = slow, 1.0 = normal, 2.0 = fast)
+TTS_VOLUME = 0.8                     # Volume (0.0 to 1.0)
+TTS_DISPLAY_SECONDS = 0             # 0 = auto (stays visible until speech ends)
+
 # === WEB SERVER ===
 WEB_HOST = "localhost"
 WEB_PORT = 8069
@@ -154,7 +175,9 @@ DEFAULT_FEATURES = {
     "song_requests": True, "predictions": True, "snap": True,
     "claude_chat": True, "smite_tracking": True, "gamble": True,
     "now_playing_overlay": True, "auto_scene_switch": True,
-    "auto_title": True, "god_requests": True,
+    "auto_title": True, "god_requests": True, "auto_shoutout": True,
+    "tts_highlights": True,
+    "kill_detection": True,
 }
 
 # === MODERATORS ===

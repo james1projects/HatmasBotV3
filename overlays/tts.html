@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TTS Overlay — Highlighted Messages</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: transparent;
+    overflow: hidden;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  }
+
+  #tts-container {
+    position: fixed;
+    bottom: 40px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 600px;
+    max-width: 90vw;
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    pointer-events: none;
+  }
+
+  #tts-container.visible {
+    opacity: 1;
+  }
+
+  .tts-box {
+    background: linear-gradient(135deg, rgba(110, 50, 200, 0.92), rgba(160, 60, 220, 0.88));
+    border: 2px solid rgba(200, 150, 255, 0.6);
+    border-radius: 12px;
+    padding: 16px 20px;
+    box-shadow: 0 4px 24px rgba(120, 40, 200, 0.5), 0 0 40px rgba(160, 60, 220, 0.2);
+    backdrop-filter: blur(8px);
+  }
+
+  .tts-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .tts-icon svg {
+    width: 20px;
+    height: 20px;
+    fill: rgba(255, 220, 100, 0.9);
+  }
+
+  .tts-username {
+    font-size: 16px;
+    font-weight: 700;
+    color: #ffd866;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+  }
+
+  .tts-label {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-left: auto;
+  }
+
+  .tts-message {
+    font-size: 18px;
+    font-weight: 500;
+    color: #fff;
+    line-height: 1.4;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.4);
+    word-wrap: break-word;
+  }
+
+  .tts-box.speaking {
+    animation: speakPulse 1.5s ease-in-out infinite;
+  }
+
+  @keyframes speakPulse {
+    0%, 100% { border-color: rgba(200, 150, 255, 0.6); box-shadow: 0 4px 24px rgba(120, 40, 200, 0.5), 0 0 40px rgba(160, 60, 220, 0.2); }
+    50% { border-color: rgba(255, 220, 100, 0.8); box-shadow: 0 4px 30px rgba(120, 40, 200, 0.7), 0 0 50px rgba(255, 220, 100, 0.15); }
+  }
+
+  .sound-bars {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 16px;
+    margin-left: 6px;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  .sound-bars.active { opacity: 1; }
+
+  .sound-bars .bar {
+    width: 3px;
+    background: #ffd866;
+    border-radius: 1px;
+    animation: barBounce 0.8s ease-in-out infinite;
+  }
+  .sound-bars .bar:nth-child(1) { height: 6px; animation-delay: 0s; }
+  .sound-bars .bar:nth-child(2) { height: 12px; animation-delay: 0.15s; }
+  .sound-bars .bar:nth-child(3) { height: 8px; animation-delay: 0.3s; }
+  .sound-bars .bar:nth-child(4) { height: 14px; animation-delay: 0.1s; }
+  .sound-bars .bar:nth-child(5) { height: 5px; animation-delay: 0.25s; }
+
+  @keyframes barBounce {
+    0%, 100% { transform: scaleY(0.4); }
+    50% { transform: scaleY(1); }
+  }
+</style>
+</head>
+<body>
+
+<div id="tts-container">
+  <div class="tts-box" id="tts-box">
+    <div class="tts-header">
+      <div class="tts-icon">
+        <svg viewBox="0 0 24 24"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3zM19 10v2a7 7 0 0 1-14 0v-2H3v2a9 9 0 0 0 8 8.94V23h2v-2.06A9 9 0 0 0 21 12v-2h-2z"/></svg>
+      </div>
+      <span class="tts-username" id="tts-username"></span>
+      <div class="sound-bars" id="sound-bars">
+        <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
+      </div>
+      <span class="tts-label">Highlighted Message</span>
+    </div>
+    <div class="tts-message" id="tts-message"></div>
+  </div>
+</div>
+
+<script>
+  const POLL_INTERVAL = 500;
+  const HIDE_DELAY = 1500;
+  const VOLUME = 0.8;
+
+  const container = document.getElementById('tts-container');
+  const box = document.getElementById('tts-box');
+  const usernameEl = document.getElementById('tts-username');
+  const messageEl = document.getElementById('tts-message');
+  const soundBars = document.getElementById('sound-bars');
+
+  let localQueue = [];
+  let isPlaying = false;
+
+  // Use Web Audio API for OBS compatibility
+  let audioCtx = null;
+  let gainNode = null;
+
+  function getAudioContext() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      gainNode = audioCtx.createGain();
+      gainNode.gain.value = VOLUME;
+      gainNode.connect(audioCtx.destination);
+    }
+    // Resume if suspended (autoplay policy)
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+    return audioCtx;
+  }
+
+  // ─── Poll server queue ───────────────────────────────────
+  async function pollQueue() {
+    try {
+      const resp = await fetch('/api/tts_queue');
+      if (resp.ok) {
+        const items = await resp.json();
+        if (items.length > 0) {
+          localQueue.push(...items);
+          processQueue();
+        }
+      }
+    } catch (e) {}
+  }
+
+  // ─── Process local queue one at a time ───────────────────
+  function processQueue() {
+    if (isPlaying || localQueue.length === 0) return;
+    const item = localQueue.shift();
+    playTTS(item.user, item.message, item.audio);
+  }
+
+  // ─── Fetch audio and play via Web Audio API ─────────────
+  async function playTTS(username, message, audioUrl) {
+    isPlaying = true;
+
+    // Update display
+    usernameEl.textContent = username;
+    messageEl.textContent = message;
+    container.classList.add('visible');
+    box.classList.add('speaking');
+    soundBars.classList.add('active');
+
+    try {
+      const ctx = getAudioContext();
+
+      // Fetch audio file as ArrayBuffer
+      const response = await fetch(audioUrl);
+      if (!response.ok) throw new Error(`Audio fetch failed: ${response.status}`);
+
+      const arrayBuffer = await response.arrayBuffer();
+      const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+
+      // Create source and play
+      const source = ctx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(gainNode);
+
+      source.onended = () => {
+        onSpeechDone();
+      };
+
+      source.start(0);
+      console.log('[TTS] Playing audio via Web Audio API');
+
+    } catch (err) {
+      console.error('[TTS] Playback error:', err);
+      // Fallback: try regular <audio> element
+      try {
+        await playFallback(audioUrl);
+      } catch (e2) {
+        console.error('[TTS] Fallback also failed:', e2);
+        // Show visual for 5s then move on
+        setTimeout(onSpeechDone, 5000);
+      }
+    }
+  }
+
+  // ─── Fallback: regular audio element ────────────────────
+  function playFallback(audioUrl) {
+    return new Promise((resolve, reject) => {
+      const audio = new Audio(audioUrl);
+      audio.volume = VOLUME;
+      audio.onended = () => { onSpeechDone(); resolve(); };
+      audio.onerror = (e) => { onSpeechDone(); reject(e); };
+      audio.play().catch(reject);
+    });
+  }
+
+  function onSpeechDone() {
+    box.classList.remove('speaking');
+    soundBars.classList.remove('active');
+
+    setTimeout(() => {
+      container.classList.remove('visible');
+      setTimeout(() => {
+        isPlaying = false;
+        processQueue();
+      }, 500);
+    }, HIDE_DELAY);
+  }
+
+  // ─── Init ───────────────────────────────────────────────
+  // Pre-initialize AudioContext on load (OBS doesn't need user gesture)
+  try {
+    getAudioContext();
+    console.log('[TTS] AudioContext initialized:', audioCtx.state);
+  } catch(e) {
+    console.log('[TTS] AudioContext init deferred');
+  }
+
+  setInterval(pollQueue, POLL_INTERVAL);
+  console.log('[TTS] Overlay ready (Web Audio API + server-side gTTS)');
+</script>
+</body>
+</html>

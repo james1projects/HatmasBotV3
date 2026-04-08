@@ -581,7 +581,7 @@ class SmitePlugin:
                 # Prompt prediction resolve
                 if self.prediction_id:
                     await self.bot.send_chat(
-                        "Match ended — resolve the prediction via the control panel!"
+                        "Match ended! Resolve the prediction in the control panel."
                     )
 
     # === OBS GOD IMAGE & BACKGROUND ===
@@ -1040,7 +1040,7 @@ class SmitePlugin:
                     if resp.status == 200:
                         result_text = "Hatmaster won!" if outcome == "win" else "Hatmaster lost!"
                         await self.bot.send_chat(
-                            f"Prediction resolved — {result_text} (Today: {record})"
+                            f"Prediction resolved! {result_text} (Today: {record})"
                         )
                         print(f"[Smite] Prediction resolved: {outcome} ({record})")
                         self.prediction_id = None
@@ -1179,7 +1179,7 @@ class SmitePlugin:
                 )
             else:
                 await self.bot.send_reply(
-                    message, "In a match — still detecting god...", whisper
+                    message, "In a match, still detecting god...", whisper
                 )
         else:
             await self.bot.send_reply(message, "No active match right now.", whisper)
@@ -1265,7 +1265,7 @@ class SmitePlugin:
         s = r.get("stats", {})
         await self.bot.send_reply(
             message,
-            f"Last game: {r['god']} — "
+            f"Last game: {r['god']} "
             f"{s.get('kills', 0)}/{s.get('deaths', 0)}/{s.get('assists', 0)}",
             whisper
         )
