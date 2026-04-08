@@ -171,6 +171,7 @@ class SongRequestPlugin:
                 "is_playing": True,
                 "progress_ms": 0,
                 "last_updated": time.time(),
+                "is_playlist": False,
             })
 
         self._monitor_task = asyncio.create_task(self._playback_monitor())
@@ -419,6 +420,7 @@ class SongRequestPlugin:
                 "is_playing": True,
                 "progress_ms": 0,
                 "last_updated": time.time(),
+                "is_playlist": False,
             })
 
             self.bot.web_server.update_queue(
@@ -1210,6 +1212,7 @@ class SongRequestPlugin:
                         "progress_ms": progress_ms,
                         "is_playing": is_playing,
                         "last_updated": time.time(),
+                        "is_playlist": False,
                     })
 
                     self.bot.web_server.update_queue(
@@ -1292,4 +1295,4 @@ class SongRequestPlugin:
         if self.session:
             await self.session.close()
         self._yt_executor.shutdown(wait=False)
-        self._save_st
+        self._save_state()

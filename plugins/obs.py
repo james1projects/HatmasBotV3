@@ -37,14 +37,21 @@ class OBSPlugin:
                 password=OBS_WS_PASSWORD,
             )
             print("[OBS] Connected to OBS WebSocket")
+            return True
         except Exception as e:
             print(f"[OBS] Connection failed: {e}")
             print("[OBS] Make sure OBS is running with WebSocket enabled")
             self.client = None
+            return False
 
     def _ensure_connected(self):
         if not self.client:
             raise ConnectionError("OBS not connected")
+
+    async def reconnect(self):
+        """Attempt to reconnect to OBS. Returns True if successful, False otherwise."""
+        print("[OBS] Attempting to reconnect...")
+        return await self._connect()
 
     # === SCENE CONTROL ===
 
@@ -53,8 +60,10 @@ class OBSPlugin:
         try:
             self.client.set_current_program_scene(scene_name)
             print(f"[OBS] Switched to scene: {scene_name}")
+            return True
         except Exception as e:
             print(f"[OBS] Scene switch error: {e}")
+            return False
 
     async def switch_to_game(self):
         self.previous_scene = self._get_current_scene()
@@ -98,8 +107,10 @@ class OBSPlugin:
                 scene_item_id = self.client.get_scene_item_id(scene, source_name).scene_item_id
                 self.client.set_scene_item_enabled(scene, scene_item_id, visible)
             print(f"[OBS] Source '{source_name}' visible={visible}")
+            return True
         except Exception as e:
             print(f"[OBS] Source control error: {e}")
+            return False
 
     async def update_text_source(self, source_name, text):
         self._ensure_connected()
@@ -109,18 +120,22 @@ class OBSPlugin:
                 {"text": text},
                 overlay=True
             )
+            return True
         except Exception as e:
             print(f"[OBS] Text update error: {e}")
+            return False
 
     async def refresh_browser_source(self, source_name):
         self._ensure_connected()
         try:
             self.client.press_input_properties_button(source_name, "refreshnocache")
+            return True
         except Exception as e:
             print(f"[OBS] Browser refresh error: {e}")
+            return False
 
     async def set_image_source(self, source_name, file_path):
-        """Change the file path of an Image source."""
+        """Change the file path of an Image source. Returns True on success, False on failure."""
         self._ensure_connected()
         try:
             self.client.set_input_settings(
@@ -129,20 +144,24 @@ class OBSPlugin:
                 overlay=True
             )
             print(f"[OBS] Image source '{source_name}' set to: {file_path}")
+            return True
         except Exception as e:
             print(f"[OBS] Image source error: {e}")
+            return False
 
     # === FILTER CONTROL ===
 
     async def set_source_filter_value(self, source_name, filter_name, settings):
-        """Update settings on a source filter."""
+        """Update settings on a source filter. Returns True on success, False on failure."""
         self._ensure_connected()
         try:
             self.client.set_source_filter_settings(
                 source_name, filter_name, settings, overlay=True
             )
+            return True
         except Exception as e:
             print(f"[OBS] Filter update error ({source_name}/{filter_name}): {e}")
+            return False
 
     # OBS filter kind string varies by version — try these in order
     COLOR_FILTER_KINDS = ["color_filter", "color_filter_v4", "color_correction_filter"]
@@ -190,7 +209,8 @@ class OBSPlugin:
             steps: Number of opacity steps (higher = smoother)
             filter_name: Name of the Color Correction filter to use
         """
-        await self.ensure_color_correction_filter(source_name, filter_name)
+        if not await self.ensure_color_correction_filter(source_name, filter_name):
+            return False
 
         step_delay = duration / steps
         for i in range(steps + 1):
@@ -198,12 +218,15 @@ class OBSPlugin:
                 opacity = i / steps
             else:
                 opacity = 1.0 - (i / steps)
-            await self.set_source_filter_value(
+            success = await self.set_source_filter_value(
                 source_name, filter_name, {"opacity": int(opacity * 100)}
             )
+            if not success:
+                return False
             await asyncio.sleep(step_delay)
 
         print(f"[OBS] Fade {'in' if fade_in else 'out'} complete: {source_name}")
+        return True
 
     async def set_browser_source_url(self, source_name, url):
         self._ensure_connected()
@@ -213,8 +236,10 @@ class OBSPlugin:
                 {"url": url},
                 overlay=True
             )
+            return True
         except Exception as e:
             print(f"[OBS] Browser URL update error: {e}")
+            return False
 
     # === OVERLAY CONTROL ===
 

@@ -2,7 +2,7 @@
 
 Complete reference for HatmasBot. This file is the single source of truth for Claude when working on this codebase across sessions.
 
-**v2.1 | April 2026 | Built by Hatmaster & Claude**
+**v2.3 | April 2026 | Built by Hatmaster & Claude**
 
 ---
 
@@ -36,20 +36,20 @@ Plugin system. Each plugin has `setup(bot)`, `on_ready()`, `cleanup()`. Bot core
 5. GodRequestPlugin - god request queue with MixItUp token economy
 6. ClaudeChatPlugin - AI chat responses via Claude API (per-user history, safety)
 7. GamblePlugin - wager Hats on dice rolls with jackpot pool
-8. KillDeathDetector - real-time kill/death/assist detection via OBS screenshot OCR
+8. KillDeathDetector - real-time kill/death/assist detection via OBS screenshot analysis + template matching
 
 SnapPlugin exists but is commented out in main.py.
 
 Bot also receives `token_manager` directly for raid shoutout and TTS API calls.
 
-KillDeathDetector hooks into SmitePlugin's match lifecycle: starts on match start, stops on match end. It uses OBS WebSocket to grab screenshots of the "Smite 2" source every 0.8s and reads the K/D/A numbers from the HUD bar using OCR (connected component analysis + Tesseract). When K, D, or A increases, it fires callbacks that push events to the webserver queue for the overlay. Optional chat announcement toggle sends KDA updates to Twitch chat.
+KillDeathDetector starts automatically on bot launch and runs continuously (does not depend on SmitePlugin match state). It uses OBS WebSocket to grab screenshots of the "Smite 2" source every 0.8s, detects gameplay via HUD variance checks, identifies the current god from the in-game portrait via HSV histogram matching (2-5 min faster than the tracker.gg API), and then reads K/D/A numbers from the HUD bar using a per-component template-based digit matcher (with per-component Tesseract OCR fallback). KDA reading is gated behind god portrait identification — the detector won't attempt KDA reads until a god is matched, which eliminates noise during lobby, god select, and menus. When K, D, or A increases, it fires callbacks that push events to the webserver queue for the overlay. KDA state persists to disk (JSON with 30-min staleness threshold) so mid-game bot restarts resume correctly. On startup, 3 consecutive identical reads are required before accepting a baseline. Optional chat announcement toggle sends KDA updates to Twitch chat.
 
 ---
 
 ## File Structure
 
 ```
-main.py                     Entry point. Creates TokenManager, WebServer, Bot, registers plugins.
+main.py                     Entry point. Creates TokenManager, WebServer, Bot, registers plugins. Graceful shutdown via console ("quit"/"exit"/"stop"/"close") or Ctrl+C.
 core/
   bot.py                    HatmasBot class. EventSub subs, command routing, raid handler, TTS handler.
   config.py                 All settings. Loads config_local.py at bottom.
@@ -58,6 +58,8 @@ core/
   auth.py                   OAuth browser flow for bot and broadcaster tokens.
   cache.py                  Simple TTL cache.
   nsfw_check.py             Album art NSFW classification.
+  god_matcher.py            Portrait-based god identification via HSV histogram matching.
+  digit_matcher.py          Template-based digit recognition for KDA numbers. XOR distance + hole-count pre-filter.
 plugins/
   basic.py                  !hello, !commands, !uptime, !socials, !suggest, !suggestions, !clearsuggestions
   smite.py                  Match tracking, god detection, predictions, title, record, commands.
@@ -66,7 +68,7 @@ plugins/
   godrequest.py             God request queue, token economy, MixItUp integration, auto-complete.
   claude_chat.py            Claude API responses for @mentions. Per-user history, safety prompt.
   gamble.py                 Dice roll gambling with Hats currency, jackpot pool, sound/visual alerts.
-  killdetector.py           Real-time kill/death detection via OBS screenshot analysis + OCR.
+  killdetector.py           Real-time kill/death detection via OBS screenshot analysis + template matching (Tesseract OCR fallback).
   snap.py                   Thanos snap. Times out random half of chat.
 overlays/
   control_panel.html        Dashboard for stream management.
@@ -84,16 +86,21 @@ data/
   song_blacklist.json       Blacklisted songs.
   song_state.json           Current playing song (overlay recovery after restart).
   smite_state.json          Last match result, daily W/L record (auto-resets each day).
+  god_icons/                Reference god portrait icons from tracker.gg CDN (for portrait matcher).
   godreq_queue.json         God request queue.
   godreq_history.json       Completed god requests with status.
   snap_stats.json           Snap statistics.
   spotify_token.json        Spotify access/refresh tokens.
   gamble_jackpot.json       Current jackpot pool.
   claude_history.json       Per-user Claude conversation history.
+  kda_state.json            Persisted KDA state for mid-game restart recovery (K/D/A, match stats, timestamp).
   nsfw_cache.json           NSFW album art classification cache.
   twitch_token.json         Bot OAuth token (auto-refreshed).
   twitch_broadcaster_token.json  Broadcaster OAuth token (auto-refreshed).
   tts_audio/                Generated TTS MP3 files (auto-cleaned, keeps last 30).
+  killdetect_debug/         Debug frame archives (timestamped subfolders, preserved for regression testing).
+tools/
+  obs_screenshot.py         Captures OBS "Smite 2" source screenshot for calibration. Saves full frame + KDA crop.
 ```
 
 ---
@@ -185,6 +192,9 @@ All subscribed when both owner_id and bot_id are set:
 ### Smite Match Tracking
 Polls tracker.gg with adaptive intervals (IDLE: 45s, SEARCHING: 30s, FOUND: 45s). Auto-announces match start, detects god, fires callbacks to other plugins. Updates OBS god portrait with fade. Creates Twitch predictions on match start. Auto-switches OBS scenes. Tracks daily W-L record (resets at midnight).
 
+### Early God Detection (Portrait Matcher)
+The tracker.gg API has a 2-5 minute delay before returning god data after a match starts. To show the god portrait immediately, the KillDeathDetector runs a portrait matcher on each game screenshot. It crops the in-game god portrait (bottom-center HUD, below K/D/A bar, region 635,942 to 715,1022 at 1920x1080) and compares it against a library of reference icons using HSV histogram correlation (cv2.compareHist with HISTCMP_CORREL). When a match is found above 0.80 confidence, it fires immediately — setting the OBS portrait, announcing in chat, and updating the stream title. When tracker.gg eventually responds, it confirms the detection and adds team/stats data without re-announcing. Reference icons are downloaded from the tracker.gg CDN via `download_god_icons.py` and stored in `data/god_icons/`. The matcher is initialized in KillDeathDetector.on_ready and runs on each frame in the detection loop until a god is identified for the current match.
+
 ### Stream Title Placeholders
 Templates in TITLE_TEMPLATE_GOD and TITLE_TEMPLATE_LOBBY support:
 - `{god}` - current god name
@@ -193,7 +203,7 @@ Templates in TITLE_TEMPLATE_GOD and TITLE_TEMPLATE_LOBBY support:
 - `{song}` - current song ("Title - Artist" or "No song playing")
 
 ### Song Request Automation
-Polls Spotify every 3s. Pushes next song to queue 30s before current ends (gapless playback). Coordinates Spotify pause/resume with YouTube playback. Auto-skips blacklisted songs. Detects Spotify disconnection, slows polling, notifies chat on reconnect.
+Polls Spotify every 3s. Pushes next song to queue 30s before current ends (gapless playback). Coordinates Spotify pause/resume with YouTube playback. Auto-skips blacklisted songs. Detects Spotify disconnection, slows polling, notifies chat on reconnect. Now Playing overlay auto-hide relies on the `is_playlist` field in every `update_now_playing()` call: playlist songs auto-hide after SR_PLAYLIST_AUTO_HIDE_SECONDS (8s), requested songs stay visible. All update paths (startup restore, YouTube playback, Spotify monitor) include this field.
 
 ### Auto-Shoutout on Raid (bot.py)
 Fires on ChannelRaidSubscription. Fetches raider's last game via GET /helix/channels. Sends chat message with raider name, viewer count, and last game. Calls POST /helix/chat/shoutouts for official shoutout card. 120s per-raider cooldown. Configurable min viewers (SHOUTOUT_MIN_VIEWERS). Controllable via `auto_shoutout` feature toggle.
@@ -204,16 +214,42 @@ Detected in event_message by checking `payload.type == "channel_points_highlight
 ### God Request Auto-Complete
 When smite plugin fires god_detected, godrequest plugin checks if detected god matches next in queue. If so, removes request, logs to history, announces in chat, advances OBS display.
 
-### Kill/Death/Assist Detection (killdetector.py + webserver + kills.html)
-Runs during active matches only (hooks into smite plugin match start/end callbacks). Can also be started/stopped manually from the debug panel for testing in jungle practice. Grabs OBS screenshots of the "Smite 2" source via GetSourceScreenshot every 0.8s. Detection method: KDA HUD number tracking via OCR.
-- KDA region: Reads the K/D/A numbers from the HUD bar above the god portrait at pixel region (625, 905, 725, 932) on a 1920x1080 source. The bar shows sword icon + kills, skull icon + deaths, hand icon + assists.
-- OCR pipeline: Crops the KDA region, scales 8x, Otsu binarization, connected component analysis to separate icons (h>88px) from digit blobs, groups digits into K/D/A by the two largest x-gaps between components, isolates each group, inverts to black-on-white, then runs Tesseract OCR (PSM 7, digit whitelist) on each group independently.
-- Sanity checks: Rejects any frame where KDA decreases (OCR misread). Rejects any frame where a single value jumps by more than MAX_KDA_JUMP (5) in one read (catches misreads like "19" → "49"). Store/scoreboard filter skips frames when left 60% of screen has >65% dark pixels (KDA bar is hidden behind overlays).
-- Multi-kill classification: Tracks kill timestamps within a MULTIKILL_WINDOW (10s) to classify double, triple, quadra, and penta kills.
-- Chat announcements: Optional toggle ("Announce K/D/A in chat") sends a Twitch chat message on each kill, death, or assist with the updated KDA line.
-- Callbacks: on_kill, on_multikill, on_death, on_assist — set in main.py to push events to the webserver overlay queue.
-Overlay at /overlay/kills polls /api/kill_events, shows popup (red for kills, gold for multi-kills, gray for deaths) with K/D counter. Events and stats available via /api/kill_stats (includes running, debug, announce_chat, ocr_available, last_kda, last_read_ago). Test via actions: test_kill (with optional kill_type param), test_death. Debug panel actions: start_kill_detect, stop_kill_detect, kd_toggle_debug, kd_toggle_announce.
-Dependencies: pytesseract + Tesseract binary (required), Pillow, opencv-python, numpy.
+### Kill/Death/Assist Detection (killdetector.py + digit_matcher.py + webserver + kills.html)
+Starts automatically on bot launch and runs continuously — does not depend on SmitePlugin match state. Detects gameplay vs menus via HUD variance checks, so it works in jungle practice and real matches alike without waiting for the tracker.gg API. Grabs OBS screenshots of the "Smite 2" source via GetSourceScreenshot every 0.8s.
+
+**Detection loop order:** gameplay check → god portrait identification → (gate: skip if god not identified) → overlay check → KDA reading → sanity checks → event firing.
+
+**God portrait gating:** KDA reading only begins after the god portrait matcher has identified a god for the current match. Before that (lobby, god select, menus), only the gameplay check and portrait scanning run. When the match ends and `reset_match_stats()` fires, `_god_identified` resets to False and KDA reading stops until the next god is found. This eliminates noisy failed-read log spam during non-gameplay states.
+
+**KDA region:** Reads K/D/A from the bottom-left HUD bar at pixel region `(35, 1033, 160, 1055)` on a 1920x1080 source — a 125x22px rectangle positioned below the item bar where it is always visible (never occluded by store or scoreboard overlays). The bar shows sword icon + kills, skull icon + deaths, hand icon + assists. The bar is semi-transparent — the background shifts as the camera moves, which is the root cause of recognition difficulty.
+
+**Recognition pipeline:** Crops the KDA region, scales 8x (INTER_CUBIC), Otsu binarization (adaptive Gaussian fallback), connected component analysis (8-connectivity) to separate icons (h>88px) from digit blobs, groups digits into K/D/A by the two largest x-gaps. Each digit component is then recognized individually (per-component, not whole-group).
+
+**Primary method — template matching (core/digit_matcher.py):** Each digit component is extracted, resized to 60x80, pre-filtered by hole count (0=must be 1/2/3/5/7, 1=must be 0/4/6/9, 2=must be 8), then XOR distance matched against reference templates in data/digit_templates/ (197 templates as of April 2026). Rejects if distance > 0.30 or margin < 0.02. Typically completes in 4-7ms per frame.
+
+**Fallback method — per-component Tesseract OCR:** If template matching fails for any individual component, that component falls back to Tesseract PSM 10 (single character) with dilated and original image variants. Other components that matched templates keep their results. This handles double-digit numbers where the "1" in the tens place may not match any template.
+
+**Auto-collection:** After sanity checks pass, confirmed digit crops are saved as new templates (max 20 per digit). The template library grows automatically over time.
+
+**State persistence:** KDA state saves to `data/kda_state.json` on every successful read (K/D/A values, match stats, timestamp). On startup, if the saved state is less than 30 minutes old (`STATE_STALE_SECONDS`), it's restored as the baseline. If older, the detector starts fresh. This allows mid-game bot restarts without losing KDA tracking.
+
+**Startup validation:** The first `STARTUP_REQUIRED_READS` (3) consecutive reads must all agree before the baseline is accepted. If restored state exists, the validated read is compared against it — if live reads >= saved values, the delta is applied; if live reads < saved values (new match or bad data), it starts fresh.
+
+**Sanity checks:** Rejects any frame where KDA decreases (misread). Rejects any frame where a single value jumps by more than `MAX_KDA_JUMP_BASE` (5) + seconds_elapsed * `MAX_KDA_JUMP_PER_SEC` (1/3) — scales with time since last successful read. Non-gameplay screen detection checks HUD area for low std/mean — if missing for 3 consecutive frames, assumes game ended and resets stats.
+
+**Multi-kill classification:** Tracks kill timestamps within MULTIKILL_WINDOW (10s) to classify double, triple, quadra, and penta kills. Batched kills (+2 or more from missed frames) clear the window and fire as player_kill.
+
+**Chat announcements:** Optional toggle sends Twitch chat message on each kill, death, or assist with updated KDA line.
+
+**Callbacks:** on_kill, on_multikill, on_death, on_assist — set in main.py to push events to the webserver overlay queue.
+
+**Debug:** set_debug(True) saves crops to data/killdetect_debug/ (archived into timestamped subfolders on each session start). File logging writes all [KillDetector] output to data/killdetect.log (overwritten per session, flushed on every write).
+
+**Overlay:** /overlay/kills polls /api/kill_events, shows popup (red for kills, gold for multi-kills, gray for deaths) with K/D counter. Events and stats available via /api/kill_stats (includes running, debug, announce_chat, ocr_available, last_kda, last_read_ago). Test via actions: test_kill (with optional kill_type param), test_death. Debug panel actions: start_kill_detect, stop_kill_detect, kd_toggle_debug, kd_toggle_announce.
+
+**Dependencies:** Pillow, opencv-python, numpy. Optional: pytesseract + Tesseract binary (fallback OCR, not needed if template library has full digit coverage).
+
+**Calibration tool:** `tools/obs_screenshot.py` captures an OBS screenshot from the exact "Smite 2" source at 1920x1080 and saves a KDA crop for coordinate verification.
 
 ### Gamble Sound + Visual Alerts
 Triggers on wagers >= 1000 Hats (GAMBLE_ALERT_MIN_WAGER). Jackpot always triggers. OBS overlay at /overlay/sound_alerts shows dice roll animation (1.5s cycling), then result with color-coded popup. Sounds synthesized via Web Audio API. Multiple rapid gambles queue server-side (/api/gamble_queue drain pattern). Auto-hides after 5s.
@@ -291,22 +327,4 @@ channel:manage:broadcast, channel:manage:predictions, channel:read:subscriptions
 | TTS_MAX_LENGTH | Max chars for TTS messages (default: 300) |
 | SR_PLAYLIST_AUTO_HIDE_SECONDS | Seconds before playlist overlay hides (default: 8) |
 | MIXITUP_API_BASE | MixItUp API URL (default: localhost:8911) |
-| MIXITUP_INVENTORY_NAME / ITEM_NAME | Must match MixItUp exactly ("God Tokens" / "God Token") |
-| SMITE2_GOD_IMAGES_DIR | Folder with god portrait images |
-
----
-
-## God Name Matching
-
-Fuzzy match against 100+ Smite 2 gods. Resolution: exact match, then starts-with, then contains. Normalizes input (lowercase, strips apostrophes/hyphens). Returns None if ambiguous.
-
-## OBS Sources
-
-- GodImage / GodBackground - god portrait + team-colored background (in configured scene/group)
-- GodReqImage / GodReqText - next requested god portrait + name (in configured scene/group)
-- NowPlaying - now playing overlay
-- SnapOverlay - snap animation
-
-## Queue/Drain Pattern
-
-Used for gamble alerts and TTS. Server appends to a list, caps at 20. Dedicated GET endpoint returns the list and clears it. Overlay polls every 500ms, drains into local queue, processes one at a time. Prevents missed events during rapid activity.
+| MIXITUP_INVENTORY_NAME / ITEM_NAME | Must match MixItUp e

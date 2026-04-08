@@ -7,6 +7,12 @@ data/spotify_token.json
 # === RUNTIME DATA ===
 data/*.json
 
+# === Temp files not necessary for committing ===
+CURRENT_TASK.md
+Future_Features.txt
+Gods - SMITE 2 Wiki.html
+
+
 # === PYTHON ===
 __pycache__/
 *.pyc
@@ -34,3 +40,4 @@ Custom God Icons/
 unpacked_doc/
 Table Reference — TwitchIO 3.2.1 documentation_files/
 data/
+Gods - SMITE 2 Wiki_files/

@@ -323,6 +323,9 @@ function updateDisplay(data) {
   const isNewSong = songKey !== currentSong;
 
   if (isNewSong) {
+    // Reset likeReshown BEFORE checking like event, so a like during a new song
+    // doesn't incorrectly think the overlay was already re-shown by a like
+    likeReshown = false;
     currentSong = songKey;
     el.title.textContent = np.title || '—';
     el.artist.textContent = np.artist || '—';
@@ -340,7 +343,6 @@ function updateDisplay(data) {
     el.label.textContent = np.is_playlist ? 'playing from playlist' : 'now playing';
 
     // Show the overlay (cancels any pending hide)
-    likeReshown = false;
     showOverlay();
 
     // Playlist songs auto-hide; requested songs stay visible

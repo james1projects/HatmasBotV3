@@ -45,25 +45,24 @@ from core.config import (
 
 
 # === KNOWN GODS ===
-# Canonical list for fuzzy matching (lowercase). Add new gods as they release.
+# Canonical list for fuzzy matching (lowercase).
+# Source of truth: Gods - SMITE 2 Wiki.html (82 gods as of April 2026).
+# Update by re-saving https://wiki.smite2.com/w/Gods and running
+# download_god_icons.py to refresh both this list and the icon library.
 SMITE2_GODS = [
-    "agni", "ah muzen cab", "ah puch", "amaterasu", "anhur", "anubis",
-    "ao kuang", "aphrodite", "apollo", "arachne", "ares", "artemis",
-    "athena", "atlas", "awilix", "bacchus", "bakasura", "baron samedi",
-    "bastet", "bellona", "cabrakan", "cerberus", "cernunnos",
-    "chaac", "change", "chernobog", "chiron", "chronos", "cthulhu",
-    "cu chulainn", "cupid", "da ji", "discordia", "erlang shen",
-    "fafnir", "fenrir", "freya", "ganesha", "geb", "hades", "he bo",
-    "hel", "hera", "hercules", "hou yi", "hun batz", "isis", "izanami",
-    "janus", "jing wei", "kali", "khepri", "king arthur", "kukulkan",
-    "kumbhakarna", "kuzenbo", "loki", "medusa", "mercury", "merlin",
-    "mordred", "ne zha", "neith", "nemesis", "nike", "nox", "nu wa",
-    "odin", "osiris", "pele", "persephone", "poseidon", "ra",
-    "rama", "ravana", "scylla", "serqet", "skadi", "sobek",
-    "sol", "sun wukong", "susano", "sylvanus", "terra", "thanatos",
-    "the morrigan", "thor", "thoth", "tiamat", "tsukuyomi", "tyr",
-    "ullr", "vulcan", "xbalanque", "xing tian", "yemoja", "ymir",
-    "zeus", "zhong kui",
+    "achilles", "agni", "aladdin", "amaterasu", "anhur", "anubis",
+    "aphrodite", "apollo", "ares", "artemis", "artio", "athena", "atlas",
+    "awilix", "bacchus", "baron samedi", "bellona", "cabrakan", "cerberus",
+    "cernunnos", "chaac", "charon", "chiron", "cupid", "da ji", "danzaburou",
+    "discordia", "eset", "fenrir", "ganesha", "geb", "gilgamesh", "guan yu",
+    "hades", "hecate", "hercules", "hou yi", "hua mulan", "hun batz",
+    "ishtar", "izanami", "janus", "jing wei", "jormungandr", "kali",
+    "khepri", "kukulkan", "loki", "medusa", "mercury", "merlin", "mordred",
+    "morgan le fay", "ne zha", "neith", "nemesis", "nu wa", "nut", "odin",
+    "osiris", "pele", "poseidon", "princess bari", "ra", "rama", "ratatoskr",
+    "scylla", "sobek", "sol", "sun wukong", "susano", "sylvanus", "thanatos",
+    "the morrigan", "thor", "tsukuyomi", "ullr", "vulcan", "xbalanque",
+    "yemoja", "ymir", "zeus",
 ]
 
 

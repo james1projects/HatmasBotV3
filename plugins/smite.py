@@ -100,6 +100,9 @@ class SmitePlugin:
         self._session_losses = 0
         self._session_date = None  # date string "YYYY-MM-DD"
 
+        # Early god detection from portrait matcher (before tracker.gg responds)
+        self._god_from_portrait = False  # True if portrait matcher already set the god
+
         # Event callbacks — other plugins can register here
         self._on_match_start_callbacks = []
         self._on_god_detected_callbacks = []
@@ -221,6 +224,56 @@ class SmitePlugin:
                 await cb(data)
             except Exception as e:
                 print(f"[Smite] Event callback error: {e}")
+
+    # === EARLY GOD DETECTION (from portrait matcher) ===
+
+    async def set_god_from_portrait(self, god_name):
+        """
+        Called by the kill detector's portrait matcher when it identifies
+        the god from the in-game portrait.  This fires 2-5 minutes before
+        the tracker.gg API returns god data.
+
+        Sets the OBS god portrait image immediately and announces in chat.
+        When tracker.gg eventually returns the same god, the SEARCHING→FOUND
+        transition will skip the re-announcement but still populate the full
+        match data (team, stats, players).
+        """
+        if not self.is_in_match:
+            return
+        if self._god_from_portrait:
+            return  # Already set from portrait this match
+
+        self._god_from_portrait = True
+
+        # Build a minimal god info dict (no stats yet — those come from tracker.gg)
+        god_slug = god_name.lower().replace(" ", "-").replace("'", "")
+        god_info = {
+            "name": god_name,
+            "slug": god_slug,
+            "imageUrl": f"{SMITE2_GOD_IMAGE_BASE}/{god_slug}.jpg",
+            "team": "unknown",
+            "stats": {"kills": 0, "deaths": 0, "assists": 0,
+                      "gold": 0, "gpm": 0, "damage": 0},
+        }
+
+        self.current_god = god_info
+        print(f"[Smite] Early god detection from portrait: {god_name}")
+
+        await self.bot.send_chat(
+            f"Playing {god_name}! (detected from portrait) | Use !god for stats"
+        )
+
+        # Fire god detected callbacks (godrequest auto-complete, etc.)
+        await self._fire_event(self._on_god_detected_callbacks, god_info)
+
+        # Swap OBS god image source immediately
+        await self._set_god_image(god_name, team=None)
+
+        # Update stream title with god name
+        await self._update_stream_title(god_name)
+
+        # Update overlay state
+        self._update_overlay_state()
 
     # === API METHODS ===
     #
@@ -481,32 +534,47 @@ class SmitePlugin:
 
             if god_info and god_info["name"]:
                 if self._poll_state == "SEARCHING":
-                    # === GOD JUST IDENTIFIED ===
+                    # === GOD JUST IDENTIFIED (from tracker.gg API) ===
                     self._poll_state = "FOUND"
                     self.current_god = god_info
                     self.match_players = self._extract_all_players(live_data)
 
-                    print(f"[Smite] God detected: {god_info['name']} "
-                          f"({god_info['team']} side)")
+                    if self._god_from_portrait:
+                        # Portrait matcher already announced and set the image.
+                        # Just log and update with the full data (team, stats).
+                        print(f"[Smite] Tracker.gg confirmed god: {god_info['name']} "
+                              f"({god_info['team']} side) — portrait already set")
 
-                    await self.bot.send_chat(
-                        f"Playing {god_info['name']}! "
-                        f"({god_info['team'].title()} side) "
-                        f"| Use !god for stats"
-                    )
+                        # Update background with correct team color now that we know it
+                        await self._set_god_background(team=god_info.get("team"))
 
-                    # Update webserver state for overlay
+                        # Update the chat message with team info
+                        await self.bot.send_chat(
+                            f"Tracker confirmed: {god_info['team'].title()} side"
+                        )
+                    else:
+                        # Normal flow — portrait matcher didn't catch it
+                        print(f"[Smite] God detected: {god_info['name']} "
+                              f"({god_info['team']} side)")
+
+                        await self.bot.send_chat(
+                            f"Playing {god_info['name']}! "
+                            f"({god_info['team'].title()} side) "
+                            f"| Use !god for stats"
+                        )
+
+                        # Fire god detected event
+                        await self._fire_event(self._on_god_detected_callbacks, god_info)
+
+                        # Swap OBS god image source to the matching funny image
+                        # Pass team so the background matches Chaos/Order side
+                        await self._set_god_image(god_info["name"], team=god_info.get("team"))
+
+                        # Update stream title with god name
+                        await self._update_stream_title(god_info["name"])
+
+                    # Update webserver state for overlay (always, to get stats)
                     self._update_overlay_state()
-
-                    # Fire god detected event
-                    await self._fire_event(self._on_god_detected_callbacks, god_info)
-
-                    # Swap OBS god image source to the matching funny image
-                    # Pass team so the background matches Chaos/Order side
-                    await self._set_god_image(god_info["name"], team=god_info.get("team"))
-
-                    # Update stream title with god name
-                    await self._update_stream_title(god_info["name"])
 
                 elif self._poll_state == "FOUND":
                     # === UPDATE LIVE STATS ===
@@ -534,6 +602,7 @@ class SmitePlugin:
 
                 self.is_in_match = False
                 self.current_god = None
+                self._god_from_portrait = False  # Reset for next match
                 self.match_players = []
                 self._poll_state = "IDLE"
 
@@ -613,7 +682,9 @@ class SmitePlugin:
     async def _set_god_image(self, god_name, team=None):
         """Swap the OBS image source to the god's funny image, if it exists.
         Also sets the appropriate background based on team side.
-        Fades both sources in smoothly."""
+        Fades both sources in smoothly.
+
+        Implements retry logic: if OBS operations fail, attempts one reconnect + retry cycle."""
         if "obs" not in self.bot.plugins:
             return
 
@@ -649,20 +720,48 @@ class SmitePlugin:
         scene = OBS_GOD_IMAGE_SCENE or None
         group = OBS_GOD_IMAGE_GROUP or None
 
+        # Attempt to set god image with retry logic
+        success = await self._try_set_god_image(
+            obs, image_path, scene, group, team
+        )
+
+        if not success:
+            # Try one reconnect + retry cycle
+            print("[Smite] God portrait update failed, attempting reconnect...")
+            reconnect_success = await obs.reconnect()
+            if reconnect_success:
+                print("[Smite] Reconnect successful, retrying god portrait update...")
+                success = await self._try_set_god_image(
+                    obs, image_path, scene, group, team
+                )
+
+        if not success:
+            print("[Smite] ERROR: God portrait update failed permanently after reconnect attempt. "
+                  "Check OBS connection and scene/source configuration.")
+
+    async def _try_set_god_image(self, obs, image_path, scene, group, team):
+        """Inner method for god image update. Returns True if successful, False otherwise."""
         try:
             # Set opacity to 0 before making visible (so we can fade in)
-            await obs.ensure_color_correction_filter(OBS_SOURCE_GOD_IMAGE)
-            await obs.set_source_filter_value(OBS_SOURCE_GOD_IMAGE, "FadeFilter", {"opacity": 0})
-            await obs.ensure_color_correction_filter(OBS_SOURCE_GOD_BG)
-            await obs.set_source_filter_value(OBS_SOURCE_GOD_BG, "FadeFilter", {"opacity": 0})
+            if not await obs.ensure_color_correction_filter(OBS_SOURCE_GOD_IMAGE):
+                return False
+            if not await obs.set_source_filter_value(OBS_SOURCE_GOD_IMAGE, "FadeFilter", {"opacity": 0}):
+                return False
+            if not await obs.ensure_color_correction_filter(OBS_SOURCE_GOD_BG):
+                return False
+            if not await obs.set_source_filter_value(OBS_SOURCE_GOD_BG, "FadeFilter", {"opacity": 0}):
+                return False
 
             # Set the image file and make source visible
-            await obs.set_image_source(OBS_SOURCE_GOD_IMAGE, str(image_path.resolve()))
-            await obs.set_source_visible(OBS_SOURCE_GOD_IMAGE, True,
-                                          scene=scene, group=group)
+            if not await obs.set_image_source(OBS_SOURCE_GOD_IMAGE, str(image_path.resolve())):
+                return False
+            if not await obs.set_source_visible(OBS_SOURCE_GOD_IMAGE, True,
+                                                scene=scene, group=group):
+                return False
             print(f"[Smite] God image set: {image_path.name}")
         except Exception as e:
             print(f"[Smite] OBS god image error: {e}")
+            return False
 
         # Set the background based on team side
         await self._set_god_background(team=team)
@@ -674,12 +773,16 @@ class SmitePlugin:
             step_delay = fade_duration / steps
             for i in range(steps + 1):
                 opacity = i / steps
-                await obs.set_source_filter_value(
+                success_img = await obs.set_source_filter_value(
                     OBS_SOURCE_GOD_IMAGE, "FadeFilter", {"opacity": int(opacity * 100)})
-                await obs.set_source_filter_value(
+                success_bg = await obs.set_source_filter_value(
                     OBS_SOURCE_GOD_BG, "FadeFilter", {"opacity": int(opacity * 100)})
+                if not success_img or not success_bg:
+                    print("[Smite] Fade operation failed, aborting fade sequence")
+                    return False
                 await asyncio.sleep(step_delay)
             print(f"[Smite] Fade in complete ({fade_duration}s)")
+            return True
         except Exception as e:
             print(f"[Smite] Fade in error: {e}")
             # Fallback: ensure full opacity
@@ -688,6 +791,7 @@ class SmitePlugin:
                 await obs.set_source_filter_value(OBS_SOURCE_GOD_BG, "FadeFilter", {"opacity": 1.0})
             except Exception:
                 pass
+            return False
 
     async def _set_god_background(self, team=None, role=None):
         """Set the god portrait background image based on role or team side.
@@ -725,9 +829,15 @@ class SmitePlugin:
         group = OBS_GOD_IMAGE_GROUP or None
 
         try:
-            await obs.set_image_source(OBS_SOURCE_GOD_BG, str(bg_path.resolve()))
-            await obs.set_source_visible(OBS_SOURCE_GOD_BG, True,
-                                          scene=scene, group=group)
+            success = await obs.set_image_source(OBS_SOURCE_GOD_BG, str(bg_path.resolve()))
+            if not success:
+                print(f"[Smite] OBS background error: set_image_source failed")
+                return
+            success = await obs.set_source_visible(OBS_SOURCE_GOD_BG, True,
+                                                    scene=scene, group=group)
+            if not success:
+                print(f"[Smite] OBS background error: set_source_visible failed")
+                return
             print(f"[Smite] Background set: {bg_file} (key={bg_key})")
         except Exception as e:
             print(f"[Smite] OBS background error: {e}")

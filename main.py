@@ -4,10 +4,15 @@ HatmasBot
 Main entry point. Initializes all systems and starts the bot.
 
 Usage: python main.py
+
+Shutdown:  Type "quit" or "exit" in the console, or press Ctrl+C.
+           All plugins are cleaned up and logs are flushed before exit.
 """
 
 import asyncio
+import signal
 import sys
+import threading
 
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
 
@@ -85,10 +90,8 @@ async def main():
     if smite_plugin:
         async def _kd_match_start(data):
             kd.reset_match_stats()
-            await kd.start_detection()
 
         async def _kd_match_end(data):
-            await kd.stop_detection()
             stats = kd.get_match_stats()
             if stats["kills"] > 0 or stats["deaths"] > 0:
                 print(f"[KillDetector] Match stats: {stats['kills']}K / {stats['deaths']}D")
@@ -96,11 +99,77 @@ async def main():
         smite_plugin.on_match_start(_kd_match_start)
         smite_plugin.on_match_end(_kd_match_end)
 
+        # Hook god portrait detection — the kill detector identifies the god
+        # from the in-game portrait ~2-5 minutes before tracker.gg API responds.
+        async def _on_god_identified(god_name):
+            await smite_plugin.set_god_from_portrait(god_name)
+
+        kd.on_god_identified = _on_god_identified
+
+    # Start kill detector immediately — it scans always and uses
+    # _is_gameplay_screen() to filter, so it works in jungle practice
+    # and real matches alike without waiting for the tracker.gg API.
+    await kd.start_detection()
+
     # Start web server
     await web.start()
 
     print("[HatmasBot] Starting...")
     print()
+
+    # --- Graceful shutdown machinery ---
+    _shutdown_event = asyncio.Event()
+
+    async def _shutdown():
+        """Run full cleanup: plugins → token manager → web server → logs."""
+        print("\n[HatmasBot] Shutting down...")
+        for name, plugin in bot.plugins.items():
+            if hasattr(plugin, "cleanup"):
+                try:
+                    await plugin.cleanup()
+                    print(f"  - {name} cleaned up")
+                except Exception as e:
+                    print(f"  - {name} cleanup error: {e}")
+        await token_mgr.close()
+        await web.stop()
+
+        # Flush all log handlers so nothing is truncated
+        import logging
+        for handler in logging.getLogger("KillDetector").handlers:
+            handler.flush()
+        logging.shutdown()
+
+        print("[HatmasBot] Goodbye.")
+
+    # Console input listener — runs in a background thread so it
+    # doesn't block the asyncio loop.  Typing "quit" or "exit"
+    # triggers the same graceful shutdown as Ctrl+C.
+    def _console_listener():
+        while not _shutdown_event.is_set():
+            try:
+                line = input()
+            except EOFError:
+                break
+            cmd = line.strip().lower()
+            if cmd in ("quit", "exit", "stop", "close"):
+                print("[HatmasBot] Shutdown requested from console")
+                _shutdown_event.set()
+                break
+
+    console_thread = threading.Thread(target=_console_listener, daemon=True)
+    console_thread.start()
+
+    # Handle Ctrl+C via the event loop (works reliably on Windows)
+    def _signal_handler():
+        _shutdown_event.set()
+
+    loop = asyncio.get_event_loop()
+    try:
+        loop.add_signal_handler(signal.SIGINT, _signal_handler)
+    except NotImplementedError:
+        # Windows doesn't support add_signal_handler — fall back to
+        # threading-based signal handler
+        signal.signal(signal.SIGINT, lambda s, f: _shutdown_event.set())
 
     try:
         # Start token manager (validates and refreshes tokens on startup)
@@ -117,22 +186,40 @@ async def main():
         await bot.add_token(_cfg.TWITCH_BROADCASTER_TOKEN, _cfg.TWITCH_BROADCASTER_REFRESH_TOKEN)
         print("[HatmasBot] Broadcaster token added")
 
-        # Start the bot (this blocks)
-        await bot.start()
-    except KeyboardInterrupt:
-        print("\n[HatmasBot] Shutting down...")
+        print()
+        print("Type 'quit' or 'exit' to shut down gracefully.")
+        print()
+
+        # Run the bot and the shutdown watcher concurrently.
+        # When _shutdown_event fires (from console, Ctrl+C, or signal),
+        # the watcher task completes and we cancel the bot.
+        bot_task = asyncio.create_task(bot.start())
+        shutdown_watcher = asyncio.create_task(_shutdown_event.wait())
+
+        done, pending = await asyncio.wait(
+            [bot_task, shutdown_watcher],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        # Cancel whichever is still running
+        for task in pending:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+
     except Exception as e:
         print(f"\n[HatmasBot] Error: {e}")
         import traceback
         traceback.print_exc()
     finally:
-        for name, plugin in bot.plugins.items():
-            if hasattr(plugin, "cleanup"):
-                await plugin.cleanup()
-        await token_mgr.close()
-        await web.stop()
-        print("[HatmasBot] Goodbye.")
+        await _shutdown()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        # Last-resort catch for Ctrl+C during asyncio.run() teardown
+        print("\n[HatmasBot] Force quit.")
