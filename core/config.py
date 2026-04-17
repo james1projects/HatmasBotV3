@@ -11,6 +11,8 @@ from pathlib import Path
 BASE_DIR = Path(__file__).parent.parent
 DATA_DIR = BASE_DIR / "data"
 OVERLAY_DIR = BASE_DIR / "overlays"
+CUSTOM_GOD_ICONS_DIR = BASE_DIR / "Custom God Icons"
+GOD_ICONS_DIR = DATA_DIR / "god_icons"
 DATA_DIR.mkdir(exist_ok=True)
 
 # === TWITCH ===
@@ -36,6 +38,8 @@ TWITCH_BROADCASTER_REFRESH_TOKEN = os.environ.get("TWITCH_BROADCASTER_REFRESH_TO
 TWITCH_BROADCASTER_SCOPES = [
     "channel:manage:broadcast", "channel:manage:predictions",
     "channel:read:subscriptions", "moderator:manage:shoutouts",
+    "channel:manage:redemptions", "channel:read:redemptions",
+    "moderator:read:chatters",
 ]
 
 # === AUTO-SHOUTOUT ===
@@ -148,7 +152,7 @@ GAMBLE_CURRENCY_NAME = "Hats"                # Must match the currency name in M
 GAMBLE_MIN_BET = 10                          # Minimum wager
 GAMBLE_COOLDOWN = 10                         # Seconds between gambles per user
 GAMBLE_JACKPOT_FILE = DATA_DIR / "gamble_jackpot.json"
-GAMBLE_ALERT_MIN_WAGER = 1000               # Min wager to trigger sound + visual alerts (jackpot always triggers)
+GAMBLE_ALERT_MIN_WAGER = 100                # Min wager to trigger sound + visual alerts (jackpot always triggers)
 
 # === KILL/DEATH DETECTION ===
 KILL_DETECT_ENABLED = True               # Enable/disable kill/death detection
@@ -170,6 +174,19 @@ TTS_DISPLAY_SECONDS = 0             # 0 = auto (stays visible until speech ends)
 WEB_HOST = "localhost"
 WEB_PORT = 8069
 
+# === GOD ECONOMY (Stock Market) ===
+ECONOMY_DB_PATH = DATA_DIR / "economy.db"
+ECONOMY_STARTING_PRICE = 100           # Hats per share for new gods
+ECONOMY_PRICE_FLOOR = 10               # Minimum share price
+ECONOMY_TRANSACTION_FEE = 0.0          # No fee — keep it fun
+ECONOMY_POSITION_LIMIT = 0.30          # Max 30% of total hats in one god
+ECONOMY_DIVIDEND_RATE = 0.05           # 5% dividend on god pick
+ECONOMY_KILL_TICK = 0.015              # +1.5% per kill during match
+ECONOMY_DEATH_TICK = -0.02             # -2% per death during match
+ECONOMY_ASSIST_TICK = 0.005            # +0.5% per assist during match
+ECONOMY_FREE_SHARE_COUNT = 1           # Free shares to viewers on match end
+ECONOMY_CURRENCY_NAME = "Hats"         # Currency name (same as gamble)
+
 # === FEATURE TOGGLES ===
 DEFAULT_FEATURES = {
     "song_requests": True, "predictions": True, "snap": True,
@@ -178,6 +195,8 @@ DEFAULT_FEATURES = {
     "auto_title": True, "god_requests": True, "auto_shoutout": True,
     "tts_highlights": True,
     "kill_detection": True,
+    "voicelines": True,
+    "economy": True,
 }
 
 # === MODERATORS ===

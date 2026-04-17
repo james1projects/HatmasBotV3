@@ -39,11 +39,19 @@ PORTRAIT_REGION = (635, 942, 715, 1022)  # (x1, y1, x2, y2)
 # Icon comparison size — all icons and portrait crops are resized to this.
 MATCH_SIZE = (64, 64)
 
-# Minimum correlation to accept a match.
+# Minimum correlation to accept a match (absolute threshold).
 # 0.90+ = very high confidence (same god for sure)
 # 0.80-0.90 = likely correct but verify
 # Below 0.80 = probably wrong (different lighting, skin, overlay, etc.)
 MIN_CONFIDENCE = 0.80
+
+# Margin-based acceptance: if absolute score is below MIN_CONFIDENCE but
+# above MIN_CONFIDENCE_MARGIN and the gap to the second-best match exceeds
+# MARGIN_GAP, accept anyway.  This handles gods whose color histograms
+# don't correlate as strongly (e.g. Ymir's ice-blue palette scores ~0.73
+# but with a 0.47 gap to the runner-up — clearly correct).
+MIN_CONFIDENCE_MARGIN = 0.60   # Floor for margin-based acceptance
+MARGIN_GAP = 0.20              # Required gap between #1 and #2
 
 # Number of histogram bins per channel for comparison.
 HIST_BINS = 16
@@ -137,18 +145,30 @@ class GodMatcher:
         # Compute histogram for the portrait
         portrait_hist = self._compute_hist(portrait_cv)
 
-        # Compare against all reference icons
+        # Compare against all reference icons — track top 2 for margin check
         best_name = None
         best_score = -1.0
+        second_score = -1.0
 
         for god_name, icon_hist in self._icon_hists.items():
             score = cv2.compareHist(portrait_hist, icon_hist, cv2.HISTCMP_CORREL)
             if score > best_score:
+                second_score = best_score
                 best_score = score
                 best_name = god_name
+            elif score > second_score:
+                second_score = score
 
+        # Accept if above absolute threshold
         if best_score >= MIN_CONFIDENCE:
             return best_name, best_score
+
+        # Accept if above margin floor AND gap to runner-up is large enough
+        # (handles gods with lower histogram correlation like Ymir's ice palette)
+        if (best_score >= MIN_CONFIDENCE_MARGIN
+                and (best_score - second_score) >= MARGIN_GAP):
+            return best_name, best_score
+
         return None, best_score
 
     def identify_top_n(self, screenshot: Image.Image, n=3) -> list[tuple[str, float]]:

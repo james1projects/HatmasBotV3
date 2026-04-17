@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Hatmas Market — Match End Report</title>
+<link rel="stylesheet" href="hatmas_theme.css">
+<style>
+  body {
+    background: transparent;
+    overflow: hidden;
+    width: 420px;
+    height: 400px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .report {
+    width: 380px;
+    background: var(--hm-bg);
+    border: 1px solid var(--hm-border);
+    border-radius: 10px;
+    overflow: hidden;
+    opacity: 0;
+    transform: translateY(15px);
+    animation: enter 0.4s ease-out 0.3s forwards;
+  }
+
+  @keyframes enter {
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Result header */
+  .result {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    position: relative;
+  }
+
+  .result.win { border-bottom: 1px solid var(--hm-green-bg); }
+  .result.loss { border-bottom: 1px solid var(--hm-red-bg); }
+
+  .god-img {
+    width: 44px;
+    height: 44px;
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--hm-icon-bg);
+    flex-shrink: 0;
+  }
+
+  .god-img img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .result-info { flex: 1; }
+
+  .result-tag {
+    font-family: 'BigNoodleTitling', 'Poppins', sans-serif;
+    font-weight: normal;
+    font-size: 20px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  .win .result-tag { color: var(--hm-green); }
+  .loss .result-tag { color: var(--hm-red); }
+
+  .result-sub {
+    font-family: 'Poppins', sans-serif;
+    font-size: 12px;
+    color: var(--hm-text-muted);
+  }
+
+  .kda-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .kda-big {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 18px;
+    color: var(--hm-text);
+    text-align: right;
+  }
+
+  .streak-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 11px;
+    padding: 3px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .streak-badge.win {
+    background: var(--hm-green-bg);
+    color: var(--hm-green);
+  }
+
+  .streak-badge.loss {
+    background: var(--hm-red-bg);
+    color: var(--hm-red);
+  }
+
+  /* Price movement */
+  .movement {
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .prices {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .old-price {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 18px;
+    color: var(--hm-text-muted);
+    text-decoration: line-through;
+  }
+
+  .arrow {
+    color: var(--hm-border-subtle);
+    font-size: 14px;
+  }
+
+  .new-price {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 24px;
+  }
+
+  .new-price.up { color: var(--hm-green); }
+  .new-price.down { color: var(--hm-red); }
+
+  .change-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 16px;
+    padding: 3px 10px;
+    border-radius: 5px;
+  }
+
+  .change-badge.up {
+    color: var(--hm-green);
+    background: var(--hm-green-bg);
+  }
+
+  .change-badge.down {
+    color: var(--hm-red);
+    background: var(--hm-red-bg);
+  }
+
+  /* Share distribution */
+  .shares {
+    margin: 0 16px 12px;
+    padding: 9px 12px;
+    background: var(--hm-separator);
+    border: 1px solid var(--hm-border-subtle);
+    border-radius: 6px;
+    font-family: 'Poppins', sans-serif;
+    font-size: 12px;
+    color: var(--hm-text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .shares strong {
+    color: var(--hm-text);
+  }
+
+  /* Session movers */
+  .movers {
+    padding: 0 16px 12px;
+    display: flex;
+    gap: 6px;
+  }
+
+  .mover {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--hm-separator);
+    border: 1px solid var(--hm-border-subtle);
+    border-radius: 5px;
+    padding: 5px 8px;
+  }
+
+  .mover-icon {
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    overflow: hidden;
+    background: var(--hm-icon-bg);
+  }
+
+  .mover-icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .mover-name {
+    font-family: 'Poppins', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--hm-text-secondary);
+    flex: 1;
+  }
+
+  .mover-pct {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  .mover-pct.up { color: var(--hm-green); }
+  .mover-pct.down { color: var(--hm-red); }
+
+  /* Footer */
+  .foot {
+    padding: 7px 16px;
+    border-top: 1px solid var(--hm-border-subtle);
+    font-family: 'BigNoodleTitling', 'Poppins', sans-serif;
+    font-size: 13px;
+    color: var(--hm-text-muted);
+    display: flex;
+    justify-content: space-between;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+</style>
+</head>
+<body>
+
+<div class="report hm-panel" id="report">
+  <div class="result" id="result">
+    <div class="god-img">
+      <img id="godIcon" src="" alt="">
+    </div>
+    <div class="result-info">
+      <div class="result-tag" id="resultTag">—</div>
+      <div class="result-sub" id="resultSub">—</div>
+    </div>
+    <div class="kda-container">
+      <div class="kda-big" id="kdaBig">0 / 0 / 0</div>
+      <div class="streak-badge" id="streakBadge" style="display:none;"></div>
+    </div>
+  </div>
+
+  <div class="movement">
+    <div class="prices">
+      <span class="old-price" id="oldPrice">—</span>
+      <span class="arrow">→</span>
+      <span class="new-price" id="newPrice">—</span>
+    </div>
+    <div class="change-badge" id="changeBadge">—</div>
+  </div>
+
+  <div class="shares" id="sharesSection">
+    <span id="sharesText"></span>
+  </div>
+
+  <div class="movers" id="moversSection"></div>
+
+  <div class="foot">
+    <span>Hatmas Market</span>
+    <span>!portfolio · !price · !buy · !sell</span>
+  </div>
+</div>
+
+<script src="overlay_client.js"></script>
+<script>
+const CUSTOM_ICON_PATH = '/icons/custom/';
+const DEFAULT_ICON_PATH = '/icons/gods/';
+
+function iconUrl(name) {
+  return CUSTOM_ICON_PATH + name + '.png';
+}
+function fallbackUrl(name) {
+  return DEFAULT_ICON_PATH + name.toLowerCase().replace(/\s+/g, '-') + '.png';
+}
+
+function onShow(data) {
+  if (!data || !data.god) return;
+
+  const isWin = data.outcome === 'win';
+  const resultEl = document.getElementById('result');
+  resultEl.className = 'result ' + (isWin ? 'win' : 'loss');
+
+  // God icon
+  const icon = document.getElementById('godIcon');
+  icon.src = iconUrl(data.god);
+  icon.onerror = () => { icon.src = fallbackUrl(data.god); };
+
+  // Result tag & subtitle
+  document.getElementById('resultTag').textContent = isWin ? 'Victory' : 'Defeat';
+  document.getElementById('resultSub').textContent = `${data.god} : ${data.mode || 'Conquest'}`;
+
+  // KDA — data.kda is [kills, deaths, assists] array
+  const kda = data.kda || [0, 0, 0];
+  const k = kda[0] || 0;
+  const d = kda[1] || 0;
+  const a = kda[2] || 0;
+  document.getElementById('kdaBig').textContent = `${k} / ${d} / ${a}`;
+
+  // Streak badge
+  const streakEl = document.getElementById('streakBadge');
+  if (data.streak && Math.abs(data.streak) >= 2) {
+    const streakType = data.streak > 0 ? 'win' : 'loss';
+    streakEl.textContent = (data.streak > 0 ? 'W' : 'L') + Math.abs(data.streak);
+    streakEl.className = 'streak-badge ' + streakType;
+    streakEl.style.display = '';
+  } else {
+    streakEl.style.display = 'none';
+  }
+
+  // Price movement
+  const oldPrice = data.old_price || 0;
+  const newPrice = data.new_price || 0;
+  const changePct = data.change_pct || 0;
+  const priceUp = changePct >= 0;
+
+  document.getElementById('oldPrice').innerHTML = HatmasOverlay.hatPrice(oldPrice, {label: false});
+  const newPriceEl = document.getElementById('newPrice');
+  newPriceEl.innerHTML = HatmasOverlay.hatPrice(newPrice, {label: true});
+  newPriceEl.className = 'new-price ' + (priceUp ? 'up' : 'down');
+
+  const badgeEl = document.getElementById('changeBadge');
+  badgeEl.textContent = (priceUp ? '+' : '') + changePct.toFixed(1) + '%';
+  badgeEl.className = 'change-badge ' + (priceUp ? 'up' : 'down');
+
+  // Free shares
+  const shares = data.free_shares || {};
+  const sharesText = document.getElementById('sharesText');
+  if (shares.shares_each) {
+    sharesText.innerHTML = `${shares.shares_each} free share${shares.shares_each > 1 ? 's' : ''} to ${shares.viewer_count || 0} viewers worth ${HatmasOverlay.hatPrice(newPrice)}`;
+  } else {
+    sharesText.textContent = '';
+  }
+
+  // Session movers (top gainers/losers)
+  const moversEl = document.getElementById('moversSection');
+  if (data.movers && data.movers.length > 0) {
+    moversEl.innerHTML = data.movers.slice(0, 3).map(m => {
+      const up = m.change_pct >= 0;
+      return `
+        <div class="mover">
+          <div class="mover-icon"><img src="${iconUrl(m.name)}" onerror="this.src='${fallbackUrl(m.name)}'"></div>
+          <span class="mover-name">${m.name.length > 6 ? m.name.slice(0, 5) : m.name}</span>
+          <span class="mover-pct ${up ? 'up' : 'down'}">${up ? '+' : ''}${m.change_pct.toFixed(1)}%</span>
+        </div>`;
+    }).join('');
+  } else {
+    moversEl.innerHTML = '';
+  }
+}
+
+function onHide() {
+  // Handled by overlay_client.js visibility
+}
+
+HatmasOverlay.connect('economy_match_end', { onShow, onHide });
+</script>
+</body>
+</html>

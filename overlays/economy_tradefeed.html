@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Hatmas Market — Trade Feed</title>
+<link rel="stylesheet" href="hatmas_theme.css">
+<style>
+  body {
+    background: transparent;
+    overflow: hidden;
+    width: 320px;
+    height: 340px;
+  }
+
+  .feed {
+    width: 300px;
+    background: var(--hm-bg);
+    border: 1px solid var(--hm-border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .feed-header {
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--hm-border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .feed-title {
+    font-family: 'BigNoodleTitling', 'Poppins', sans-serif;
+    font-size: 17px;
+    color: var(--hm-text-secondary);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  .feed-list {
+    padding: 4px 0;
+    max-height: 260px;
+    overflow: hidden;
+  }
+
+  .trade {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 14px;
+    opacity: 0;
+    transform: translateY(-8px);
+    animation: trade-enter 0.3s ease-out forwards;
+  }
+
+  @keyframes trade-enter {
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .trade-icon {
+    width: 24px;
+    height: 24px;
+    border-radius: 5px;
+    overflow: hidden;
+    background: var(--hm-icon-bg);
+    flex-shrink: 0;
+  }
+
+  .trade-icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .trade-text {
+    flex: 1;
+    font-family: 'Poppins', sans-serif;
+    font-size: 11px;
+    color: var(--hm-text-secondary);
+    line-height: 1.3;
+  }
+
+  .trade-text .user {
+    color: var(--hm-text);
+    font-weight: 600;
+  }
+
+  .trade-text .action-buy {
+    color: var(--hm-green);
+    font-weight: 600;
+  }
+
+  .trade-text .action-sell {
+    color: var(--hm-red);
+    font-weight: 600;
+  }
+
+  .trade-text .god {
+    color: var(--hm-text);
+    font-weight: 600;
+  }
+
+  .trade-text .amount {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    color: var(--hm-text-secondary);
+  }
+
+  .trade-time {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: var(--hm-text-muted);
+    flex-shrink: 0;
+  }
+
+  /* Divider between trades */
+  .trade + .trade {
+    border-top: 1px solid var(--hm-separator);
+  }
+
+  /* Special trade types */
+  .trade.dividend {
+    background: var(--hm-bg-subtle);
+  }
+
+  .trade-text .dividend-label {
+    color: var(--hm-gold);
+    font-weight: 600;
+  }
+
+  .trade.free-share {
+    background: var(--hm-blue-bg);
+  }
+
+  .trade-text .free-label {
+    color: var(--hm-blue);
+    font-weight: 600;
+  }
+
+</style>
+</head>
+<body>
+
+<div class="feed hm-panel" id="feed">
+  <div class="feed-header">
+    <span class="feed-title">Trade Feed</span>
+  </div>
+
+  <div class="feed-list" id="feedList"></div>
+</div>
+
+<script src="overlay_client.js"></script>
+<script>
+const CUSTOM_ICON_PATH = '/icons/custom/';
+const DEFAULT_ICON_PATH = '/icons/gods/';
+const MAX_TRADES = 8;
+
+function iconUrl(name) {
+  return CUSTOM_ICON_PATH + name + '.png';
+}
+function fallbackUrl(name) {
+  return DEFAULT_ICON_PATH + name.toLowerCase().replace(/\s+/g, '-') + '.png';
+}
+
+function formatAmount(v) {
+  return HatmasOverlay.hatPrice(v, {compact: true, size: 'sm'});
+}
+
+function renderTrade(t) {
+  const god = t.god || t.god_name || 'Unknown';
+  const icon = '<div class="trade-icon"><img src="' + iconUrl(god) + '" onerror="this.src=\'' + fallbackUrl(god) + '\'"></div>';
+
+  let text = '';
+  let cls = 'trade';
+
+  if (t.type === 'buy') {
+    const n = Math.round(t.shares || 1);
+    text = '<span class="user">' + t.username + '</span> <span class="action-buy">bought</span> <span class="amount">' + n + (n === 1 ? ' share' : ' shares') + '</span> of <span class="god">' + god + '</span>';
+  } else if (t.type === 'sell') {
+    const n = Math.round(t.shares || 1);
+    text = '<span class="user">' + t.username + '</span> <span class="action-sell">sold</span> <span class="amount">' + n + (n === 1 ? ' share' : ' shares') + '</span> of <span class="god">' + god + '</span>';
+  } else if (t.type === 'dividend') {
+    cls += ' dividend';
+    text = '<span class="dividend-label">Dividend</span> — <span class="god">' + god + '</span> paid <span class="amount">' + formatAmount(t.total_hats || t.amount || 0) + '</span> to <span class="amount">' + (t.holders || 0) + '</span> holders';
+  } else if (t.type === 'free') {
+    cls += ' free-share';
+    text = '<span class="free-label">Free share</span> — <span class="god">' + god + '</span> distributed to <span class="amount">' + (t.viewers || 0) + '</span> viewers';
+  }
+
+  return '<div class="' + cls + '">' + icon + '<div class="trade-text">' + text + '</div><span class="trade-time">now</span></div>';
+}
+
+function addTrade(t) {
+  const feedEl = document.getElementById('feedList');
+  feedEl.insertAdjacentHTML('afterbegin', renderTrade(t));
+
+  // Remove oldest if more than max visible
+  while (feedEl.children.length > MAX_TRADES) {
+    feedEl.removeChild(feedEl.lastChild);
+  }
+}
+
+function onShow(data) {
+  if (!data) return;
+  document.getElementById('feedList').innerHTML = '';
+
+  // If initial data has a trade, render it
+  if (data.type) {
+    addTrade(data);
+  }
+}
+
+function onUpdate(data) {
+  if (!data || !data.type) return;
+  addTrade(data);
+}
+
+function onHide() {
+  // Handled by overlay_client.js
+}
+
+HatmasOverlay.connect('economy_tradefeed', { onShow, onUpdate, onHide });
+</script>
+</body>
+</html>

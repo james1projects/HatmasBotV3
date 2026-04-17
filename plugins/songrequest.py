@@ -1079,9 +1079,6 @@ class SongRequestPlugin:
                         self._spotify_connected = False
                         self._spotify_notified_disconnect = True
                         print("[SongRequest] Spotify connection lost")
-                        await self.bot.send_chat(
-                            "Spotify connection lost. Song requests paused."
-                        )
                     # Backoff: poll slower when disconnected
                     sleep_time = 15 if self._spotify_errors >= 3 else 3
                     # Still check for YouTube songs even without Spotify
@@ -1095,7 +1092,6 @@ class SongRequestPlugin:
                     self._spotify_connected = True
                     self._spotify_notified_disconnect = False
                     print("[SongRequest] Spotify connection restored")
-                    await self.bot.send_chat("Spotify reconnected. Song requests are back!")
                 self._spotify_errors = 0
 
                 if not playback.get("item"):

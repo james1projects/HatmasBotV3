@@ -130,25 +130,26 @@
 </head>
 <body>
 
-<div id="gamble-popup">
-  <div class="popup-label" id="popup-label"></div>
-  <div class="popup-player" id="popup-player"></div>
-  <div class="popup-details">
-    <div class="popup-roll" id="popup-roll"></div>
-    <div class="popup-amount" id="popup-amount">
-      <span id="popup-amount-label">won</span>
-      <span class="value" id="popup-amount-value"></span>
+<div id="overlay-root">
+  <div id="gamble-popup">
+    <div class="popup-label" id="popup-label"></div>
+    <div class="popup-player" id="popup-player"></div>
+    <div class="popup-details">
+      <div class="popup-roll" id="popup-roll"></div>
+      <div class="popup-amount" id="popup-amount">
+        <span id="popup-amount-label">won</span>
+        <span class="value" id="popup-amount-value"></span>
+      </div>
     </div>
   </div>
 </div>
 
+<script src="/overlays/overlay_client.js"></script>
 <script>
 // ============================================================
-// HatmasBot Sound & Gamble Alerts
+// HatmasBot Sound & Gamble Alerts — WebSocket driven
 // ============================================================
 
-const API_BASE = 'http://localhost:8069';
-const POLL_INTERVAL = 500;
 const POPUP_SHOW_DURATION = 5000;
 const ROLL_ANIMATION_MS = 1500;
 const POPUP_FADE_TIME = 400;
@@ -317,26 +318,21 @@ function showGamblePopup(result) {
   const rollEl = document.getElementById('popup-roll');
   const amountDiv = document.getElementById('popup-amount');
 
-  // Clear pending timers
   if (popupTimeout) { clearTimeout(popupTimeout); popupTimeout = null; }
   if (rollInterval) { clearInterval(rollInterval); rollInterval = null; }
 
-  // Reset
   popup.className = '';
   popup.id = 'gamble-popup';
   label.className = 'popup-label';
   amountDiv.className = 'popup-amount';
 
-  // Neutral rolling theme
   popup.classList.add('rolling');
   player.textContent = result.player + ' is rolling...';
   rollEl.textContent = Math.floor(Math.random() * 100) + 1;
   label.textContent = '';
 
-  // Show popup
   requestAnimationFrame(() => { popup.classList.add('visible'); });
 
-  // Dice animation
   const startTime = Date.now();
   let tickCount = 0;
 
@@ -366,11 +362,9 @@ function revealResult(result) {
 
   const type = result.type;
 
-  // Switch theme
   popup.classList.remove('rolling');
   popup.classList.add(type);
 
-  // Show real values
   rollEl.textContent = result.roll;
   player.textContent = result.player;
   label.textContent = LABELS[type] || type.toUpperCase();
@@ -385,11 +379,9 @@ function revealResult(result) {
   }
   amountDiv.classList.add('show');
 
-  // Play result sound
   const fn = SOUND_MAP[type];
   if (fn) fn();
 
-  // Auto-hide, then next in queue
   popupTimeout = setTimeout(() => {
     popup.classList.remove('visible');
     popup.classList.add('hiding');
@@ -401,24 +393,32 @@ function revealResult(result) {
 }
 
 // ============================================================
-// POLLING — drains the server-side queue each tick
+// OVERLAY MANAGER CONNECTION
 // ============================================================
 
-async function poll() {
-  try {
-    const resp = await fetch(API_BASE + '/api/gamble_queue');
-    const results = await resp.json();
-    // Enqueue all new results locally
-    for (const r of results) {
-      enqueueResult(r);
-    }
-  } catch (e) {
-    // Server not running
-  }
-}
+// Note: This overlay manages its own show/hide animations internally
+// because of the dice roll animation and queuing system.
+// The overlay manager's show/hide just delivers gamble results.
+// We override the default container show/hide behavior.
 
-setInterval(poll, POLL_INTERVAL);
-poll();
+HatmasOverlay.connect('sound_alerts', {
+  container: '#overlay-root',
+  onShow(data) {
+    // gamble_result event — data is the result object
+    if (data && data.player) {
+      enqueueResult(data);
+    }
+  },
+  onUpdate(data) {
+    // Additional gamble results while visible
+    if (data && data.player) {
+      enqueueResult(data);
+    }
+  },
+  onHide() {
+    // Auto-hide from overlay manager — we handle our own hide timing
+  }
+});
 
 // Auto-resume audio context
 window.addEventListener('load', () => {

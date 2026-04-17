@@ -89,13 +89,17 @@ OVERLAY_DARK_THRESHOLD = 0.65   # Dark ratio above this → overlay is open
 # During gameplay the bottom HUD (ability bar, health/mana) is always visible
 # with high color variance from the ability icons.  On non-gameplay screens
 # (god select, post-match results, lobby) this area is dark and flat.
-# We check TWO regions: the ability bar and the KDA bar.  The ability bar
-# can dim/disappear when dead, but the KDA bar stays visible during death.
+# We check TWO regions: the ability bar and the god portrait area.
+# The ability bar can dim/disappear when dead, but the god portrait/health
+# bar area stays visible during death.
 # If EITHER region passes, we consider it gameplay.
+# NOTE: These regions are SEPARATE from KDA_REGION — don't change them
+# when moving the KDA HUD element.
 HUD_CHECK_REGION = (600, 1000, 780, 1080)  # Bottom-center ability bar area
 HUD_MIN_STD = 25       # Below this → no ability bar → not gameplay
 HUD_MIN_MEAN = 40      # Below this → too dark → not gameplay
-KDA_CHECK_MIN_STD = 30  # KDA bar visible if std above this
+GAMEPLAY_CHECK_REGION = (600, 900, 760, 1080)  # God portrait + health/mana bar area (center-bottom)
+GAMEPLAY_CHECK_MIN_STD = 25  # This area is colorful during gameplay, flat on menus
 NON_GAMEPLAY_FRAMES = 3  # Consecutive non-gameplay frames before resetting
 
 # Screenshot interval
@@ -165,16 +169,23 @@ class KillDeathDetector:
         self.match_kill_types = {}  # {"double_kill": 2, "triple_kill": 1, ...}
 
         # Callbacks — set by the bot/webserver during integration
-        self.on_kill = None         # async def on_kill(kill_type: str)
-        self.on_death = None        # async def on_death()
+        self.on_kill = None         # async def on_kill(kill_type: str, count: int)
+        self.on_death = None        # async def on_death(count: int)
         self.on_multikill = None    # async def on_multikill(kill_type: str)
-        self.on_assist = None       # async def on_assist()
+        self.on_assist = None       # async def on_assist(count: int)
         self.on_god_identified = None  # async def on_god_identified(god_name: str)
+        self.on_gameplay_ended = None  # async def on_gameplay_ended() — non-gameplay detected
 
         # God portrait matcher — identifies the god from the in-game portrait
         # before tracker.gg API responds (which has a 2-5 min delay).
         self._god_matcher = None
         self._god_identified = False  # True once we've matched the god this match
+
+        # God identification validation — require multiple consecutive frames
+        # matching the SAME god before accepting, to prevent lobby false positives.
+        self._god_confirm_name = None   # Candidate god name being validated
+        self._god_confirm_count = 0     # Consecutive frames matching this candidate
+        self._GOD_CONFIRM_REQUIRED = 3  # Must match 3 frames in a row
 
         # Template-based digit matcher — primary digit recognition method.
         # Falls back to Tesseract OCR when templates don't match.
@@ -333,25 +344,55 @@ class KillDeathDetector:
         Checks two regions:
           1. Ability bar (bottom-center) — bright and colorful during gameplay,
              but can dim when dead.
-          2. KDA bar — always visible during gameplay, even when dead.
+          2. God portrait / health+mana bar area — always visible during
+             gameplay, even when dead.
 
         If EITHER region passes, we consider it gameplay.  On non-gameplay
         screens (god select, results, lobby) both regions are dark/flat.
+
+        NOTE: These regions are fixed screen positions independent of
+        where the KDA HUD element was moved to.
         """
+        h, w = img_array.shape[:2]
+
+        # Diagnostic: log image dimensions + region values for first few fails
+        if not hasattr(self, "_gameplay_diag_count"):
+            self._gameplay_diag_count = 0
+
         # Check 1: ability bar
         x1, y1, x2, y2 = HUD_CHECK_REGION
-        region = img_array[y1:y2, x1:x2]
-        hud_std = np.std(region)
-        hud_mean = np.mean(region)
+        if y2 <= h and x2 <= w:
+            region = img_array[y1:y2, x1:x2]
+            hud_std = np.std(region)
+            hud_mean = np.mean(region)
+        else:
+            hud_std = 0.0
+            hud_mean = 0.0
+
         if hud_std >= HUD_MIN_STD and hud_mean >= HUD_MIN_MEAN:
+            self._gameplay_diag_count = 0
             return True
 
-        # Check 2: KDA bar — catches death screens where ability bar dims
-        x1, y1, x2, y2 = KDA_REGION
-        kda_region = img_array[y1:y2, x1:x2]
-        kda_std = np.std(kda_region)
-        if kda_std >= KDA_CHECK_MIN_STD:
+        # Check 2: god portrait + health/mana area (center-bottom HUD)
+        x1, y1, x2, y2 = GAMEPLAY_CHECK_REGION
+        if y2 <= h and x2 <= w:
+            gp_region = img_array[y1:y2, x1:x2]
+            gp_std = np.std(gp_region)
+        else:
+            gp_std = 0.0
+
+        if gp_std >= GAMEPLAY_CHECK_MIN_STD:
+            self._gameplay_diag_count = 0
             return True
+
+        # Log diagnostics for first 5 failures to help debug
+        if self._gameplay_diag_count < 5:
+            _log(f"[KillDetector] Gameplay check FAILED — "
+                 f"img={w}x{h}, "
+                 f"ability_bar(std={hud_std:.1f}, mean={hud_mean:.1f}, "
+                 f"need std>={HUD_MIN_STD} & mean>={HUD_MIN_MEAN}), "
+                 f"portrait(std={gp_std:.1f}, need>={GAMEPLAY_CHECK_MIN_STD})")
+            self._gameplay_diag_count += 1
 
         return False
 
@@ -733,6 +774,8 @@ class KillDeathDetector:
         self._recent_kill_times = []
         self._non_gameplay_count = 0
         self._god_identified = False  # Reset for new match god detection
+        self._god_confirm_name = None  # Reset god validation buffer
+        self._god_confirm_count = 0
         self._last_digit_crops = None
         self._startup_reads = []  # Clear startup validation buffer
         self._startup_validated = False
@@ -864,6 +907,13 @@ class KillDeathDetector:
                             f"screen detected). Final KDA: "
                             f"{prev[0]}/{prev[1]}/{prev[2]}. Resetting."
                         )
+                        # Notify smite plugin BEFORE resetting stats, so
+                        # match stats are still available in callbacks.
+                        if self.on_gameplay_ended:
+                            try:
+                                await self.on_gameplay_ended()
+                            except Exception as e:
+                                _log(f"[KillDetector] on_gameplay_ended error: {e}")
                         self.reset_match_stats()
                     await asyncio.sleep(SCREENSHOT_INTERVAL)
                     continue
@@ -872,19 +922,44 @@ class KillDeathDetector:
 
                 # --- GOD PORTRAIT IDENTIFICATION ---
                 # Try to identify the god from the in-game portrait each frame
-                # until we get a match.  This fires ~2-5 minutes before the
-                # tracker.gg API returns god data.
+                # until we get a confirmed match.  Requires the SAME god to be
+                # identified on multiple consecutive frames to prevent lobby
+                # false positives (lobby screenshots can occasionally pass the
+                # gameplay check and produce a spurious match).
                 if (not self._god_identified
                         and self._god_matcher
                         and self._god_matcher.is_loaded):
                     try:
                         god_name, confidence = self._god_matcher.identify(img)
                         if god_name:
-                            self._god_identified = True
-                            _log(f"[KillDetector] God identified from portrait: "
-                                  f"{god_name} (confidence: {confidence:.3f})")
-                            if self.on_god_identified:
-                                await self.on_god_identified(god_name)
+                            # Validate: same god must match N frames in a row
+                            if god_name == self._god_confirm_name:
+                                self._god_confirm_count += 1
+                            else:
+                                self._god_confirm_name = god_name
+                                self._god_confirm_count = 1
+
+                            if self._god_confirm_count >= self._GOD_CONFIRM_REQUIRED:
+                                self._god_identified = True
+                                _log(f"[KillDetector] God identified from portrait: "
+                                      f"{god_name} (confidence: {confidence:.3f}, "
+                                      f"confirmed over {self._god_confirm_count} frames)")
+                                if self.on_god_identified:
+                                    await self.on_god_identified(god_name)
+                            elif self._debug:
+                                _log(f"[KillDetector] God candidate: {god_name} "
+                                      f"({confidence:.3f}) — confirming "
+                                      f"{self._god_confirm_count}/"
+                                      f"{self._GOD_CONFIRM_REQUIRED}")
+                        else:
+                            # No match — reset confirmation buffer
+                            self._god_confirm_name = None
+                            self._god_confirm_count = 0
+                            if self._debug:
+                                top = self._god_matcher.identify_top_n(img, n=1)
+                                if top:
+                                    _log(f"[KillDetector] God match below threshold: "
+                                          f"best={top[0][0]} ({top[0][1]:.3f})")
                     except Exception as e:
                         if self._debug:
                             _log(f"[KillDetector] God match error: {e}")
@@ -1075,14 +1150,15 @@ class KillDeathDetector:
                                 img.save(str(self._debug_dir /
                                     f"event_kill_{self.match_kills}_f{_frame_count}.png"))
 
-                            # Fire callback
+                            # Fire callbacks
                             if kill_type in ("double_kill", "triple_kill",
                                              "quadra_kill", "penta_kill"):
                                 if self.on_multikill:
                                     asyncio.create_task(self.on_multikill(kill_type))
-                            else:
-                                if self.on_kill:
-                                    asyncio.create_task(self.on_kill(kill_type))
+                            # Always fire on_kill with the count so economy
+                            # and other consumers track every kill
+                            if self.on_kill:
+                                asyncio.create_task(self.on_kill(kill_type, new_kills))
 
                         # Death increase
                         if cur_d > prev_d:
@@ -1100,7 +1176,7 @@ class KillDeathDetector:
                                     f"event_death_{self.match_deaths}_f{_frame_count}.png"))
 
                             if self.on_death:
-                                asyncio.create_task(self.on_death())
+                                asyncio.create_task(self.on_death(new_deaths))
 
                         # Assist increase
                         if cur_a > prev_a:
@@ -1111,7 +1187,7 @@ class KillDeathDetector:
                                 f"(+{new_assists}, total={self.match_assists})"
                             )
                             if self.on_assist:
-                                asyncio.create_task(self.on_assist())
+                                asyncio.create_task(self.on_assist(new_assists))
 
                         # Chat announcements
                         if self._announce_chat and self.bot:

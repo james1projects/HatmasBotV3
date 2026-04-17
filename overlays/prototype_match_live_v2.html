@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Hatmas Market — Live Match v2</title>
+<link rel="stylesheet" href="hatmas_theme.css">
+<style>
+  body {
+    background: transparent;
+    overflow: hidden;
+    width: 320px;
+    height: 280px;
+  }
+
+  .panel {
+    width: 300px;
+    background: var(--hm-bg);
+    border: 1px solid var(--hm-border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  /* Header */
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--hm-border-subtle);
+  }
+
+  .god-img {
+    width: 38px;
+    height: 38px;
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--hm-icon-bg);
+    flex-shrink: 0;
+  }
+
+  .god-img img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .god-info {
+    flex: 1;
+  }
+
+  .god-name {
+    font-family: 'BigNoodleTitling', 'Poppins', sans-serif;
+    font-weight: normal;
+    font-size: 20px;
+    color: var(--hm-text);
+    line-height: 1.1;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .match-type {
+    font-family: 'Poppins', sans-serif;
+    font-size: 11px;
+    color: var(--hm-text-muted);
+  }
+
+  .live-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--hm-red);
+    animation: pulse 2s infinite;
+    flex-shrink: 0;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  /* Price area */
+  .price-area {
+    padding: 12px 14px 8px;
+  }
+
+  .price-row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+
+  .big-price {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 30px;
+    color: var(--hm-text);
+    line-height: 1;
+  }
+
+  .pct {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 15px;
+  }
+
+  .pct.up { color: var(--hm-green); }
+  .pct.down { color: var(--hm-red); }
+
+  .open-label {
+    font-family: 'Poppins', sans-serif;
+    font-size: 11px;
+    color: var(--hm-text-muted);
+    margin-top: 3px;
+  }
+
+  /* Chart */
+  .chart {
+    width: 100%;
+    height: 60px;
+    padding: 4px 14px;
+  }
+
+  .chart canvas {
+    width: 100%;
+    height: 100%;
+  }
+
+  /* Footer */
+  .footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 14px;
+    border-top: 1px solid var(--hm-border-subtle);
+  }
+
+  .kda {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 14px;
+    letter-spacing: 0.5px;
+  }
+
+  .kda .k { color: var(--hm-green); }
+  .kda .d { color: var(--hm-red); }
+  .kda .a { color: var(--hm-blue); }
+  .kda .sep { color: var(--hm-text-muted); }
+
+  .trade-status {
+    font-family: 'BigNoodleTitling', 'Poppins', sans-serif;
+    font-size: 12px;
+    font-weight: normal;
+    color: var(--hm-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    text-align: right;
+    line-height: 1.2;
+  }
+
+  .trade-status-hint {
+    font-family: 'Poppins', sans-serif;
+    font-size: 9px;
+    color: var(--hm-text-muted);
+    text-transform: none;
+    letter-spacing: 0;
+    margin-top: 2px;
+  }
+
+  /* Flash effects */
+  .flash {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    pointer-events: none;
+    border-radius: 10px;
+  }
+
+  .flash.kill { background: var(--hm-green-bg); }
+  .flash.death { background: var(--hm-red-bg); }
+
+  .flash.active {
+    animation: flash 0.5s ease-out;
+  }
+
+  @keyframes flash {
+    0% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  .panel { position: relative; }
+
+</style>
+</head>
+<body>
+
+<div class="panel hm-panel">
+  <div class="flash kill" id="killFlash"></div>
+  <div class="flash death" id="deathFlash"></div>
+
+  <div class="header">
+    <div class="god-img hm-god-icon">
+      <img src="../Custom God Icons/Ymir.png" onerror="this.src='../data/god_icons/ymir.png'">
+    </div>
+    <div class="god-info">
+      <div class="god-name hm-title">Ymir</div>
+      <div class="match-type">Conquest</div>
+    </div>
+    <div class="live-dot"></div>
+  </div>
+
+  <div class="price-area">
+    <div class="price-row">
+      <span class="big-price hm-mono" id="price">287</span>
+      <span class="pct up" id="pct">+2.5%</span>
+    </div>
+    <div class="open-label">open <span id="openVal" class="hm-mono">280</span></div>
+  </div>
+
+  <div class="chart">
+    <canvas id="chart"></canvas>
+  </div>
+
+  <div class="footer">
+    <div class="kda hm-mono">
+      <span class="k hm-positive" id="k">3</span><span class="sep">/</span><span class="d hm-negative" id="d">1</span><span class="sep">/</span><span class="a" id="a">4</span>
+    </div>
+    <div>
+      <div class="trade-status">!buy · !sell</div>
+      <div class="trade-status-hint">!buy ymir · !sell ymir</div>
+    </div>
+  </div>
+
+  </div>
+</div>
+
+<script>
+const OPEN = 280;
+let price = 287, kills = 3, deaths = 1, assists = 4;
+let history = [280, 280, 282, 284, 283, 286, 284, 285, 287];
+
+const canvas = document.getElementById('chart');
+const ctx = canvas.getContext('2d');
+
+function getComputedColor(varName) {
+  return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+}
+
+function resize() {
+  const r = canvas.parentElement.getBoundingClientRect();
+  canvas.width = r.width * 2;
+  canvas.height = r.height * 2;
+  ctx.scale(2, 2);
+}
+resize();
+
+function draw() {
+  const w = canvas.width / 2, h = canvas.height / 2;
+  ctx.clearRect(0, 0, w, h);
+  if (history.length < 2) return;
+
+  const all = [...history, OPEN];
+  const lo = Math.min(...all) - 3, hi = Math.max(...all) + 3, rng = hi - lo;
+  const x = i => (i / (history.length - 1)) * w;
+  const y = v => 2 + (1 - (v - lo) / rng) * (h - 4);
+
+  // open line
+  ctx.beginPath();
+  ctx.setLineDash([3, 3]);
+  ctx.strokeStyle = getComputedColor('--hm-border');
+  ctx.moveTo(0, y(OPEN));
+  ctx.lineTo(w, y(OPEN));
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  const last = history[history.length - 1];
+  const up = last >= OPEN;
+  const col = up ? getComputedColor('--hm-green') : getComputedColor('--hm-red');
+
+  // fill
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  const gradTopColor = up ? getComputedColor('--hm-green-glow') : getComputedColor('--hm-red-glow');
+  grad.addColorStop(0, gradTopColor);
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.beginPath();
+  ctx.moveTo(x(0), y(history[0]));
+  for (let i = 1; i < history.length; i++) ctx.lineTo(x(i), y(history[i]));
+  ctx.lineTo(x(history.length - 1), h);
+  ctx.lineTo(0, h);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // line
+  ctx.beginPath();
+  ctx.moveTo(x(0), y(history[0]));
+  for (let i = 1; i < history.length; i++) ctx.lineTo(x(i), y(history[i]));
+  ctx.strokeStyle = col;
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+
+  // dot
+  const lx = x(history.length - 1), ly = y(last);
+  ctx.beginPath();
+  ctx.arc(lx, ly, 3, 0, Math.PI * 2);
+  ctx.fillStyle = col;
+  ctx.fill();
+}
+
+function update() {
+  const chg = ((price - OPEN) / OPEN * 100);
+  const up = chg >= 0;
+  document.getElementById('price').textContent = Math.round(price);
+  const pctEl = document.getElementById('pct');
+  pctEl.textContent = `${up ? '+' : ''}${chg.toFixed(1)}%`;
+  pctEl.className = `pct ${up ? 'up' : 'down'}`;
+  document.getElementById('k').textContent = kills;
+  document.getElementById('d').textContent = deaths;
+  document.getElementById('a').textContent = assists;
+  draw();
+}
+
+function flash(type) {
+  const el = document.getElementById(type + 'Flash');
+  el.classList.remove('active');
+  void el.offsetWidth;
+  el.classList.add('active');
+}
+
+function kill() {
+  kills++;
+  price *= 1.015;
+  history.push(Math.round(price * 10) / 10);
+  flash('kill');
+  update();
+}
+
+function death() {
+  deaths++;
+  price *= 0.98;
+  price = Math.max(10, price);
+  history.push(Math.round(price * 10) / 10);
+  flash('death');
+  update();
+}
+
+function assist() {
+  assists++;
+  price *= 1.005;
+  history.push(Math.round(price * 10) / 10);
+  update();
+}
+
+// Simulate
+const events = [
+  [2000, kill], [5000, kill], [8000, death],
+  [11000, kill], [14000, assist], [17000, kill],
+  [20000, kill], [23000, death], [26000, kill],
+  [29000, assist], [32000, kill], [35000, kill],
+];
+events.forEach(([t, fn]) => setTimeout(fn, t));
+draw();
+</script>
+</body>
+</html>

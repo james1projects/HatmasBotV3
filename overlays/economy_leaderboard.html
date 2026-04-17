@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Hatmas Market — Portfolio Leaderboard</title>
+<link rel="stylesheet" href="hatmas_theme.css">
+<style>
+  body {
+    background: transparent;
+    overflow: hidden;
+    width: 260px;
+    height: 360px;
+  }
+
+  .board {
+    width: 240px;
+    background: var(--hm-bg);
+    border: 1px solid var(--hm-border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .board-header {
+    padding: 10px 14px 8px;
+    border-bottom: 1px solid var(--hm-border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .board-title {
+    font-family: 'BigNoodleTitling', 'Poppins', sans-serif;
+    font-size: 17px;
+    color: var(--hm-text-secondary);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  .board-subtitle {
+    font-family: 'Poppins', sans-serif;
+    font-size: 9px;
+    color: var(--hm-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .rows {
+    padding: 6px 0;
+  }
+
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 14px;
+    transition: background 0.2s;
+  }
+
+  .row:hover {
+    background: var(--hm-bg-subtle);
+  }
+
+  .rank-container {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+
+  .rank {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 13px;
+    width: 18px;
+    text-align: center;
+  }
+
+  .rank-arrow {
+    font-family: monospace;
+    font-size: 10px;
+    width: 8px;
+    text-align: center;
+  }
+
+  .row:nth-child(1) .rank { color: var(--hm-gold-bright); }
+  .row:nth-child(2) .rank { color: var(--hm-text-secondary); }
+  .row:nth-child(3) .rank { color: var(--hm-gold); }
+  .row:nth-child(4) .rank,
+  .row:nth-child(5) .rank { color: var(--hm-text-muted); }
+
+  .rank-arrow.up { color: var(--hm-green); }
+  .rank-arrow.down { color: var(--hm-red); }
+  .rank-arrow.same { color: var(--hm-text-muted); }
+
+  .viewer-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .viewer-name {
+    font-family: 'Poppins', sans-serif;
+    font-weight: 600;
+    font-size: 12px;
+    color: var(--hm-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .viewer-holdings {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    margin-top: 1px;
+  }
+
+  .holding-icon {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    overflow: hidden;
+    background: var(--hm-icon-bg);
+  }
+
+  .holding-icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .portfolio-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 12px;
+    color: var(--hm-text-secondary);
+    flex-shrink: 0;
+    text-align: right;
+  }
+
+  .portfolio-change {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 500;
+    text-align: right;
+  }
+
+  .portfolio-change.up { color: var(--hm-green); }
+  .portfolio-change.down { color: var(--hm-red); }
+
+  .value-col {
+    flex-shrink: 0;
+    text-align: right;
+  }
+
+  /* Footer */
+  .board-footer {
+    padding: 7px 14px;
+    border-top: 1px solid var(--hm-separator);
+    font-family: 'BigNoodleTitling', 'Poppins', sans-serif;
+    font-size: 11px;
+    color: var(--hm-text-muted);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    text-align: center;
+  }
+
+  /* Entry animation */
+  .row {
+    opacity: 0;
+    transform: translateX(-10px);
+    animation: row-enter 0.3s ease-out forwards;
+  }
+
+  .row:nth-child(1) { animation-delay: 0.1s; }
+  .row:nth-child(2) { animation-delay: 0.2s; }
+  .row:nth-child(3) { animation-delay: 0.3s; }
+  .row:nth-child(4) { animation-delay: 0.4s; }
+  .row:nth-child(5) { animation-delay: 0.5s; }
+
+  @keyframes row-enter {
+    to { opacity: 1; transform: translateX(0); }
+  }
+</style>
+</head>
+<body>
+
+<div class="board hm-panel" id="board">
+  <div class="board-header">
+    <span class="board-title">Top Investors</span>
+    <span class="board-subtitle">Portfolio Value</span>
+  </div>
+
+  <div class="rows" id="rows"></div>
+
+  <div class="board-footer">!portfolio · !market</div>
+</div>
+
+<script src="overlay_client.js"></script>
+<script>
+const CUSTOM_ICON_PATH = '/icons/custom/';
+const DEFAULT_ICON_PATH = '/icons/gods/';
+
+function iconUrl(name) {
+  return CUSTOM_ICON_PATH + name + '.png';
+}
+
+function fallbackUrl(name) {
+  return DEFAULT_ICON_PATH + name.toLowerCase().replace(/\s+/g, '-') + '.png';
+}
+
+function formatValue(v) {
+  return HatmasOverlay.hatPrice(v, {compact: true, size: 'sm', label: false});
+}
+
+function getRankArrow(rankChange) {
+  if (rankChange > 0) return '▲';
+  if (rankChange < 0) return '▼';
+  return '—';
+}
+
+function getRankArrowClass(rankChange) {
+  if (rankChange > 0) return 'up';
+  if (rankChange < 0) return 'down';
+  return 'same';
+}
+
+function onShow(data) {
+  if (!data || !data.leaderboard) return;
+
+  const investors = data.leaderboard.slice(0, 5);
+  const el = document.getElementById('rows');
+
+  el.innerHTML = investors.map((inv, i) => {
+    const change = inv.change_pct || 0;
+    const cls = change >= 0 ? 'up' : 'down';
+    const arrow = change >= 0 ? '+' : '';
+    const rankChange = inv.rank_change || 0;
+    const rankArrow = getRankArrow(rankChange);
+    const rankArrowClass = getRankArrowClass(rankChange);
+
+    // God holding icons
+    const topGods = inv.top_gods || [];
+    const icons = topGods.map(g =>
+      '<div class="holding-icon"><img src="' + iconUrl(g) + '" onerror="this.src=\'' + fallbackUrl(g) + '\'"></div>'
+    ).join('');
+
+    return '<div class="row">' +
+      '<div class="rank-container">' +
+        '<span class="rank">' + (i + 1) + '</span>' +
+        '<span class="rank-arrow ' + rankArrowClass + '">' + rankArrow + '</span>' +
+      '</div>' +
+      '<div class="viewer-info">' +
+        '<div class="viewer-name">' + (inv.username || inv.name) + '</div>' +
+        '<div class="viewer-holdings">' + icons + '</div>' +
+      '</div>' +
+      '<div class="value-col">' +
+        '<div class="portfolio-value">' + formatValue(inv.portfolio_value || inv.value || 0) + '</div>' +
+        '<div class="portfolio-change ' + cls + '">' + arrow + change.toFixed(1) + '%</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function onHide() {
+  // Handled by overlay_client.js
+}
+
+HatmasOverlay.connect('economy_leaderboard', { onShow, onHide });
+</script>
+</body>
+</html>

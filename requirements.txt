@@ -1,5 +1,6 @@
 twitchio>=2.10.0
 aiohttp>=3.9.0
+aiosqlite>=0.20.0
 obsws-python>=1.7.0
 anthropic>=0.40.0
 spotipy>=2.24.0

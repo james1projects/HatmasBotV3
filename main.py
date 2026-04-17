@@ -33,6 +33,9 @@ from plugins.claude_chat import ClaudeChatPlugin
 from plugins.godrequest import GodRequestPlugin
 from plugins.gamble import GamblePlugin
 from plugins.killdetector import KillDeathDetector
+from plugins.voicelines import VoiceLinePlugin
+from plugins.deathcounter import DeathCounterPlugin
+from plugins.economy import EconomyPlugin
 
 
 async def main():
@@ -68,8 +71,13 @@ async def main():
     bot.register_plugin("claude", ClaudeChatPlugin())
     bot.register_plugin("gamble", GamblePlugin())
 
+    # Death counter — registered before killdetector so the on_death
+    # callback can reference it.
+    death_counter = DeathCounterPlugin()
+    bot.register_plugin("deathcounter", death_counter)
+
     # Kill/death detector — hooks into smite match state
-    kd = KillDeathDetector(debug=True)
+    kd = KillDeathDetector(debug=False)
 
     async def on_kill(kill_type):
         web.trigger_kill_event("kill", kill_type)
@@ -79,11 +87,16 @@ async def main():
 
     async def on_death():
         web.trigger_kill_event("death")
+        death_counter.increment()
 
     kd.on_kill = on_kill
     kd.on_multikill = on_multikill
     kd.on_death = on_death
     bot.register_plugin("killdetector", kd)
+
+    # Voice line plugin — channel point redemptions for god voice lines
+    vl = VoiceLinePlugin(token_manager=token_mgr)
+    bot.register_plugin("voicelines", vl)
 
     # Hook kill detector into smite match lifecycle
     smite_plugin = bot.plugins.get("smite")
@@ -103,8 +116,67 @@ async def main():
         # from the in-game portrait ~2-5 minutes before tracker.gg API responds.
         async def _on_god_identified(god_name):
             await smite_plugin.set_god_from_portrait(god_name)
+            vl.set_current_god(god_name)
 
         kd.on_god_identified = _on_god_identified
+
+        # Hook kill detector gameplay-end detection — clears god portrait
+        # immediately instead of waiting for tracker.gg API to catch up.
+        async def _kd_gameplay_ended():
+            await smite_plugin.force_end_match()
+
+        kd.on_gameplay_ended = _kd_gameplay_ended
+
+        # Also hook into god detection from tracker.gg (backup path)
+        async def _on_god_detected_vl(god_info):
+            if god_info and god_info.get("name"):
+                vl.set_current_god(god_info["name"])
+
+        smite_plugin.on_god_detected(_on_god_detected_vl)
+
+        # Clear voice line god on match end
+        async def _vl_match_end(data):
+            vl.set_current_god(None)
+
+        smite_plugin.on_match_end(_vl_match_end)
+
+    # ── God Stock Market Economy ──
+    economy = EconomyPlugin(token_manager=token_mgr)
+    bot.register_plugin("economy", economy)
+
+    if smite_plugin:
+        # Dividend payout on god detection
+        smite_plugin.on_god_detected(economy.on_god_detected)
+
+        # Stop live ticking on match end
+        smite_plugin.on_match_end(economy.on_match_end)
+
+        # Final price settlement on win/loss determination
+        smite_plugin.on_match_result(economy.on_match_result)
+
+    # Hook economy into kill detector for live price ticks
+    _original_on_kill = kd.on_kill
+    _original_on_death = kd.on_death
+
+    async def _economy_on_kill(kill_type, count=1):
+        if _original_on_kill:
+            await _original_on_kill(kill_type, count)
+        await economy.on_kill(kill_type, count)
+
+    async def _economy_on_death(count=1):
+        if _original_on_death:
+            await _original_on_death(count)
+        await economy.on_death(count)
+
+    async def _economy_on_assist(count=1):
+        await economy.on_assist(count)
+
+    kd.on_kill = _economy_on_kill
+    kd.on_death = _economy_on_death
+    kd.on_assist = _economy_on_assist
+
+    # Register economy API routes on webserver
+    economy.register_api_routes(web.app)
 
     # Start kill detector immediately — it scans always and uses
     # _is_gameplay_screen() to filter, so it works in jungle practice

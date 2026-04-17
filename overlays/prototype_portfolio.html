@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Portfolio Overlay — Hatmas Economy</title>
+<link rel="stylesheet" href="hatmas_theme.css">
+<style>
+  body {
+    background: transparent;
+    overflow: hidden;
+    width: 420px;
+    height: 670px;
+  }
+
+  .portfolio-card {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    width: 380px;
+    background: var(--hm-bg);
+    border: 1px solid var(--hm-border);
+    border-radius: 12px;
+    overflow: hidden;
+    transform: translateX(420px);
+    transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  }
+
+  .portfolio-card.visible {
+    transform: translateX(0);
+  }
+
+  /* === HEADER === */
+  .header {
+    padding: 14px 18px 12px;
+    border-bottom: 1px solid var(--hm-border-subtle);
+  }
+
+  .header-top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+
+  .pfp {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    border: 2px solid var(--hm-border);
+    background: var(--hm-icon-bg);
+  }
+
+  .header-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .username {
+    font-family: 'BigNoodleTitling', 'Poppins', sans-serif;
+    font-size: 22px;
+    color: var(--hm-text);
+    letter-spacing: 1px;
+    line-height: 1.1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .portfolio-label {
+    font-family: 'Poppins', sans-serif;
+    font-size: 9px;
+    font-weight: 500;
+    color: var(--hm-text-muted);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  /* Two-column value display */
+  .header-values {
+    display: flex;
+    gap: 0;
+  }
+
+  .value-block {
+    flex: 1;
+    padding: 6px 0;
+  }
+
+  .value-block + .value-block {
+    border-left: 1px solid var(--hm-icon-bg);
+    padding-left: 16px;
+  }
+
+  .value-label {
+    font-family: 'Poppins', sans-serif;
+    font-size: 9px;
+    font-weight: 500;
+    color: var(--hm-text-muted);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-bottom: 2px;
+  }
+
+  .value-amount {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 18px;
+    font-weight: 500;
+    color: var(--hm-text);
+    line-height: 1.1;
+  }
+
+  .value-amount .hat-suffix {
+    font-size: 11px;
+    color: var(--hm-text-secondary);
+    font-weight: 400;
+    margin-left: 2px;
+  }
+
+  .value-pnl {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 400;
+    margin-top: 1px;
+  }
+
+  .value-pnl.positive { color: var(--hm-green); }
+  .value-pnl.negative { color: var(--hm-red); }
+
+  .hat-balance {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 18px;
+    font-weight: 500;
+    color: var(--hm-gold);
+    line-height: 1.1;
+  }
+
+  .hat-balance .hat-suffix {
+    font-size: 11px;
+    color: var(--hm-text-muted);
+    font-weight: 400;
+    margin-left: 2px;
+  }
+
+  .balance-sub {
+    font-family: 'Poppins', sans-serif;
+    font-size: 9px;
+    color: var(--hm-text-muted);
+    margin-top: 1px;
+  }
+
+  /* === HOLDINGS LIST === */
+  .holdings {
+    padding: 6px 0;
+    max-height: 360px;
+    overflow-y: auto;
+  }
+
+  .holdings::-webkit-scrollbar { width: 3px; }
+  .holdings::-webkit-scrollbar-track { background: transparent; }
+  .holdings::-webkit-scrollbar-thumb { background: var(--hm-gold-glow); border-radius: 2px; }
+
+  .holding-row {
+    display: flex;
+    align-items: center;
+    padding: 8px 18px;
+    gap: 10px;
+    transition: background 0.15s;
+  }
+
+  .holding-row:hover {
+    background: var(--hm-bg-subtle);
+  }
+
+  .god-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 6px;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: var(--hm-icon-bg);
+    border: 1px solid var(--hm-border-subtle);
+  }
+
+  .holding-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .god-name {
+    font-family: 'Poppins', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--hm-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.2;
+  }
+
+  .shares-count {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--hm-text-secondary);
+  }
+
+  .holding-value {
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  .holding-current {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--hm-text);
+    line-height: 1.2;
+  }
+
+  .holding-pnl {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+  }
+
+  .holding-pnl.positive { color: var(--hm-green); }
+  .holding-pnl.negative { color: var(--hm-red); }
+  .holding-pnl.neutral  { color: var(--hm-text-muted); }
+
+  /* Sparkline canvas */
+  .sparkline {
+    width: 50px;
+    height: 24px;
+    flex-shrink: 0;
+  }
+
+  /* === FOOTER === */
+  .footer {
+    padding: 8px 18px 10px;
+    border-top: 1px solid var(--hm-icon-bg);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .footer-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .footer-stat-label {
+    font-family: 'Poppins', sans-serif;
+    font-size: 8px;
+    font-weight: 500;
+    color: var(--hm-text-muted);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+  }
+
+  .footer-stat-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--hm-text-secondary);
+  }
+
+  .footer-stat-value.rank {
+    color: var(--hm-gold);
+    font-weight: 500;
+  }
+
+  /* === EMPTY STATE === */
+  .empty-state {
+    padding: 30px 18px;
+    text-align: center;
+  }
+
+  .empty-state .empty-icon {
+    font-size: 28px;
+    margin-bottom: 8px;
+    opacity: 0.3;
+  }
+
+  .empty-state p {
+    font-family: 'Poppins', sans-serif;
+    font-size: 12px;
+    color: var(--hm-text-muted);
+    line-height: 1.5;
+  }
+
+  /* === ANIMATIONS === */
+  @keyframes fadeInRow {
+    from { opacity: 0; transform: translateX(10px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+
+  .holding-row {
+    animation: fadeInRow 0.3s ease forwards;
+    opacity: 0;
+  }
+
+</style>
+</head>
+<body>
+
+<div class="portfolio-card hm-panel" id="card">
+  <!-- Header -->
+  <div class="header">
+    <div class="header-top">
+      <img class="pfp" id="pfp" src="" alt=""
+           onerror="this.style.display='none';">
+      <div class="header-info">
+        <div class="username" id="username">HATMASTER_42</div>
+        <div class="portfolio-label">PORTFOLIO</div>
+      </div>
+    </div>
+
+    <!-- Two-column: Portfolio Value | Hat Balance -->
+    <div class="header-values">
+      <div class="value-block">
+        <div class="value-label">INVESTED VALUE</div>
+        <div class="value-amount" id="portfolioValue">0<span class="hat-suffix">hats</span></div>
+        <div class="value-pnl positive" id="portfolioPnl">+0 (+0%)</div>
+      </div>
+      <div class="value-block">
+        <div class="value-label">HAT BALANCE</div>
+        <div class="hat-balance" id="hatBalance">0<span class="hat-suffix">hats</span></div>
+        <div class="balance-sub">available to trade</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Holdings -->
+  <div class="holdings" id="holdings"></div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <div class="footer-stat">
+      <span class="footer-stat-label">RANK</span>
+      <span class="footer-stat-value rank" id="rank">#—</span>
+    </div>
+    <div class="footer-stat">
+      <span class="footer-stat-label">GODS</span>
+      <span class="footer-stat-value" id="godCount">0</span>
+    </div>
+    <div class="footer-stat">
+      <span class="footer-stat-label">SHARES</span>
+      <span class="footer-stat-value" id="totalShares">0</span>
+    </div>
+    <div class="footer-stat">
+      <span class="footer-stat-label">BEST</span>
+      <span class="footer-stat-value" id="bestGod" style="color: var(--hm-green);">—</span>
+    </div>
+    <div class="footer-stat">
+      <span class="footer-stat-label">NET WORTH</span>
+      <span class="footer-stat-value rank" id="netWorth">0</span>
+    </div>
+  </div>
+</div>
+
+<script>
+// === GOD ICON PATHS ===
+// When served by webserver: /icons/custom/ and /icons/gods/
+// When opened as local file: relative ../ paths to project root
+// We use relative paths so prototypes work both ways.
+const CUSTOM_ICON_PATH = '../Custom God Icons/';
+const FALLBACK_ICON_PATH = '../data/god_icons/';
+
+// === DEMO DATA ===
+const DEMO_USER = {
+  username: 'HatMaster_42',
+  pfpUrl: 'https://static-cdn.jtvnw.net/jtv_user_pictures/8a6381c7-d0c0-4576-b179-38bd5ce1d6af-profile_image-70x70.png',
+  hatBalance: 1420,      // liquid hats available to trade
+  rank: 4,
+  holdings: [
+    {
+      god: 'Ymir',
+      shares: 8,
+      avgCost: 100,
+      currentPrice: 142,
+      history: [100, 105, 98, 112, 120, 118, 130, 135, 128, 142],
+    },
+    {
+      god: 'Thor',
+      shares: 5,
+      avgCost: 100,
+      currentPrice: 118,
+      history: [100, 102, 108, 105, 110, 115, 112, 118, 116, 118],
+    },
+    {
+      god: 'Athena',
+      shares: 4,
+      avgCost: 100,
+      currentPrice: 95,
+      history: [100, 97, 92, 88, 90, 94, 91, 93, 96, 95],
+    },
+    {
+      god: 'Loki',
+      shares: 3,
+      avgCost: 100,
+      currentPrice: 78,
+      history: [100, 95, 88, 82, 90, 85, 80, 76, 74, 78],
+    },
+    {
+      god: 'Ra',
+      shares: 3,
+      avgCost: 100,
+      currentPrice: 110,
+      history: [100, 103, 106, 104, 108, 105, 107, 109, 108, 110],
+    },
+  ]
+};
+
+function formatHats(n) {
+  return n.toLocaleString();
+}
+
+function getThemeColor(variableName) {
+  return getComputedStyle(document.documentElement).getPropertyValue(variableName).trim();
+}
+
+function drawSparkline(canvas, data, isPositive) {
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width = 50 * 2;
+  const h = canvas.height = 24 * 2;
+  canvas.style.width = '50px';
+  canvas.style.height = '24px';
+  ctx.clearRect(0, 0, w, h);
+
+  if (data.length < 2) return;
+
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  const range = max - min || 1;
+  const pad = 4;
+
+  const points = data.map((v, i) => ({
+    x: pad + (i / (data.length - 1)) * (w - pad * 2),
+    y: pad + (1 - (v - min) / range) * (h - pad * 2),
+  }));
+
+  // Get theme colors from CSS variables
+  const lineColor = isPositive
+    ? getThemeColor('--hm-green')
+    : getThemeColor('--hm-red');
+
+  // Line
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) {
+    ctx.lineTo(points[i].x, points[i].y);
+  }
+  ctx.strokeStyle = lineColor;
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.stroke();
+
+  // Fill gradient under line
+  ctx.lineTo(points[points.length - 1].x, h);
+  ctx.lineTo(points[0].x, h);
+  ctx.closePath();
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  if (isPositive) {
+    const greenBg = getThemeColor('--hm-green-bg');
+    grad.addColorStop(0, greenBg.replace('0.08)', '0.15)'));
+    grad.addColorStop(1, greenBg.replace('0.08)', '0)'));
+  } else {
+    const redBg = getThemeColor('--hm-red-bg');
+    grad.addColorStop(0, redBg.replace('0.08)', '0.15)'));
+    grad.addColorStop(1, redBg.replace('0.08)', '0)'));
+  }
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // End dot
+  const last = points[points.length - 1];
+  ctx.beginPath();
+  ctx.arc(last.x, last.y, 3, 0, Math.PI * 2);
+  ctx.fillStyle = lineColor;
+  ctx.fill();
+}
+
+function renderPortfolio(user) {
+  // Profile picture
+  const pfpEl = document.getElementById('pfp');
+  if (user.pfpUrl) {
+    pfpEl.src = user.pfpUrl;
+    pfpEl.style.display = '';
+  } else {
+    pfpEl.style.display = 'none';
+  }
+
+  // Username
+  document.getElementById('username').textContent = user.username.toUpperCase();
+
+  // Calculate totals
+  let totalValue = 0;
+  let totalCost = 0;
+  let totalShares = 0;
+  let bestGod = null;
+  let bestPnlPct = -Infinity;
+
+  for (const h of user.holdings) {
+    const value = h.shares * h.currentPrice;
+    const cost = h.shares * h.avgCost;
+    totalValue += value;
+    totalCost += cost;
+    totalShares += h.shares;
+
+    const pnlPct = ((h.currentPrice - h.avgCost) / h.avgCost) * 100;
+    if (pnlPct > bestPnlPct) {
+      bestPnlPct = pnlPct;
+      bestGod = h.god;
+    }
+  }
+
+  const totalPnl = totalValue - totalCost;
+  const totalPnlPct = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
+  const netWorth = totalValue + user.hatBalance;
+
+  // Portfolio value (invested)
+  document.getElementById('portfolioValue').innerHTML =
+    `${formatHats(totalValue)}<span class="hat-suffix">hats</span>`;
+
+  const pnlEl = document.getElementById('portfolioPnl');
+  const sign = totalPnl >= 0 ? '+' : '';
+  pnlEl.textContent = `${sign}${formatHats(totalPnl)} (${sign}${totalPnlPct.toFixed(1)}%)`;
+  pnlEl.className = 'value-pnl ' + (totalPnl >= 0 ? 'positive' : 'negative');
+
+  // Hat balance (liquid)
+  document.getElementById('hatBalance').innerHTML =
+    `${formatHats(user.hatBalance)}<span class="hat-suffix">hats</span>`;
+
+  // Footer
+  document.getElementById('rank').textContent = `#${user.rank}`;
+  document.getElementById('godCount').textContent = user.holdings.length;
+  document.getElementById('totalShares').textContent = totalShares;
+  document.getElementById('bestGod').textContent = bestGod || '—';
+  document.getElementById('netWorth').textContent = formatHats(netWorth);
+
+  // Render holdings (sorted by value descending)
+  const holdingsEl = document.getElementById('holdings');
+  const sorted = [...user.holdings].sort((a, b) =>
+    (b.shares * b.currentPrice) - (a.shares * a.currentPrice)
+  );
+
+  holdingsEl.innerHTML = '';
+
+  sorted.forEach((h, i) => {
+    const value = h.shares * h.currentPrice;
+    const pnl = (h.currentPrice - h.avgCost) * h.shares;
+    const pnlPct = ((h.currentPrice - h.avgCost) / h.avgCost) * 100;
+    const isPositive = pnl >= 0;
+
+    const row = document.createElement('div');
+    row.className = 'holding-row';
+    row.style.animationDelay = `${i * 0.08}s`;
+
+    // Custom icon → fallback to default → fallback to Smite2 CDN
+    const godName = h.god;
+    const godLower = h.god.toLowerCase();
+    const customIcon = `${CUSTOM_ICON_PATH}${godName}.png`;
+    const fallbackIcon = `${FALLBACK_ICON_PATH}${godLower}.png`;
+
+    row.innerHTML = `
+      <img class="god-icon" id="icon-${i}" src="${customIcon}"
+           onerror="this.onerror=function(){this.style.background='var(--hm-border)';this.src='';}; this.src='${fallbackIcon}';"
+           alt="${godName}">
+      <div class="holding-info">
+        <div class="god-name">${godName}</div>
+        <div class="shares-count">${h.shares} share${h.shares !== 1 ? 's' : ''} @ ${formatHats(h.avgCost)} avg</div>
+      </div>
+      <canvas class="sparkline" id="spark-${i}"></canvas>
+      <div class="holding-value">
+        <div class="holding-current">${formatHats(value)}</div>
+        <div class="holding-pnl ${isPositive ? 'positive' : pnl < 0 ? 'negative' : 'neutral'}">
+          ${isPositive ? '+' : ''}${formatHats(pnl)} (${isPositive ? '+' : ''}${pnlPct.toFixed(1)}%)
+        </div>
+      </div>
+    `;
+
+    holdingsEl.appendChild(row);
+
+    // Draw sparkline after append
+    requestAnimationFrame(() => {
+      const canvas = document.getElementById(`spark-${i}`);
+      if (canvas && h.history) {
+        drawSparkline(canvas, h.history, isPositive);
+      }
+    });
+  });
+}
+
+// === INIT ===
+renderPortfolio(DEMO_USER);
+
+setTimeout(() => {
+  document.getElementById('card').classList.add('visible');
+}, 300);
+
+// Auto-hide after 15 seconds
+setTimeout(() => {
+  document.getElementById('card').classList.remove('visible');
+}, 15300);
+
+</script>
+</body>
+</html>

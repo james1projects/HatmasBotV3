@@ -1,0 +1,64 @@
+{
+  "now_playing": {
+    "show_on": ["song_change"],
+    "hide_on": ["song_queue_empty", "song_stopped"],
+    "hide_after": 15,
+    "keep_alive_on": ["song_like"]
+  },
+  "god_overlay": {
+    "show_on": ["god_detected"],
+    "hide_on": ["match_end_confirmed"]
+  },
+  "sound_alerts": {
+    "show_on": ["gamble_result"],
+    "hide_after": 8
+  },
+  "tts": {
+    "show_on": ["tts_message"],
+    "hide_after": 30
+  },
+  "voicelines": {
+    "show_on": ["voiceline_play"],
+    "hide_after": 20
+  },
+  "youtube_player": {
+    "show_on": ["youtube_play"],
+    "hide_on": ["youtube_ended"]
+  },
+  "deaths": {
+    "show_on": ["bot_ready"],
+    "hide_on": ["bot_shutdown"]
+  },
+  "economy_ticker": {
+    "show_on": ["bot_ready"],
+    "hide_on": ["bot_shutdown"],
+    "update_on": ["god_stock_update_kd", "god_stock_update", "match_end_economy"]
+  },
+  "economy_match_live": {
+    "show_on": ["economy_god_detected"],
+    "hide_on": ["match_end_economy"],
+    "keep_alive_on": ["god_stock_update_kd"],
+    "update_on": ["god_stock_update"]
+  },
+  "economy_match_end": {
+    "show_on": ["match_end_economy"],
+    "hide_after": 20
+  },
+  "economy_dividend": {
+    "show_on": ["dividend_paid"],
+    "hide_after": 10
+  },
+  "economy_leaderboard": {
+    "show_on": ["leaderboard_update"],
+    "hide_after": 30
+  },
+  "economy_tradefeed": {
+    "show_on": ["trade_executed"],
+    "hide_after": 15,
+    "keep_alive_on": ["trade_executed", "dividend_paid"]
+  },
+  "economy_portfolio": {
+    "show_on": ["portfolio_requested"],
+    "hide_after": 15
+  }
+}

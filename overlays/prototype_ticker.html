@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Hatmas Market — Stock Ticker</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@400;600;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: transparent;
+    overflow: hidden;
+    width: 1920px;
+    height: 120px;
+  }
+
+  .ticker-container {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 64px;
+    background: linear-gradient(180deg, rgba(10,10,18,0.92) 0%, rgba(6,6,14,0.97) 100%);
+    border-top: 1px solid rgba(212,175,55,0.3);
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+  }
+
+  .ticker-label {
+    flex-shrink: 0;
+    background: linear-gradient(135deg, #d4af37 0%, #b8941f 100%);
+    color: #0a0a12;
+    font-family: 'Orbitron', monospace;
+    font-weight: 900;
+    font-size: 13px;
+    letter-spacing: 2px;
+    padding: 0 18px;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    text-transform: uppercase;
+    position: relative;
+    z-index: 2;
+  }
+
+  .ticker-label::after {
+    content: '';
+    position: absolute;
+    right: -20px;
+    top: 0;
+    width: 20px;
+    height: 100%;
+    background: linear-gradient(90deg, rgba(10,10,18,0.97), transparent);
+    z-index: 1;
+  }
+
+  .ticker-scroll {
+    display: flex;
+    animation: scroll 40s linear infinite;
+    gap: 0;
+  }
+
+  .ticker-scroll:hover {
+    animation-play-state: paused;
+  }
+
+  @keyframes scroll {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+  }
+
+  .stock-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 28px;
+    border-right: 1px solid rgba(212,175,55,0.1);
+    flex-shrink: 0;
+    transition: background 0.3s;
+  }
+
+  .stock-item:hover {
+    background: rgba(212,175,55,0.05);
+  }
+
+  .god-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #1a1a2e, #2a2a4e);
+    border: 2px solid rgba(212,175,55,0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+
+  .god-icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .stock-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .god-name {
+    font-family: 'Inter', sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    color: #e8e8f0;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+  }
+
+  .price-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .price {
+    font-family: 'Orbitron', monospace;
+    font-weight: 700;
+    font-size: 15px;
+    color: #d4af37;
+  }
+
+  .change {
+    font-family: 'Inter', sans-serif;
+    font-weight: 600;
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 3px;
+  }
+
+  .change.up {
+    color: #4ade80;
+    background: rgba(74,222,128,0.12);
+  }
+
+  .change.down {
+    color: #f87171;
+    background: rgba(248,113,113,0.12);
+  }
+
+  .change.neutral {
+    color: #94a3b8;
+    background: rgba(148,163,184,0.12);
+  }
+
+  .mini-chart {
+    width: 48px;
+    height: 24px;
+    flex-shrink: 0;
+    margin-left: 4px;
+  }
+
+  .mini-chart svg {
+    width: 100%;
+    height: 100%;
+  }
+
+  /* Pulse animation for actively-played god */
+  .stock-item.active {
+    background: rgba(212,175,55,0.08);
+  }
+
+  .stock-item.active .god-icon {
+    border-color: #d4af37;
+    box-shadow: 0 0 12px rgba(212,175,55,0.4);
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-glow {
+    0%, 100% { box-shadow: 0 0 8px rgba(212,175,55,0.3); }
+    50% { box-shadow: 0 0 18px rgba(212,175,55,0.6); }
+  }
+
+  /* Volatility indicator */
+  .volatility {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .volatility.high { background: #f59e0b; animation: blink 1.5s infinite; }
+  .volatility.med { background: #3b82f6; }
+  .volatility.low { background: #6b7280; }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+</style>
+</head>
+<body>
+
+<div class="ticker-container">
+  <div class="ticker-label">HATMAS MARKET</div>
+  <div class="ticker-scroll" id="tickerScroll"></div>
+</div>
+
+<script>
+// Mock data - in production this comes from /api/economy
+const gods = [
+  { name: "Ymir",        price: 287, change: +10.2, trend: [220,235,240,255,261,270,265,280,287], vol: "low", active: true },
+  { name: "Athena",      price: 215, change: +6.8,  trend: [180,175,190,195,200,198,210,208,215], vol: "low", active: false },
+  { name: "Thanatos",    price: 178, change: -3.4,   trend: [190,195,188,192,185,183,180,182,178], vol: "med", active: false },
+  { name: "Danzaburou",  price: 156, change: +12.1,  trend: [100,110,120,115,130,128,140,145,156], vol: "med", active: false },
+  { name: "Bellona",     price: 142, change: +1.2,   trend: [135,138,136,140,139,141,138,140,142], vol: "low", active: false },
+  { name: "Anubis",      price: 118, change: -8.5,   trend: [155,148,140,135,130,128,125,120,118], vol: "med", active: false },
+  { name: "Loki",        price: 32,  change: -5.9,   trend: [80,65,55,50,42,40,38,35,32],          vol: "high", active: false },
+  { name: "Zeus",        price: 100, change: 0,      trend: [100,100,100,100,100,100,100,100,100], vol: "high", active: false },
+  { name: "Poseidon",    price: 203, change: +4.1,   trend: [170,178,182,185,190,188,195,198,203], vol: "low", active: false },
+  { name: "Agni",        price: 89,  change: -11.0,  trend: [140,130,120,115,108,100,95,92,89],    vol: "med", active: false },
+  { name: "Kukulkan",    price: 165, change: +7.3,   trend: [120,128,135,140,148,150,155,160,165], vol: "med", active: false },
+  { name: "Hercules",    price: 194, change: +2.8,   trend: [175,178,180,183,185,188,190,192,194], vol: "low", active: false },
+];
+
+// Emoji fallback for god icons (in production: actual icons)
+const godEmojis = {
+  "Ymir": "❄️", "Athena": "🦉", "Thanatos": "💀", "Danzaburou": "🦝",
+  "Bellona": "⚔️", "Anubis": "🐺", "Loki": "🗡️", "Zeus": "⚡",
+  "Poseidon": "🔱", "Agni": "🔥", "Kukulkan": "🐍", "Hercules": "💪"
+};
+
+function createMiniChart(trend, isUp) {
+  const w = 48, h = 24, pad = 2;
+  const min = Math.min(...trend);
+  const max = Math.max(...trend);
+  const range = max - min || 1;
+
+  const points = trend.map((v, i) => {
+    const x = pad + (i / (trend.length - 1)) * (w - pad * 2);
+    const y = h - pad - ((v - min) / range) * (h - pad * 2);
+    return `${x},${y}`;
+  }).join(' ');
+
+  const color = isUp ? '#4ade80' : (trend[trend.length-1] === trend[0] ? '#94a3b8' : '#f87171');
+
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+    <defs>
+      <linearGradient id="grad_${isUp}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${color}" stop-opacity="0.3"/>
+        <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    <polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <polygon points="${points} ${w-pad},${h} ${pad},${h}" fill="url(#grad_${isUp})" opacity="0.5"/>
+  </svg>`;
+}
+
+function renderTicker() {
+  const scroll = document.getElementById('tickerScroll');
+  let html = '';
+
+  // Duplicate for seamless loop
+  for (let dup = 0; dup < 2; dup++) {
+    gods.forEach(god => {
+      const changeClass = god.change > 0 ? 'up' : god.change < 0 ? 'down' : 'neutral';
+      const changeStr = god.change > 0 ? `+${god.change.toFixed(1)}%` : god.change === 0 ? '—' : `${god.change.toFixed(1)}%`;
+      const arrow = god.change > 0 ? '▲' : god.change < 0 ? '▼' : '';
+      const emoji = godEmojis[god.name] || '⚔️';
+      const chart = createMiniChart(god.trend, god.change >= 0);
+
+      html += `
+        <div class="stock-item ${god.active ? 'active' : ''}">
+          <div class="volatility ${god.vol}"></div>
+          <div class="god-icon">${emoji}</div>
+          <div class="stock-info">
+            <span class="god-name">${god.name}</span>
+            <div class="price-row">
+              <span class="price">${god.price}</span>
+              <span class="change ${changeClass}">${arrow} ${changeStr}</span>
+            </div>
+          </div>
+          <div class="mini-chart">${chart}</div>
+        </div>
+      `;
+    });
+  }
+
+  scroll.innerHTML = html;
+}
+
+renderTicker();
+
+// Simulate live price ticks
+setInterval(() => {
+  const activeGod = gods.find(g => g.active);
+  if (activeGod) {
+    const tick = (Math.random() - 0.45) * 3; // slight upward bias during play
+    activeGod.price = Math.max(10, Math.round((activeGod.price + tick) * 10) / 10);
+    activeGod.change = +(activeGod.change + tick * 0.1).toFixed(1);
+    activeGod.trend.push(activeGod.price);
+    if (activeGod.trend.length > 9) activeGod.trend.shift();
+    renderTicker();
+  }
+}, 3000);
+</script>
+</body>
+</html>

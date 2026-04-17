@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Economy Ticker</title>
+    <link rel="stylesheet" href="hatmas_theme.css">
+    <style>
+        body {
+            background: transparent;
+            overflow: hidden;
+            width: 1920px;
+            height: 120px;
+        }
+        .ticker {
+            position: absolute;
+            bottom: 0; left: 0; right: 0;
+            height: 52px;
+            background: var(--hm-bg);
+            border-top: 1px solid var(--hm-border);
+            display: flex;
+            align-items: center;
+            overflow: hidden;
+        }
+        .label {
+            flex-shrink: 0;
+            color: var(--hm-text-secondary);
+            font-family: 'BigNoodleTitling', 'Poppins', sans-serif;
+            font-weight: normal;
+            font-size: 16px;
+            letter-spacing: 2px;
+            padding: 0 16px;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            border-right: 1px solid var(--hm-border);
+            text-transform: uppercase;
+        }
+        .scroll-wrap { overflow: hidden; flex: 1; }
+        .scroll { display: flex; animation: scroll 45s linear infinite; }
+        @keyframes scroll {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(-50%); }
+        }
+        .item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 0 22px;
+            height: 52px;
+            flex-shrink: 0;
+            border-right: 1px solid var(--hm-border-subtle);
+        }
+        .item.active { background: rgba(196, 168, 130, 0.03); }
+        .icon { width: 32px; height: 32px; border-radius: 6px; overflow: hidden; flex-shrink: 0; background: var(--hm-icon-bg); }
+        .icon img { width: 100%; height: 100%; object-fit: cover; }
+        .item.active .icon { box-shadow: 0 0 0 1.5px rgba(196, 168, 130, 0.2); }
+        .info { display: flex; align-items: center; gap: 10px; }
+        .name { font-family: 'Poppins', sans-serif; font-weight: 600; font-size: 13px; color: var(--hm-text); white-space: nowrap; }
+        .price { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 14px; color: var(--hm-text); }
+        .change { font-family: 'JetBrains Mono', monospace; font-weight: 500; font-size: 11px; padding: 1px 5px; border-radius: 3px; }
+        .change.up { color: var(--hm-green); background: var(--hm-green-bg); }
+        .change.down { color: var(--hm-red); background: var(--hm-red-bg); }
+        .change.flat { color: var(--hm-text-muted); }
+        .spark { width: 40px; height: 18px; flex-shrink: 0; }
+        .spark svg { width: 100%; height: 100%; }
+    </style>
+</head>
+<body>
+    <div class="ticker">
+        <div class="label">Market</div>
+        <div class="scroll-wrap">
+            <div class="scroll" id="scroll"></div>
+        </div>
+    </div>
+
+    <script src="overlay_client.js"></script>
+    <script>
+        const scrollContainer = document.getElementById('scroll');
+        const godData = new Map(); // Store god data for quick updates
+
+        function createItemElement(god) {
+            const item = document.createElement('div');
+            item.className = 'item';
+            item.id = `god-${god.name.toLowerCase()}`;
+            item.dataset.godName = god.name;
+
+            // Determine change class
+            const changeClass = god.change_pct > 0 ? 'up' : god.change_pct < 0 ? 'down' : 'flat';
+            const changeSign = god.change_pct > 0 ? '+' : '';
+            const changeText = god.change_pct === 0 ? '—' : `${changeSign}${god.change_pct.toFixed(2)}%`;
+
+            // Icon paths with fallback
+            const customIconPath = `/icons/custom/${god.name}.png`;
+            const fallbackIconPath = `/icons/gods/${god.name.toLowerCase()}.png`;
+
+            item.innerHTML = `
+                <div class="icon">
+                    <img src="${customIconPath}" alt="${god.name}"
+                         onerror="this.src='${fallbackIconPath}'">
+                </div>
+                <div class="info">
+                    <div class="name">${god.name}</div>
+                    <div class="price"><img class="hat-icon" src="/overlays/hat.png" alt="hats">${Math.round(god.price)}</div>
+                    <div class="change ${changeClass}">${changeText}</div>
+                </div>
+                <div class="spark" data-sparkline-id="${god.name}"></div>
+            `;
+
+            return item;
+        }
+
+        function renderSparkline(godName, history) {
+            if (!history || history.length === 0) return;
+
+            const sparkElement = document.querySelector(`[data-sparkline-id="${godName}"]`);
+            if (!sparkElement) return;
+
+            // Find min/max for scaling
+            const min = Math.min(...history);
+            const max = Math.max(...history);
+            const range = max - min || 1;
+
+            // Create SVG sparkline
+            const width = 40;
+            const height = 18;
+            const points = history.map((price, idx) => {
+                const x = (idx / (history.length - 1)) * width;
+                const y = height - ((price - min) / range) * height;
+                return `${x},${y}`;
+            }).join(' ');
+
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+            svg.setAttribute('preserveAspectRatio', 'none');
+
+            const polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+            polyline.setAttribute('points', points);
+            polyline.setAttribute('fill', 'none');
+            // Determine color from price history trend
+            const isUp = history[history.length - 1] >= history[0];
+            const color = isUp ? HatmasOverlay.getColor('--hm-green') : HatmasOverlay.getColor('--hm-red');
+            polyline.setAttribute('stroke', color || (isUp ? '#66bb6a' : '#ef5350'));
+            polyline.setAttribute('stroke-width', '1.5');
+            polyline.setAttribute('opacity', '0.6');
+
+            svg.appendChild(polyline);
+            sparkElement.innerHTML = '';
+            sparkElement.appendChild(svg);
+        }
+
+        function renderTicker(gods) {
+            scrollContainer.innerHTML = '';
+
+            // Create items
+            gods.forEach(god => {
+                godData.set(god.name.toLowerCase(), god);
+                const itemEl = createItemElement(god);
+                scrollContainer.appendChild(itemEl);
+                renderSparkline(god.name, god.history);
+            });
+
+            // Duplicate for seamless loop
+            gods.forEach(god => {
+                const itemEl = createItemElement(god);
+                scrollContainer.appendChild(itemEl);
+                renderSparkline(god.name, god.history);
+            });
+        }
+
+        function updateGodItem(godName, price, changePct, history) {
+            const godKey = godName.toLowerCase();
+            const itemId = `god-${godKey}`;
+
+            // Update stored data
+            const storedData = godData.get(godKey);
+            if (storedData) {
+                storedData.price = price;
+                storedData.change_pct = changePct;
+                storedData.history = history;
+            }
+
+            // Update all instances of this god (original + duplicate)
+            const items = document.querySelectorAll(`#${itemId}`);
+            items.forEach(item => {
+                const changeClass = changePct > 0 ? 'up' : changePct < 0 ? 'down' : 'flat';
+                const changeSign = changePct > 0 ? '+' : '';
+                const changeText = changePct === 0 ? '—' : `${changeSign}${changePct.toFixed(2)}%`;
+
+                const priceEl = item.querySelector('.price');
+                const changeEl = item.querySelector('.change');
+
+                if (priceEl) priceEl.innerHTML = `<img class="hat-icon" src="/overlays/hat.png" alt="hats">${Math.round(price)}`;
+                if (changeEl) {
+                    changeEl.textContent = changeText;
+                    changeEl.className = `change ${changeClass}`;
+                }
+
+                renderSparkline(godName, history);
+            });
+        }
+
+        // Overlay callbacks
+        const onShow = async (data) => {
+            try {
+                const response = await fetch('http://localhost:8069/api/economy/market');
+                const marketData = await response.json();
+
+                // Ensure we have history data (default to single point if not provided)
+                const gods = marketData.gods.map(god => ({
+                    ...god,
+                    change_pct: god.change_pct ?? god.session_change ?? 0,
+                    history: god.history || [god.price]
+                }));
+
+                renderTicker(gods);
+            } catch (error) {
+                console.error('Failed to fetch market data:', error);
+            }
+        };
+
+        const onUpdate = (data) => {
+            if (data.god && data.price !== undefined) {
+                const changePct = data.change_pct ?? data.session_change ?? 0;
+                updateGodItem(data.god, data.price, changePct, data.history || [data.price]);
+            }
+        };
+
+        const onHide = () => {
+            // Cleanup if needed
+        };
+
+        // Connect to overlay system
+        HatmasOverlay.connect('economy_ticker', { onShow, onUpdate, onHide });
+    </script>
+</body>
+</html>

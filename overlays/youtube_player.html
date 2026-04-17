@@ -19,7 +19,6 @@
     min-height: 100vh;
   }
 
-  /* In OBS, body is transparent and only the iframe matters */
   body.obs-mode {
     background: transparent;
     overflow: hidden;
@@ -81,7 +80,6 @@
   #status.active { color: rgba(130, 196, 140, 0.6); }
   #status.waiting { color: rgba(196, 168, 130, 0.5); }
 
-  /* Player container - visible in browser for testing */
   #player-wrap {
     width: 480px;
     height: 270px;
@@ -91,12 +89,6 @@
     border: 1px solid rgba(196, 168, 130, 0.1);
   }
 
-  /*
-    OBS mode: The iframe MUST stay at a real size for CEF to
-    produce audio. We keep it 480x270 but fully transparent.
-    Set your OBS browser source to any small size (e.g. 480x270)
-    and place it off-screen or behind other sources.
-  */
   body.obs-mode #player-wrap {
     width: 480px;
     height: 270px;
@@ -113,17 +105,6 @@
 </head>
 <body>
 
-<!--
-  YouTube Player for HatmasBot
-  ============================
-  Browser testing:  Open http://localhost:8069/overlay/youtube_player
-                    Click "Enable Audio" once, then it works automatically.
-
-  OBS setup:        Add as Browser Source (http://localhost:8069/overlay/youtube_player?obs=1)
-                    Any size is fine. Enable "Control audio via OBS" for stream audio.
-                    OBS browser sources bypass autoplay restrictions automatically.
--->
-
 <div id="startup-overlay">
   <h2>HatmasBot YouTube Player</h2>
   <p>Browsers require a click before audio can play.
@@ -138,8 +119,8 @@
 
 <div id="status">Initializing...</div>
 
+<script src="/overlays/overlay_client.js"></script>
 <script>
-const API_URL = 'http://localhost:8069';
 const params = new URLSearchParams(window.location.search);
 const isOBS = params.has('obs');
 
@@ -153,7 +134,7 @@ let isReady = false;
 let audioEnabled = isOBS; // OBS doesn't need the click gate
 let progressInterval = null;
 let hasReportedStarted = false;
-let pendingVideoId = null; // Video waiting for audio to be enabled
+let pendingVideoId = null;
 
 const statusEl = document.getElementById('status');
 const startupEl = document.getElementById('startup-overlay');
@@ -165,13 +146,11 @@ function setStatus(text, className) {
 }
 
 // === AUDIO GATE ===
-// Browsers block autoplay until a user gesture. This click satisfies that.
 enableBtn.addEventListener('click', () => {
   audioEnabled = true;
   startupEl.classList.add('hidden');
   setStatus('Waiting for song requests...', 'waiting');
 
-  // If a video was already queued while waiting for the click, play it now
   if (pendingVideoId && player) {
     currentVideoId = pendingVideoId;
     hasReportedStarted = false;
@@ -192,7 +171,7 @@ function onYouTubeIframeAPIReady() {
     height: '270',
     playerVars: {
       autoplay: 0,
-      controls: isOBS ? 0 : 1,  // Show controls in browser for debugging
+      controls: isOBS ? 0 : 1,
       disablekb: isOBS ? 1 : 0,
       fs: 0,
       modestbranding: 1,
@@ -219,12 +198,13 @@ function onPlayerStateChange(event) {
     currentVideoId = null;
     hasReportedStarted = false;
     setStatus('Waiting for song requests...', 'waiting');
-    reportAction('youtube_ended');
+    // Report ended via websocket
+    HatmasOverlay.send({ action: 'youtube_ended' });
   } else if (event.data === YT.PlayerState.PLAYING) {
     console.log('[HatmasBot YT] Video playing');
     if (!hasReportedStarted) {
       hasReportedStarted = true;
-      reportAction('youtube_started');
+      HatmasOverlay.send({ action: 'youtube_started' });
     }
     setStatus('Playing', 'active');
     startProgressReporting();
@@ -248,26 +228,17 @@ function onPlayerError(event) {
   setStatus(`Error: ${msg}`, '');
   stopProgressReporting();
   currentVideoId = null;
-  reportAction('youtube_ended');
+  HatmasOverlay.send({ action: 'youtube_ended' });
 }
 
-// === SERVER COMMUNICATION ===
-
-function reportAction(action, extraData) {
-  const body = { action, ...extraData };
-  fetch(`${API_URL}/api/action`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  }).catch(err => console.error('[HatmasBot YT] Report failed:', err));
-}
+// === PROGRESS REPORTING VIA WEBSOCKET ===
 
 function startProgressReporting() {
   stopProgressReporting();
   progressInterval = setInterval(() => {
     if (player && typeof player.getCurrentTime === 'function') {
       const progressMs = Math.floor(player.getCurrentTime() * 1000);
-      reportAction('youtube_progress', { progress_ms: progressMs });
+      HatmasOverlay.send({ action: 'youtube_progress', progress_ms: progressMs });
     }
   }, 2000);
 }
@@ -279,51 +250,56 @@ function stopProgressReporting() {
   }
 }
 
-// === POLLING ===
+// === PLAY A VIDEO ===
+function playVideo(videoId) {
+  if (!isReady || !player) return;
 
-async function poll() {
-  if (!isReady) return;
-
-  try {
-    const resp = await fetch(`${API_URL}/api/state`);
-    const data = await resp.json();
-    const yt = data.youtube_playback;
-
-    if (!yt || !yt.video_id || yt.status === 'idle') {
-      // Nothing to play — stop if we were playing
-      if (currentVideoId) {
-        console.log('[HatmasBot YT] Stopping (cleared by server)');
-        player.stopVideo();
-        stopProgressReporting();
-        currentVideoId = null;
-        setStatus('Waiting for song requests...', 'waiting');
-      }
-      pendingVideoId = null;
-      return;
-    }
-
-    // New video to play
-    if (yt.video_id !== currentVideoId && yt.video_id !== pendingVideoId && yt.status === 'pending') {
-      if (!audioEnabled) {
-        // Can't autoplay yet — queue it for when the user clicks Enable
-        pendingVideoId = yt.video_id;
-        console.log('[HatmasBot YT] Video queued, waiting for audio enable:', yt.video_id);
-        setStatus('Song waiting — click Enable Audio above', '');
-        return;
-      }
-
-      currentVideoId = yt.video_id;
-      hasReportedStarted = false;
-      pendingVideoId = null;
-      console.log('[HatmasBot YT] Loading video:', currentVideoId);
-      player.loadVideoById(currentVideoId);
-    }
-  } catch (e) {
-    // Server not ready yet
+  if (!audioEnabled) {
+    pendingVideoId = videoId;
+    console.log('[HatmasBot YT] Video queued, waiting for audio enable:', videoId);
+    setStatus('Song waiting — click Enable Audio above', '');
+    return;
   }
+
+  currentVideoId = videoId;
+  hasReportedStarted = false;
+  pendingVideoId = null;
+  console.log('[HatmasBot YT] Loading video:', currentVideoId);
+  player.loadVideoById(currentVideoId);
 }
 
-setInterval(poll, 1000);
+function stopVideo() {
+  if (currentVideoId && player) {
+    console.log('[HatmasBot YT] Stopping (cleared by server)');
+    player.stopVideo();
+    stopProgressReporting();
+    currentVideoId = null;
+    setStatus('Waiting for song requests...', 'waiting');
+  }
+  pendingVideoId = null;
+}
+
+// === OVERLAY MANAGER CONNECTION ===
+
+HatmasOverlay.connect('youtube_player', {
+  container: '#player-wrap',
+  onShow(data) {
+    // youtube_play event — data has {video_id}
+    if (data && data.video_id) {
+      playVideo(data.video_id);
+    }
+  },
+  onUpdate(data) {
+    // Could receive updated playback info
+    if (data && data.video_id && data.video_id !== currentVideoId) {
+      playVideo(data.video_id);
+    }
+  },
+  onHide() {
+    // youtube_ended from server — stop playback
+    stopVideo();
+  }
+});
 </script>
 </body>
 </html>

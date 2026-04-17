@@ -103,10 +103,15 @@ class SmitePlugin:
         # Early god detection from portrait matcher (before tracker.gg responds)
         self._god_from_portrait = False  # True if portrait matcher already set the god
 
+        # Guard against bounce-loop: if kill detector force-ended a match,
+        # don't let tracker.gg re-enter the same match_id.
+        self._force_ended_match_id = None
+
         # Event callbacks — other plugins can register here
         self._on_match_start_callbacks = []
         self._on_god_detected_callbacks = []
         self._on_match_end_callbacks = []
+        self._on_match_result_callbacks = []  # Fired when win/loss is determined
         self._on_stats_update_callbacks = []
 
         # Persistence
@@ -167,6 +172,18 @@ class SmitePlugin:
         self._save_state()
         record = self.get_record_string()
         print(f"[Smite] Daily record updated: {record}")
+
+        # Fire match result callbacks (economy plugin settlement, etc.)
+        if self._on_match_result_callbacks:
+            import asyncio
+            result_data = {
+                "outcome": outcome,
+                "god": self.last_match_result.get("god") if self.last_match_result else None,
+                "stats": self.last_match_result.get("stats") if self.last_match_result else {},
+                "record": record,
+            }
+            asyncio.create_task(self._fire_event(self._on_match_result_callbacks, result_data))
+
         return record
 
     def get_record_string(self):
@@ -190,6 +207,9 @@ class SmitePlugin:
         bot.register_command("record", self.cmd_record)
 
     async def on_ready(self):
+        # Load saved title templates (overrides config defaults if present)
+        self._load_title_templates()
+
         # aiohttp for Twitch API (predictions, broadcaster ID)
         self.session = aiohttp.ClientSession()
         # curl_cffi for tracker.gg (bypasses Cloudflare TLS fingerprinting)
@@ -203,6 +223,10 @@ class SmitePlugin:
         # Start command rotation task
         if TITLE_COMMAND_ROTATION and TITLE_AUTO_UPDATE:
             self._command_rotation_task = asyncio.create_task(self._command_rotation_loop())
+
+        # Ensure god portrait is hidden on startup (clears leftovers from previous session)
+        # Runs as background task because OBS plugin may not be connected yet
+        asyncio.create_task(self._startup_hide_god_image())
 
     # === EVENT REGISTRATION ===
 
@@ -218,6 +242,11 @@ class SmitePlugin:
         """Register a callback for when a match ends."""
         self._on_match_end_callbacks.append(callback)
 
+    def on_match_result(self, callback):
+        """Register a callback for when win/loss is determined.
+        callback receives: {'outcome': 'win'|'loss', 'god': god_info, 'record': '3-1'}"""
+        self._on_match_result_callbacks.append(callback)
+
     async def _fire_event(self, callbacks, data=None):
         for cb in callbacks:
             try:
@@ -225,21 +254,74 @@ class SmitePlugin:
             except Exception as e:
                 print(f"[Smite] Event callback error: {e}")
 
+    # === EARLY MATCH-END DETECTION (from kill detector) ===
+
+    async def force_end_match(self):
+        """
+        Called by the kill detector when it detects non-gameplay screens
+        (lobby, god select, results) before tracker.gg's API drops the
+        live match.  Clears the god portrait from OBS immediately so it
+        doesn't linger for minutes while tracker.gg catches up.
+
+        Also handles jungle practice / custom games where tracker.gg
+        never detects a match (is_in_match stays False) but the portrait
+        was still set via set_god_from_portrait.
+        """
+        if not self.is_in_match and not self._god_from_portrait:
+            return  # Nothing to clean up
+
+        print("[Smite] Force-ending match (kill detector saw non-gameplay)")
+
+        ended_god = self.current_god
+
+        # Remember which match we force-ended so tracker.gg doesn't re-enter it
+        if self.current_match_id:
+            self._force_ended_match_id = self.current_match_id
+
+        self.is_in_match = False
+        self.current_god = None
+        self._god_from_portrait = False
+        self.match_players = []
+        self._poll_state = "IDLE"
+
+        # Clear OBS portrait and overlay
+        self._update_overlay_state()
+        await self._clear_god_image()
+
+        # Revert stream title to lobby default
+        await self._update_stream_title(None)
+
+        # Fire match end callbacks (voiceline clear, prediction prompt, etc.)
+        await self._fire_event(self._on_match_end_callbacks, {
+            "match_id": self.current_match_id,
+            "god": ended_god,
+            "source": "killdetector",
+        })
+
+        # Note: we intentionally skip the post-game data fetch and
+        # win/loss notification here — the normal tracker.gg poll will
+        # no-op when it sees is_in_match is already False.  The post-game
+        # data fetch still happens from the _check_live_match path if
+        # tracker.gg returned data between the KD trigger and the next poll.
+
     # === EARLY GOD DETECTION (from portrait matcher) ===
 
     async def set_god_from_portrait(self, god_name):
         """
         Called by the kill detector's portrait matcher when it identifies
         the god from the in-game portrait.  This fires 2-5 minutes before
-        the tracker.gg API returns god data.
+        the tracker.gg API returns god data, and also works in modes
+        tracker.gg doesn't cover (jungle practice, custom games).
 
-        Sets the OBS god portrait image immediately and announces in chat.
+        Sets the OBS god portrait image immediately.
         When tracker.gg eventually returns the same god, the SEARCHING→FOUND
         transition will skip the re-announcement but still populate the full
-        match data (team, stats, players).
+        match data (team, stats, players).  If tracker.gg returns a different
+        god (misidentification), the portrait is corrected automatically.
+
+        Note: no is_in_match guard — the kill detector's gameplay screen
+        check already ensures we're in actual gameplay before calling this.
         """
-        if not self.is_in_match:
-            return
         if self._god_from_portrait:
             return  # Already set from portrait this match
 
@@ -258,10 +340,6 @@ class SmitePlugin:
 
         self.current_god = god_info
         print(f"[Smite] Early god detection from portrait: {god_name}")
-
-        await self.bot.send_chat(
-            f"Playing {god_name}! (detected from portrait) | Use !god for stats"
-        )
 
         # Fire god detected callbacks (godrequest auto-complete, etc.)
         await self._fire_event(self._on_god_detected_callbacks, god_info)
@@ -503,16 +581,18 @@ class SmitePlugin:
             match_id = match_attrs.get("id")
 
             if not self.is_in_match:
+                # Guard: don't re-enter a match that was just force-ended
+                # by the kill detector.  Wait for tracker.gg to drop it.
+                if match_id and match_id == self._force_ended_match_id:
+                    return
+
                 # === MATCH JUST STARTED ===
+                self._force_ended_match_id = None  # Clear guard for new match
                 self.is_in_match = True
                 self.current_match_id = match_id
                 self.match_start_time = time.time()
                 self._poll_state = "SEARCHING"
                 print(f"[Smite] Match detected! ID: {match_id}")
-
-                await self.bot.send_chat(
-                    "A new game has started! Detecting god..."
-                )
 
                 # Fire match start event
                 await self._fire_event(self._on_match_start_callbacks, {
@@ -536,32 +616,41 @@ class SmitePlugin:
                 if self._poll_state == "SEARCHING":
                     # === GOD JUST IDENTIFIED (from tracker.gg API) ===
                     self._poll_state = "FOUND"
+
+                    # Save portrait god name BEFORE overwriting current_god
+                    portrait_god = self.current_god.get("name", "") if self.current_god else ""
+
                     self.current_god = god_info
                     self.match_players = self._extract_all_players(live_data)
 
                     if self._god_from_portrait:
-                        # Portrait matcher already announced and set the image.
-                        # Just log and update with the full data (team, stats).
-                        print(f"[Smite] Tracker.gg confirmed god: {god_info['name']} "
-                              f"({god_info['team']} side) — portrait already set")
+                        # Portrait matcher already set the image — check if tracker.gg agrees
+                        if portrait_god.lower() != god_info["name"].lower():
+                            # Tracker.gg disagrees with portrait — correct it
+                            print(f"[Smite] Tracker.gg CORRECTED god: "
+                                  f"{portrait_god} → {god_info['name']} "
+                                  f"({god_info['team']} side)")
 
-                        # Update background with correct team color now that we know it
-                        await self._set_god_background(team=god_info.get("team"))
+                            # Re-set OBS portrait to the correct god
+                            await self._set_god_image(god_info["name"],
+                                                      team=god_info.get("team"))
 
-                        # Update the chat message with team info
-                        await self.bot.send_chat(
-                            f"Tracker confirmed: {god_info['team'].title()} side"
-                        )
+                            # Update stream title with corrected god name
+                            await self._update_stream_title(god_info["name"])
+
+                            # Fire god detected callbacks (voicelines, etc.)
+                            await self._fire_event(
+                                self._on_god_detected_callbacks, god_info)
+                        else:
+                            print(f"[Smite] Tracker.gg confirmed god: {god_info['name']} "
+                                  f"({god_info['team']} side) — portrait already set")
+
+                            # Update background with correct team color now that we know it
+                            await self._set_god_background(team=god_info.get("team"))
                     else:
                         # Normal flow — portrait matcher didn't catch it
                         print(f"[Smite] God detected: {god_info['name']} "
                               f"({god_info['team']} side)")
-
-                        await self.bot.send_chat(
-                            f"Playing {god_info['name']}! "
-                            f"({god_info['team'].title()} side) "
-                            f"| Use !god for stats"
-                        )
 
                         # Fire god detected event
                         await self._fire_event(self._on_god_detected_callbacks, god_info)
@@ -842,6 +931,38 @@ class SmitePlugin:
         except Exception as e:
             print(f"[Smite] OBS background error: {e}")
 
+    async def _startup_hide_god_image(self):
+        """Wait for OBS to connect, then instantly hide god portrait on startup."""
+        # Wait up to 15 seconds for OBS plugin to connect
+        for _ in range(30):
+            if "obs" in self.bot.plugins:
+                obs = self.bot.plugins["obs"]
+                if getattr(obs, "client", None) is not None:
+                    break
+            await asyncio.sleep(0.5)
+        else:
+            print("[Smite] Startup hide skipped — OBS never connected")
+            return
+
+        obs = self.bot.plugins["obs"]
+        scene = OBS_GOD_IMAGE_SCENE or None
+        group = OBS_GOD_IMAGE_GROUP or None
+        try:
+            await obs.set_source_filter_value(
+                OBS_SOURCE_GOD_IMAGE, "FadeFilter", {"opacity": 0})
+            await obs.set_source_visible(OBS_SOURCE_GOD_IMAGE, False,
+                                          scene=scene, group=group)
+        except Exception as e:
+            print(f"[Smite] Startup hide god image error: {e}")
+        try:
+            await obs.set_source_filter_value(
+                OBS_SOURCE_GOD_BG, "FadeFilter", {"opacity": 0})
+            await obs.set_source_visible(OBS_SOURCE_GOD_BG, False,
+                                          scene=scene, group=group)
+        except Exception as e:
+            print(f"[Smite] Startup hide background error: {e}")
+        print("[Smite] God portrait hidden on startup")
+
     async def _clear_god_image(self):
         """Fade out then hide the OBS god image and background sources."""
         if "obs" not in self.bot.plugins:
@@ -1026,14 +1147,49 @@ class SmitePlugin:
 
     async def set_title_template(self, god_template=None, lobby_template=None):
         """Update title templates at runtime (from dashboard).
-        Does not persist — templates reset on restart. Use config_local.py for permanent changes."""
+        Persists to data/title_templates.json so templates survive restarts."""
+        import core.config as _cfg
         global TITLE_TEMPLATE_GOD, TITLE_TEMPLATE_LOBBY
         if god_template is not None:
             TITLE_TEMPLATE_GOD = god_template
+            _cfg.TITLE_TEMPLATE_GOD = god_template
             print(f"[Smite] God title template: {god_template}")
         if lobby_template is not None:
             TITLE_TEMPLATE_LOBBY = lobby_template
+            _cfg.TITLE_TEMPLATE_LOBBY = lobby_template
             print(f"[Smite] Lobby title template: {lobby_template}")
+        self._save_title_templates()
+
+    def _save_title_templates(self):
+        """Persist current title templates to disk."""
+        import json
+        try:
+            path = Path(DATA_DIR) / "title_templates.json"
+            path.write_text(json.dumps({
+                "god": TITLE_TEMPLATE_GOD,
+                "lobby": TITLE_TEMPLATE_LOBBY,
+            }, indent=2), encoding="utf-8")
+        except Exception as e:
+            print(f"[Smite] Failed to save title templates: {e}")
+
+    def _load_title_templates(self):
+        """Load saved title templates from disk (overrides config defaults)."""
+        import json
+        import core.config as _cfg
+        global TITLE_TEMPLATE_GOD, TITLE_TEMPLATE_LOBBY
+        path = Path(DATA_DIR) / "title_templates.json"
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if "god" in data:
+                    TITLE_TEMPLATE_GOD = data["god"]
+                    _cfg.TITLE_TEMPLATE_GOD = data["god"]
+                if "lobby" in data:
+                    TITLE_TEMPLATE_LOBBY = data["lobby"]
+                    _cfg.TITLE_TEMPLATE_LOBBY = data["lobby"]
+                print(f"[Smite] Loaded saved title templates")
+            except Exception as e:
+                print(f"[Smite] Failed to load title templates: {e}")
 
     def add_rotation_command(self, command):
         """Add a command to the rotation list at runtime."""

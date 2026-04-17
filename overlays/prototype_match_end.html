@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Hatmas Market — Match End Report</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Inter:wght@400;500;600;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: transparent;
+    overflow: hidden;
+    width: 500px;
+    height: 400px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .report {
+    width: 440px;
+    background: linear-gradient(155deg, rgba(10,10,20,0.96) 0%, rgba(6,6,14,0.98) 100%);
+    border: 1px solid rgba(212,175,55,0.3);
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 12px 48px rgba(0,0,0,0.6);
+    opacity: 0;
+    transform: scale(0.9) translateY(20px);
+    animation: report-enter 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.5s forwards;
+  }
+
+  @keyframes report-enter {
+    to {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+  }
+
+  /* Result banner */
+  .result-banner {
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .result-banner.victory {
+    background: linear-gradient(135deg, rgba(74,222,128,0.15), rgba(74,222,128,0.05));
+    border-bottom: 1px solid rgba(74,222,128,0.2);
+  }
+
+  .result-banner.defeat {
+    background: linear-gradient(135deg, rgba(248,113,113,0.15), rgba(248,113,113,0.05));
+    border-bottom: 1px solid rgba(248,113,113,0.2);
+  }
+
+  .result-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    flex-shrink: 0;
+  }
+
+  .victory .result-icon {
+    background: rgba(74,222,128,0.15);
+    border: 2px solid rgba(74,222,128,0.4);
+  }
+
+  .defeat .result-icon {
+    background: rgba(248,113,113,0.15);
+    border: 2px solid rgba(248,113,113,0.4);
+  }
+
+  .result-text {
+    flex: 1;
+  }
+
+  .result-label {
+    font-family: 'Orbitron', monospace;
+    font-weight: 900;
+    font-size: 18px;
+    letter-spacing: 3px;
+  }
+
+  .victory .result-label { color: #4ade80; }
+  .defeat .result-label { color: #f87171; }
+
+  .result-god {
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    color: #94a3b8;
+    margin-top: 2px;
+  }
+
+  .result-kda {
+    font-family: 'Orbitron', monospace;
+    font-weight: 700;
+    font-size: 20px;
+    color: #e8e8f0;
+    text-align: right;
+  }
+
+  /* Market impact section */
+  .market-impact {
+    padding: 18px 20px;
+  }
+
+  .section-title {
+    font-family: 'Orbitron', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    color: #64748b;
+    letter-spacing: 2px;
+    margin-bottom: 14px;
+  }
+
+  .price-movement {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+
+  .price-from-to {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .price-old {
+    font-family: 'Orbitron', monospace;
+    font-size: 20px;
+    color: #64748b;
+    text-decoration: line-through;
+    text-decoration-color: rgba(100,116,139,0.4);
+  }
+
+  .price-arrow {
+    font-size: 16px;
+    color: #475569;
+  }
+
+  .price-new {
+    font-family: 'Orbitron', monospace;
+    font-weight: 900;
+    font-size: 28px;
+  }
+
+  .price-new.up { color: #4ade80; }
+  .price-new.down { color: #f87171; }
+
+  .price-pct {
+    font-family: 'Orbitron', monospace;
+    font-weight: 700;
+    font-size: 22px;
+    padding: 4px 12px;
+    border-radius: 6px;
+  }
+
+  .price-pct.up {
+    color: #4ade80;
+    background: rgba(74,222,128,0.1);
+    border: 1px solid rgba(74,222,128,0.2);
+  }
+
+  .price-pct.down {
+    color: #f87171;
+    background: rgba(248,113,113,0.1);
+    border: 1px solid rgba(248,113,113,0.2);
+  }
+
+  /* Shares distributed */
+  .shares-dist {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(212,175,55,0.06);
+    border: 1px solid rgba(212,175,55,0.15);
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 14px;
+  }
+
+  .shares-icon {
+    font-size: 18px;
+  }
+
+  .shares-text {
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    color: #94a3b8;
+  }
+
+  .shares-text strong {
+    color: #d4af37;
+  }
+
+  /* Top movers mini-list */
+  .movers {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .mover {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(30,30,50,0.5);
+    border: 1px solid rgba(100,116,139,0.15);
+    border-radius: 6px;
+    padding: 5px 10px;
+    flex: 1;
+    min-width: 120px;
+  }
+
+  .mover-name {
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    color: #cbd5e1;
+    flex: 1;
+  }
+
+  .mover-change {
+    font-family: 'Orbitron', monospace;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .mover-change.up { color: #4ade80; }
+  .mover-change.down { color: #f87171; }
+
+  /* Footer */
+  .report-footer {
+    padding: 10px 20px;
+    border-top: 1px solid rgba(212,175,55,0.1);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .market-label {
+    font-family: 'Orbitron', monospace;
+    font-size: 9px;
+    font-weight: 700;
+    color: rgba(212,175,55,0.5);
+    letter-spacing: 2px;
+  }
+
+  .viewers-count {
+    font-family: 'Inter', sans-serif;
+    font-size: 11px;
+    color: #64748b;
+  }
+
+  /* Auto-dismiss */
+  .report {
+    animation: report-enter 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.5s forwards,
+               report-exit 0.5s ease-in 12s forwards;
+  }
+
+  @keyframes report-exit {
+    to {
+      opacity: 0;
+      transform: scale(0.95) translateY(-10px);
+    }
+  }
+</style>
+</head>
+<body>
+
+<div class="report">
+  <div class="result-banner victory">
+    <div class="result-icon">❄️</div>
+    <div class="result-text">
+      <div class="result-label">VICTORY</div>
+      <div class="result-god">Ymir — Conquest</div>
+    </div>
+    <div class="result-kda">8 / 2 / 6</div>
+  </div>
+
+  <div class="market-impact">
+    <div class="section-title">MARKET UPDATE</div>
+
+    <div class="price-movement">
+      <div class="price-from-to">
+        <span class="price-old">280</span>
+        <span class="price-arrow">→</span>
+        <span class="price-new up">312</span>
+      </div>
+      <div class="price-pct up">▲ +11.4%</div>
+    </div>
+
+    <div class="shares-dist">
+      <span class="shares-icon">🎁</span>
+      <span class="shares-text"><strong>1 free share</strong> distributed to <strong>142</strong> viewers — worth <strong>312 hats</strong></span>
+    </div>
+
+    <div class="section-title" style="margin-top: 4px;">SESSION MOVERS</div>
+    <div class="movers">
+      <div class="mover">
+        <span>❄️</span>
+        <span class="mover-name">Ymir</span>
+        <span class="mover-change up">+11.4%</span>
+      </div>
+      <div class="mover">
+        <span>🦝</span>
+        <span class="mover-name">Danzaburou</span>
+        <span class="mover-change up">+8.2%</span>
+      </div>
+      <div class="mover">
+        <span>🔥</span>
+        <span class="mover-name">Agni</span>
+        <span class="mover-change down">-6.1%</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="report-footer">
+    <span class="market-label">HATMAS MARKET</span>
+    <span class="viewers-count">!portfolio · !price · !buy · !sell</span>
+  </div>
+</div>
+
+</body>
+</html>

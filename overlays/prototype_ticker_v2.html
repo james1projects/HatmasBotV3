@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Hatmas Market — Ticker v2</title>
+<link rel="stylesheet" href="hatmas_theme.css">
+<style>
+  body {
+    background: transparent;
+    overflow: hidden;
+    width: 1920px;
+    height: 120px;
+  }
+
+  .ticker {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 52px;
+    background: var(--hm-bg);
+    border-top: 1px solid var(--hm-border);
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+  }
+
+  .label {
+    flex-shrink: 0;
+    color: var(--hm-text-secondary);
+    font-family: 'BigNoodleTitling', 'Poppins', sans-serif;
+    font-weight: normal;
+    font-size: 16px;
+    letter-spacing: 2px;
+    padding: 0 16px;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    border-right: 1px solid var(--hm-border);
+    text-transform: uppercase;
+  }
+
+  .scroll-wrap {
+    overflow: hidden;
+    flex: 1;
+  }
+
+  .scroll {
+    display: flex;
+    animation: scroll 45s linear infinite;
+  }
+
+  @keyframes scroll {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+  }
+
+  .item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 22px;
+    height: 52px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--hm-border-subtle);
+  }
+
+  .item.active {
+    background: rgba(196, 168, 130, 0.03);
+  }
+
+  .icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    overflow: hidden;
+    flex-shrink: 0;
+    background: var(--hm-icon-bg);
+  }
+
+  .icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .item.active .icon {
+    box-shadow: 0 0 0 1.5px rgba(196, 168, 130, 0.2);
+  }
+
+  .info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .name {
+    font-family: 'Poppins', sans-serif;
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--hm-text);
+    white-space: nowrap;
+  }
+
+  .price {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--hm-text);
+  }
+
+  .change {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 500;
+    font-size: 11px;
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  .change.up {
+    color: var(--hm-green);
+    background: var(--hm-green-bg);
+  }
+
+  .change.down {
+    color: var(--hm-red);
+    background: var(--hm-red-bg);
+  }
+
+  .change.flat {
+    color: var(--hm-text-muted);
+  }
+
+  .spark {
+    width: 40px;
+    height: 18px;
+    flex-shrink: 0;
+  }
+
+  .spark svg {
+    width: 100%;
+    height: 100%;
+  }
+
+</style>
+</head>
+<body>
+
+<div class="ticker hm-panel">
+  <div class="label">Market</div>
+  <div class="scroll-wrap">
+    <div class="scroll" id="scroll"></div>
+  </div>
+</div>
+
+<script>
+const CUSTOM_ICON_PATH = '../Custom God Icons/';
+const DEFAULT_ICON_PATH = '../data/god_icons/';
+
+const gods = [
+  { name: "Ymir",       price: 287, change: +10.2, trend: [240,255,261,270,265,280,287], active: true },
+  { name: "Athena",     price: 215, change: +6.8,  trend: [190,195,200,198,210,208,215] },
+  { name: "Thanatos",   price: 178, change: -3.4,  trend: [192,185,183,180,182,178,178] },
+  { name: "Danzaburou", price: 156, change: +12.1, trend: [115,130,128,140,145,150,156] },
+  { name: "Bellona",    price: 142, change: +1.2,  trend: [136,140,139,141,138,140,142] },
+  { name: "Anubis",     price: 118, change: -8.5,  trend: [140,135,130,128,125,120,118] },
+  { name: "Loki",       price: 32,  change: -5.9,  trend: [55,50,42,40,38,35,32] },
+  { name: "Zeus",       price: 100, change: 0,     trend: [100,100,100,100,100,100,100] },
+  { name: "Poseidon",   price: 203, change: +4.1,  trend: [182,185,190,188,195,198,203] },
+  { name: "Agni",       price: 89,  change: -11.0, trend: [120,115,108,100,95,92,89] },
+  { name: "Kukulkan",   price: 165, change: +7.3,  trend: [135,140,148,150,155,160,165] },
+  { name: "Hercules",   price: 194, change: +2.8,  trend: [180,183,185,188,190,192,194] },
+];
+
+function getColorFromCSS(varName) {
+  return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+}
+
+function sparkline(trend, isUp) {
+  const w = 40, h = 18;
+  const min = Math.min(...trend);
+  const max = Math.max(...trend);
+  const range = max - min || 1;
+  const pts = trend.map((v, i) => {
+    const x = (i / (trend.length - 1)) * w;
+    const y = h - 1 - ((v - min) / range) * (h - 2);
+    return `${x},${y}`;
+  }).join(' ');
+
+  let color = isUp ? getColorFromCSS('--hm-green') : (trend[trend.length-1] === trend[0] ? getColorFromCSS('--hm-text-muted') : getColorFromCSS('--hm-red'));
+
+  return `<svg viewBox="0 0 ${w} ${h}"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+}
+
+function customIconUrl(name) {
+  return CUSTOM_ICON_PATH + name + '.png';
+}
+
+function defaultIconUrl(name) {
+  return DEFAULT_ICON_PATH + name.toLowerCase().replace(/\s+/g, '-') + '.png';
+}
+
+function render() {
+  const el = document.getElementById('scroll');
+  let html = '';
+  for (let dup = 0; dup < 2; dup++) {
+    gods.forEach(g => {
+      const cls = g.change > 0 ? 'up' : g.change < 0 ? 'down' : 'flat';
+      const arrow = g.change > 0 ? '+' : '';
+      const changeStr = g.change === 0 ? '—' : `${arrow}${g.change.toFixed(1)}%`;
+      const spark = sparkline(g.trend, g.change >= 0);
+      html += `
+        <div class="item ${g.active ? 'active' : ''}">
+          <div class="icon">
+            <img src="${customIconUrl(g.name)}" onerror="this.src='${defaultIconUrl(g.name)}'" alt="${g.name}">
+          </div>
+          <div class="info">
+            <span class="name">${g.name}</span>
+            <span class="price">${g.price}</span>
+            <span class="change ${cls}">${changeStr}</span>
+          </div>
+          <div class="spark">${spark}</div>
+        </div>`;
+    });
+  }
+  el.innerHTML = html;
+}
+
+render();
+</script>
+</body>
+</html>

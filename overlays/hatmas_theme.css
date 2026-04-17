@@ -1,0 +1,201 @@
+/**
+ * Hatmas Market — Shared Theme
+ * =============================
+ * All economy overlays import this file for consistent colors, fonts, and styling.
+ *
+ * Usage in HTML: <link rel="stylesheet" href="hatmas_theme.css">
+ */
+
+/* === GOOGLE FONTS === */
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+/* === LOCAL FONTS === */
+@font-face {
+  font-family: 'BigNoodleTitling';
+  src: local('BigNoodleTitling'), local('Big Noodle Titling'), local('big_noodle_titling');
+  font-weight: normal;
+  font-style: normal;
+}
+
+/* === GOD ICON PATHS (for reference in JS) === */
+/* Custom: ../Custom God Icons/{GodName}.png  */
+/* Fallback: ../data/god_icons/{godname}.png  */
+
+/* ============================
+   THEME VARIABLES
+   ============================ */
+:root {
+  /* Background & surface */
+  --hm-bg:             rgba(12, 13, 22, 0.94);
+  --hm-bg-subtle:      rgba(196, 168, 130, 0.03);
+  --hm-border:         rgba(196, 168, 130, 0.12);
+  --hm-border-subtle:  rgba(196, 168, 130, 0.06);
+  --hm-icon-bg:        rgba(196, 168, 130, 0.08);
+
+  /* Text */
+  --hm-text:           #f0e8de;
+  --hm-text-secondary: rgba(220, 195, 165, 0.75);
+  --hm-text-muted:     rgba(220, 195, 165, 0.5);
+
+  /* Accent / brand */
+  --hm-gold:           #c4a882;
+  --hm-gold-bright:    #d4b892;
+  --hm-gold-glow:      rgba(196, 168, 130, 0.15);
+
+  /* Positive / negative */
+  --hm-green:          #4ade80;
+  --hm-green-bg:       rgba(74, 222, 128, 0.08);
+  --hm-green-glow:     rgba(74, 222, 128, 0.12);
+  --hm-red:            #f87171;
+  --hm-red-bg:         rgba(248, 113, 113, 0.08);
+  --hm-red-glow:       rgba(248, 113, 113, 0.12);
+
+  /* Special */
+  --hm-blue:           #60a5fa;
+  --hm-blue-bg:        rgba(96, 165, 250, 0.06);
+  --hm-separator:      rgba(255, 255, 255, 0.04);
+
+  /* KDA colors */
+  --hm-kills:          #4ade80;
+  --hm-deaths:         #f87171;
+  --hm-assists:        #60a5fa;
+
+  /* Accent */
+  --hm-accent:         var(--hm-gold);
+  --hm-accent-glow:    var(--hm-gold-glow);
+}
+
+/* ============================
+   GLOBAL RESETS & BASE
+   ============================ */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+
+/* ============================
+   SHARED COMPONENT CLASSES
+   ============================ */
+
+/* Panel / card base */
+.hm-panel {
+  background: var(--hm-bg);
+  border: 1px solid var(--hm-border);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  position: relative;
+}
+
+/* God icon */
+.hm-god-icon {
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--hm-icon-bg);
+  flex-shrink: 0;
+}
+
+.hm-god-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Section divider */
+.hm-divider {
+  border: none;
+  border-top: 1px solid var(--hm-border-subtle);
+}
+
+/* Title text (BigNoodleTitling) */
+.hm-title {
+  font-family: 'BigNoodleTitling', 'Poppins', sans-serif;
+  font-weight: normal;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--hm-text);
+}
+
+/* Body text */
+.hm-body {
+  font-family: 'Poppins', sans-serif;
+  color: var(--hm-text);
+}
+
+/* Mono numbers */
+.hm-mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Positive change */
+.hm-positive {
+  color: var(--hm-green);
+}
+
+.hm-positive-bg {
+  color: var(--hm-green);
+  background: var(--hm-green-bg);
+}
+
+/* Negative change */
+.hm-negative {
+  color: var(--hm-red);
+}
+
+.hm-negative-bg {
+  color: var(--hm-red);
+  background: var(--hm-red-bg);
+}
+
+/* Gold accent */
+.hm-gold {
+  color: var(--hm-gold);
+}
+
+/* Muted text */
+.hm-muted {
+  color: var(--hm-text-muted);
+}
+
+/* ============================
+   HAT CURRENCY ICON
+   ============================ */
+
+/* Inline hat icon — use inside any text element.
+   Usage:  <img class="hat-icon" src="/overlays/hat.png">118.20 hats
+   Sizes:  hat-icon-sm (10px), hat-icon (matches font), hat-icon-lg (20px) */
+.hat-icon {
+  display: inline-block;
+  height: 1em;
+  width: auto;
+  vertical-align: middle;
+  margin-right: 2px;
+  position: relative;
+  top: -1px;
+}
+
+.hat-icon-sm {
+  display: inline-block;
+  height: 10px;
+  width: auto;
+  vertical-align: middle;
+  margin-right: 1px;
+  position: relative;
+  top: -1px;
+}
+
+.hat-icon-lg {
+  display: inline-block;
+  height: 20px;
+  width: auto;
+  vertical-align: middle;
+  margin-right: 3px;
+  position: relative;
+  top: -1px;
+}
+
+/* ============================
+   SPARKLINE HELPER COLORS
+   (Used by JS when drawing)
+   ============================ */
+/* Access in JS via:
+   getComputedStyle(document.documentElement).getPropertyValue('--hm-green').trim()
+*/

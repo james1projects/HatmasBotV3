@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Hatmas Market — Dividend v2</title>
+<link rel="stylesheet" href="hatmas_theme.css">
+<style>
+  body {
+    background: transparent;
+    overflow: hidden;
+    width: 420px;
+    height: 170px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+  }
+
+  .popup {
+    width: 380px;
+    background: var(--hm-bg);
+    border: 1px solid var(--hm-border);
+    border-radius: 10px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 16px;
+    position: relative;
+
+    opacity: 0;
+    transform: translateY(-20px);
+    animation: enter 0.35s ease-out 0.2s forwards;
+    /* exit animation removed for prototype testing — production uses websocket hide */
+  }
+
+  @keyframes enter {
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Subtle top accent */
+  .popup::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent 10%, var(--hm-gold) 50%, transparent 90%);
+    opacity: 0.6;
+  }
+
+  .god-img {
+    width: 48px;
+    height: 48px;
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--hm-icon-bg);
+    flex-shrink: 0;
+  }
+
+  .god-img img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .content {
+    flex: 1;
+  }
+
+  .tag {
+    font-family: 'BigNoodleTitling', 'Poppins', sans-serif;
+    font-size: 16px;
+    font-weight: normal;
+    color: var(--hm-gold);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 1px;
+  }
+
+  .main-text {
+    font-family: 'Poppins', sans-serif;
+    font-size: 14px;
+    color: var(--hm-text);
+    line-height: 1.3;
+  }
+
+  .main-text strong {
+    color: var(--hm-text);
+    font-weight: 700;
+  }
+
+  .sub-text {
+    font-family: 'Poppins', sans-serif;
+    font-size: 11px;
+    color: var(--hm-text-muted);
+    margin-top: 2px;
+  }
+
+  .sub-text strong {
+    color: var(--hm-text-secondary);
+  }
+
+  .payout {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 18px;
+    color: var(--hm-gold);
+    flex-shrink: 0;
+    text-align: right;
+  }
+
+  .payout-label {
+    font-family: 'Poppins', sans-serif;
+    font-size: 9px;
+    color: var(--hm-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    text-align: right;
+  }
+
+  .payout-wrap {
+    flex-shrink: 0;
+    text-align: right;
+  }
+
+</style>
+</head>
+<body>
+
+<div class="popup hm-panel">
+  <div class="god-img">
+    <img src="../Custom God Icons/Ymir.png" onerror="this.src='../data/god_icons/ymir.png'">
+  </div>
+
+  <div class="content">
+    <div class="tag">Dividend</div>
+    <div class="main-text"><strong>Ymir</strong> shareholders paid <strong id="payout-percent">0%</strong></div>
+    <div class="sub-text"><strong>47</strong> holders · <strong>2,340</strong> hats distributed</div>
+  </div>
+
+  <div class="payout-wrap">
+    <div class="payout" id="payout-display">0%</div>
+    <div class="payout-label">per share</div>
+  </div>
+</div>
+
+<script>
+  // Animation function for counting up the payout percentage
+  function animatePayoutPercentage(targetPercent, duration = 600) {
+    const payoutDisplay = document.getElementById('payout-display');
+    const payoutPercent = document.getElementById('payout-percent');
+    const startTime = performance.now();
+    const startValue = 0;
+
+    function update(currentTime) {
+      const elapsed = currentTime - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      const currentValue = Math.floor(startValue + (targetPercent - startValue) * progress);
+
+      payoutDisplay.textContent = currentValue + '%';
+      payoutPercent.textContent = currentValue + '%';
+
+      if (progress < 1) {
+        requestAnimationFrame(update);
+      }
+    }
+
+    requestAnimationFrame(update);
+  }
+
+// Trigger the animation when the page loads
+  window.addEventListener('load', function() {
+    animatePayoutPercentage(5, 600);
+  });
+
+  // Also animate on DOMContentLoaded in case load doesn't fire
+  document.addEventListener('DOMContentLoaded', function() {
+    animatePayoutPercentage(5, 600);
+  });
+</script>
+
+</body>
+</html>

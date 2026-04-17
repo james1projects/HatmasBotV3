@@ -33,6 +33,7 @@ def generate_auth_url(scopes):
         "redirect_uri": REDIRECT_URI,
         "response_type": "code",
         "scope": " ".join(scopes),
+        "force_verify": "true",
     }
     return f"https://id.twitch.tv/oauth2/authorize?{urllib.parse.urlencode(params)}"
 

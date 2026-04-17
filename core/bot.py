@@ -142,6 +142,17 @@ class HatmasBot(commands.Bot):
             except Exception as e:
                 print(f"[HatmasBot] Raid subscription failed: {e}")
 
+            # Subscribe to ALL channel point redemptions (voice lines filter in handler).
+            # Uses manual Helix API call because TwitchIO v3.2.1 has a bug where
+            # subscribe_websocket() picks the bot token instead of the broadcaster
+            # token for ChannelPointsRedeemAddSubscription, causing 403.
+            try:
+                await self._manual_channel_points_subscribe()
+                print(f"[HatmasBot] Subscribed to channel point redemption events")
+            except Exception as e:
+                print(f"[HatmasBot] Channel point redemption subscription failed: {e}")
+                print("[HatmasBot] Voice line redemptions won't be detected automatically")
+
         print(f"[HatmasBot] Commands: {list(self._custom_commands.keys())}")
         print(f"[HatmasBot] Plugins: {list(self.plugins.keys())}")
 
@@ -499,6 +510,105 @@ class HatmasBot(commands.Bot):
                         print(f"[HatmasBot] Shoutout API error: {resp.status} {body}")
         except Exception as e:
             print(f"[HatmasBot] Official shoutout failed: {e}")
+
+    # =============================================================
+    # CHANNEL POINT REDEMPTIONS
+    # =============================================================
+
+    async def event_custom_redemption_add(self, payload):
+        """Fired when a viewer redeems a custom channel point reward."""
+        try:
+            reward_id = payload.reward.id if hasattr(payload, "reward") else None
+            # TwitchIO model uses .user.name, not .user_name
+            user_name = "unknown"
+            if hasattr(payload, "user") and payload.user:
+                user_name = getattr(payload.user, "name", None) or getattr(payload.user, "display_name", "unknown")
+            elif hasattr(payload, "user_name"):
+                user_name = payload.user_name
+            if not reward_id:
+                return
+
+            # Dispatch to voice line plugin if it handles this reward
+            vl = self.plugins.get("voicelines")
+            if vl and hasattr(vl, "handle_redemption"):
+                handled = await vl.handle_redemption(reward_id, user_name)
+                if handled:
+                    return
+
+        except Exception as e:
+            print(f"[HatmasBot] Redemption handler error: {e}")
+
+    # =============================================================
+    # MANUAL EVENTSUB SUBSCRIPTION (workaround for TwitchIO token bug)
+    # =============================================================
+
+    async def _manual_channel_points_subscribe(self):
+        """Create a channel point redemption EventSub subscription via direct
+        Helix API call, bypassing TwitchIO's token selection which picks the
+        wrong token for this subscription type.
+
+        TwitchIO v3.2.1 bug: subscribe_websocket() uses the bot token instead
+        of the broadcaster token for ChannelPointsRedeemAddSubscription, even
+        though the broadcaster token has the required scopes and matching user_id.
+        This workaround makes the same API call directly with the correct token.
+        """
+        import aiohttp as _aiohttp
+
+        if not self.token_manager:
+            raise RuntimeError("No token_manager available")
+
+        # Get WebSocket session_id from TwitchIO internals.
+        # _websockets is a defaultdict[user_id_str] → dict[session_id_str] → Websocket
+        ws_session_id = None
+        ws_obj = getattr(self, "_websockets", None)
+        if isinstance(ws_obj, dict):
+            # Prefer broadcaster's WebSocket, fall back to bot's
+            for key in (str(self._owner_id), str(self._bot_id)):
+                inner = ws_obj.get(key, {})
+                if isinstance(inner, dict):
+                    for ws_node in inner.values():
+                        if hasattr(ws_node, "session_id"):
+                            ws_session_id = ws_node.session_id
+                            break
+                if ws_session_id:
+                    break
+
+        if not ws_session_id:
+            raise RuntimeError("Cannot find TwitchIO WebSocket session_id")
+
+        print(f"[HatmasBot] Using WebSocket session_id: {ws_session_id}")
+
+        bc_token = self.token_manager._broadcaster_token
+        headers = {
+            "Client-Id": TWITCH_CLIENT_ID,
+            "Authorization": f"Bearer {bc_token}",
+            "Content-Type": "application/json",
+        }
+
+        body = {
+            "type": "channel.channel_points_custom_reward_redemption.add",
+            "version": "1",
+            "condition": {
+                "broadcaster_user_id": str(self._owner_id),
+            },
+            "transport": {
+                "method": "websocket",
+                "session_id": ws_session_id,
+            },
+        }
+
+        async with _aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api.twitch.tv/helix/eventsub/subscriptions",
+                headers=headers,
+                json=body,
+            ) as resp:
+                resp_text = await resp.text()
+                if resp.status in (200, 202):
+                    print(f"[HatmasBot] Manual channel point subscription succeeded!")
+                else:
+                    print(f"[HatmasBot] Manual subscription response: {resp.status} {resp_text}")
+                    raise RuntimeError(f"Manual subscription failed: {resp.status} {resp_text}")
 
     # =============================================================
     # UTILITY METHODS

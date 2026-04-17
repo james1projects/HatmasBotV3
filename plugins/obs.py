@@ -27,7 +27,9 @@ class OBSPlugin:
         bot.register_command("overlay", self.cmd_overlay, mod_only=True)
 
     async def on_ready(self):
-        await self._connect()
+        connected = await self._connect()
+        if connected:
+            await self._refresh_all_browser_sources()
 
     async def _connect(self):
         try:
@@ -124,6 +126,26 @@ class OBSPlugin:
         except Exception as e:
             print(f"[OBS] Text update error: {e}")
             return False
+
+    async def _refresh_all_browser_sources(self):
+        """Refresh all browser sources on startup to clear OBS cache."""
+        try:
+            inputs = self.client.get_input_list("browser_source")
+            browser_sources = inputs.inputs
+            if not browser_sources:
+                print("[OBS] No browser sources found to refresh")
+                return
+            for src in browser_sources:
+                name = src.get("inputName", src.get("input_name", ""))
+                if name:
+                    try:
+                        self.client.press_input_properties_button(name, "refreshnocache")
+                        print(f"[OBS] Refreshed browser source: {name}")
+                    except Exception as e:
+                        print(f"[OBS] Failed to refresh '{name}': {e}")
+            print(f"[OBS] Startup refresh complete — {len(browser_sources)} browser source(s)")
+        except Exception as e:
+            print(f"[OBS] Startup browser refresh error: {e}")
 
     async def refresh_browser_source(self, source_name):
         self._ensure_connected()

@@ -107,6 +107,17 @@ body {
   transform: scale(1.3);
 }
 
+.like-cmd {
+  font-family: 'Inter', sans-serif;
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(196, 168, 130, 0.35);
+  border: 1px solid rgba(196, 168, 130, 0.15);
+  border-radius: 3px;
+  padding: 0 4px;
+  letter-spacing: 0.5px;
+}
+
 .progress-bar {
   position: absolute;
   bottom: 0;
@@ -188,6 +199,7 @@ body {
     <div class="meta-row">
       <span class="requester" id="requester">—</span>
       <span class="likes" id="likes">♡ 0</span>
+      <span class="like-cmd">!like</span>
     </div>
   </div>
   <div class="progress-bar">
@@ -196,8 +208,8 @@ body {
   <div class="time" id="timeDisplay">0:00 / 0:00</div>
 </div>
 
+<script src="/overlays/overlay_client.js"></script>
 <script>
-const API_URL = 'http://localhost:8069/api/state';
 const el = {
   container: document.getElementById('nowPlaying'),
   art: document.getElementById('albumArt'),
@@ -211,44 +223,15 @@ const el = {
   heartContainer: document.getElementById('heartContainer'),
 };
 
-let currentSong = null;
+let currentSongData = null;
 let lastLikes = 0;
-let hideTimer = null;
-let isVisible = false;
-let lastLikeEvent = 0;  // Track the like_event timestamp we last saw
-let likeReshown = false; // True when overlay was re-shown by a like (not by a song starting)
+let progressAnimFrame = null;
 
 function formatTime(ms) {
   const s = Math.floor(ms / 1000);
   const m = Math.floor(s / 60);
   const sec = s % 60;
   return `${m}:${sec.toString().padStart(2, '0')}`;
-}
-
-function showOverlay() {
-  if (hideTimer) {
-    clearTimeout(hideTimer);
-    hideTimer = null;
-  }
-  el.container.classList.add('visible');
-  isVisible = true;
-}
-
-function hideOverlay(delay = 0) {
-  if (hideTimer) {
-    clearTimeout(hideTimer);
-    hideTimer = null;
-  }
-  if (delay > 0) {
-    hideTimer = setTimeout(() => {
-      el.container.classList.remove('visible');
-      isVisible = false;
-      hideTimer = null;
-    }, delay);
-  } else {
-    el.container.classList.remove('visible');
-    isVisible = false;
-  }
 }
 
 function spawnHearts(count = 5) {
@@ -258,20 +241,15 @@ function spawnHearts(count = 5) {
       heart.className = 'floating-heart';
       heart.textContent = '♥';
 
-      // Random position along the bottom-right area of the overlay
-      const xPos = 60 + Math.random() * 60; // 60%–120% from left (clustered right side)
+      const xPos = 60 + Math.random() * 60;
       heart.style.left = xPos + '%';
       heart.style.bottom = '10px';
 
-      // Random size variation
       const scale = 0.7 + Math.random() * 0.8;
       heart.style.fontSize = (18 * scale) + 'px';
-
-      // Slight delay variation for natural feel
       heart.style.animationDelay = (Math.random() * 0.3) + 's';
       heart.style.animationDuration = (1.4 + Math.random() * 0.8) + 's';
 
-      // Random warm color
       const colors = [
         'rgba(232, 120, 100, 0.9)',
         'rgba(240, 140, 120, 0.9)',
@@ -282,125 +260,130 @@ function spawnHearts(count = 5) {
       heart.style.color = colors[Math.floor(Math.random() * colors.length)];
 
       el.heartContainer.appendChild(heart);
-
-      // Clean up after animation
       heart.addEventListener('animationend', () => heart.remove());
     }, i * 120);
   }
 }
 
-function updateDisplay(data) {
-  const np = data.now_playing;
+function renderSong(data) {
+  if (!data) return;
 
-  // Check for like events (hearts!) — check BEFORE the np null check
-  // so hearts still work when overlay is hidden (like on a playlist song)
-  if (data.like_event && data.like_event > lastLikeEvent) {
-    lastLikeEvent = data.like_event;
-    spawnHearts(6);
-    if (!isVisible) {
-      // Overlay was hidden — re-show it and schedule hide 5s after latest like
-      showOverlay();
-      likeReshown = true;
-      hideOverlay(5000);
-    } else if (likeReshown) {
-      // Overlay is visible from a previous like re-show — reset the 5s timer
-      hideOverlay(5000);
-    }
-    // If visible from normal playback (likeReshown=false), don't set any hide timer
+  el.title.textContent = data.title || '—';
+  el.artist.textContent = data.artist || '—';
+  el.art.src = data.album_art || '';
+  el.art.style.display = data.album_art ? 'block' : 'none';
+
+  if (data.requester) {
+    el.requester.textContent = `requested by ${data.requester}`;
+  } else {
+    el.requester.textContent = '';
   }
 
-  if (!np) {
-    // No song data — hide after 5 seconds
-    if (isVisible && !hideTimer) {
-      hideOverlay(5000);
-    }
-    currentSong = null;
-    likeReshown = false;
-    return;
-  }
+  el.label.textContent = data.is_playlist ? 'playing from playlist' : 'now playing';
 
-  const songKey = `${np.title}_${np.artist}`;
-  const isNewSong = songKey !== currentSong;
-
-  if (isNewSong) {
-    // Reset likeReshown BEFORE checking like event, so a like during a new song
-    // doesn't incorrectly think the overlay was already re-shown by a like
-    likeReshown = false;
-    currentSong = songKey;
-    el.title.textContent = np.title || '—';
-    el.artist.textContent = np.artist || '—';
-    el.art.src = np.album_art || '';
-    el.art.style.display = np.album_art ? 'block' : 'none';
-
-    // Show requester or "playlist" label
-    if (np.requester) {
-      el.requester.textContent = `requested by ${np.requester}`;
-    } else {
-      el.requester.textContent = '';
-    }
-
-    // Update label for playlist vs requested songs
-    el.label.textContent = np.is_playlist ? 'playing from playlist' : 'now playing';
-
-    // Show the overlay (cancels any pending hide)
-    showOverlay();
-
-    // Playlist songs auto-hide; requested songs stay visible
-    if (np.is_playlist) {
-      const hideMs = (data.playlist_auto_hide_seconds || 8) * 1000;
-      hideOverlay(hideMs);
-    }
-  }
-
-  // Update likes with pulse animation
-  const likeCount = np.likes || 0;
-  if (np.is_playlist && likeCount === 0) {
-    // Hide likes counter for playlist songs with no likes
+  // Update likes
+  const likeCount = data.likes || 0;
+  if (data.is_playlist && likeCount === 0) {
     el.likes.style.display = 'none';
   } else {
     el.likes.style.display = '';
-    if (likeCount !== lastLikes) {
-      el.likes.textContent = `♡ ${likeCount}`;
-      if (likeCount > lastLikes) {
-        el.likes.classList.add('pulse');
-        setTimeout(() => el.likes.classList.remove('pulse'), 300);
-      }
-      lastLikes = likeCount;
+    el.likes.textContent = `♡ ${likeCount}`;
+    if (likeCount > lastLikes && lastLikes > 0) {
+      el.likes.classList.add('pulse');
+      setTimeout(() => el.likes.classList.remove('pulse'), 300);
     }
+    lastLikes = likeCount;
   }
 
-  // Update progress
-  if (np.duration_ms) {
+  // Store for progress interpolation
+  currentSongData = data;
+}
+
+function updateProgress(data) {
+  if (!data || !data.duration_ms) return;
+
+  // Update stored song data with latest progress info
+  if (currentSongData) {
+    if (data.progress_ms !== undefined) currentSongData.progress_ms = data.progress_ms;
+    if (data.last_updated !== undefined) currentSongData.last_updated = data.last_updated;
+    if (data.is_playing !== undefined) currentSongData.is_playing = data.is_playing;
+    if (data.likes !== undefined) {
+      const oldLikes = currentSongData.likes || 0;
+      currentSongData.likes = data.likes;
+      const newLikes = data.likes || 0;
+      if (newLikes > oldLikes) {
+        el.likes.textContent = `♡ ${newLikes}`;
+        el.likes.classList.add('pulse');
+        setTimeout(() => el.likes.classList.remove('pulse'), 300);
+        lastLikes = newLikes;
+      }
+    }
+  }
+}
+
+// Smooth progress bar interpolation — runs every frame
+function animateProgress() {
+  if (currentSongData && currentSongData.duration_ms) {
     let elapsed;
 
-    if (np.progress_ms !== undefined && np.last_updated) {
-      const sincePoll = (Date.now() / 1000 - np.last_updated) * 1000;
-      elapsed = np.progress_ms + (np.is_playing !== false ? sincePoll : 0);
-    } else if (np.started_at) {
-      elapsed = (Date.now() / 1000 - np.started_at) * 1000;
+    if (currentSongData.progress_ms !== undefined && currentSongData.last_updated) {
+      const sincePoll = (Date.now() / 1000 - currentSongData.last_updated) * 1000;
+      elapsed = currentSongData.progress_ms + (currentSongData.is_playing !== false ? sincePoll : 0);
+    } else if (currentSongData.started_at) {
+      elapsed = (Date.now() / 1000 - currentSongData.started_at) * 1000;
     } else {
       elapsed = 0;
     }
 
-    elapsed = Math.max(0, Math.min(elapsed, np.duration_ms));
-    const pct = (elapsed / np.duration_ms) * 100;
+    elapsed = Math.max(0, Math.min(elapsed, currentSongData.duration_ms));
+    const pct = (elapsed / currentSongData.duration_ms) * 100;
     el.progress.style.width = `${pct}%`;
-    el.time.textContent = `${formatTime(elapsed)} / ${formatTime(np.duration_ms)}`;
+    el.time.textContent = `${formatTime(elapsed)} / ${formatTime(currentSongData.duration_ms)}`;
+  }
+
+  if (HatmasOverlay.isVisible()) {
+    progressAnimFrame = requestAnimationFrame(animateProgress);
   }
 }
 
-async function poll() {
-  try {
-    const resp = await fetch(API_URL);
-    const data = await resp.json();
-    updateDisplay(data);
-  } catch (e) {
-    // Server not ready yet
-  }
-}
+// === OVERLAY MANAGER CONNECTION ===
 
-setInterval(poll, 1000);
-poll();
+HatmasOverlay.connect('now_playing', {
+  container: '#nowPlaying',
+  onShow(data) {
+    // song_change event — new song started
+    renderSong(data);
+    lastLikes = data.likes || 0;
+
+    // Start progress animation loop
+    if (progressAnimFrame) cancelAnimationFrame(progressAnimFrame);
+    progressAnimFrame = requestAnimationFrame(animateProgress);
+  },
+  onUpdate(data) {
+    if (!data) return;
+
+    // Check if this is a like event (song_like updates come through here)
+    // The overlay manager sends update for any event with data while visible
+    // that isn't a show trigger.
+
+    // Check for like_event field (hearts!)
+    if (data.like_event) {
+      spawnHearts(6);
+    }
+
+    // Update progress and song data
+    updateProgress(data);
+  },
+  onHide() {
+    // song_queue_empty or song_stopped, or auto-hide timer expired
+    currentSongData = null;
+    lastLikes = 0;
+    if (progressAnimFrame) {
+      cancelAnimationFrame(progressAnimFrame);
+      progressAnimFrame = null;
+    }
+  }
+});
 </script>
 </body>
 </html>

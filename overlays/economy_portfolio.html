@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Economy Portfolio</title>
+    <link rel="stylesheet" href="hatmas_theme.css">
+    <style>
+        body { background: transparent; overflow: hidden; width: 420px; height: 670px; }
+        .portfolio-card { position: absolute; top: 20px; right: 20px; width: 380px; background: var(--hm-bg); border: 1px solid var(--hm-border); border-radius: 12px; overflow: hidden; transform: translateX(420px); transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6); }
+        .portfolio-card.visible { transform: translateX(0); }
+        .header { padding: 14px 18px 12px; border-bottom: 1px solid var(--hm-border-subtle); }
+        .header-top { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+        .pfp { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; flex-shrink: 0; border: 2px solid var(--hm-border); background: var(--hm-icon-bg); }
+        .header-info { flex: 1; min-width: 0; }
+        .username { font-family: 'BigNoodleTitling', 'Poppins', sans-serif; font-size: 22px; color: var(--hm-text); letter-spacing: 1px; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .portfolio-label { font-family: 'Poppins', sans-serif; font-size: 9px; font-weight: 500; color: var(--hm-text-muted); letter-spacing: 2px; text-transform: uppercase; }
+        .header-values { display: flex; gap: 0; }
+        .value-block { flex: 1; padding: 6px 0; }
+        .value-block + .value-block { border-left: 1px solid var(--hm-icon-bg); padding-left: 16px; }
+        .value-label { font-family: 'Poppins', sans-serif; font-size: 9px; font-weight: 500; color: var(--hm-text-muted); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 2px; }
+        .value-amount { font-family: 'JetBrains Mono', monospace; font-size: 18px; font-weight: 500; color: var(--hm-text); line-height: 1.1; }
+        .value-amount .hat-suffix { font-size: 11px; color: var(--hm-text-secondary); font-weight: 400; margin-left: 2px; }
+        .value-pnl { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 400; margin-top: 1px; }
+        .value-pnl.positive { color: var(--hm-green); }
+        .value-pnl.negative { color: var(--hm-red); }
+        .hat-balance { font-family: 'JetBrains Mono', monospace; font-size: 18px; font-weight: 500; color: var(--hm-gold); line-height: 1.1; }
+        .hat-balance .hat-suffix { font-size: 11px; color: var(--hm-text-muted); font-weight: 400; margin-left: 2px; }
+        .balance-sub { font-family: 'Poppins', sans-serif; font-size: 9px; color: var(--hm-text-muted); margin-top: 1px; }
+        .holdings { padding: 6px 0; max-height: 360px; overflow-y: auto; }
+        .holdings::-webkit-scrollbar { width: 3px; }
+        .holdings::-webkit-scrollbar-track { background: transparent; }
+        .holdings::-webkit-scrollbar-thumb { background: var(--hm-gold-glow); border-radius: 2px; }
+        .holding-row { display: flex; align-items: center; padding: 8px 18px; gap: 10px; transition: background 0.15s; }
+        .holding-row:hover { background: var(--hm-bg-subtle); }
+        .god-icon { width: 36px; height: 36px; border-radius: 6px; object-fit: cover; flex-shrink: 0; background: var(--hm-icon-bg); border: 1px solid var(--hm-border-subtle); }
+        .holding-info { flex: 1; min-width: 0; }
+        .god-name { font-family: 'Poppins', sans-serif; font-size: 13px; font-weight: 500; color: var(--hm-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2; }
+        .shares-count { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--hm-text-secondary); }
+        .holding-value { text-align: right; flex-shrink: 0; }
+        .holding-current { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 500; color: var(--hm-text); line-height: 1.2; }
+        .holding-pnl { font-family: 'JetBrains Mono', monospace; font-size: 10px; }
+        .holding-pnl.positive { color: var(--hm-green); }
+        .holding-pnl.negative { color: var(--hm-red); }
+        .holding-pnl.neutral { color: var(--hm-text-muted); }
+        .sparkline { width: 50px; height: 24px; flex-shrink: 0; }
+        .footer { padding: 8px 18px 10px; border-top: 1px solid var(--hm-icon-bg); display: flex; justify-content: space-between; align-items: center; }
+        .footer-stat { display: flex; flex-direction: column; align-items: center; }
+        .footer-stat-label { font-family: 'Poppins', sans-serif; font-size: 8px; font-weight: 500; color: var(--hm-text-muted); letter-spacing: 1.5px; text-transform: uppercase; }
+        .footer-stat-value { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--hm-text-secondary); }
+        .footer-stat-value.rank { color: var(--hm-gold); font-weight: 500; }
+        .empty-state { padding: 30px 18px; text-align: center; }
+        .empty-state .empty-icon { font-size: 28px; margin-bottom: 8px; opacity: 0.3; }
+        .empty-state p { font-family: 'Poppins', sans-serif; font-size: 12px; color: var(--hm-text-muted); line-height: 1.5; }
+        @keyframes fadeInRow { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: translateX(0); } }
+        .holding-row { animation: fadeInRow 0.3s ease forwards; opacity: 0; }
+    </style>
+</head>
+<body>
+    <div id="card" class="portfolio-card hm-panel">
+        <div class="header">
+            <div class="header-top">
+                <img class="pfp" id="pfp" alt="" onerror="this.style.display='none'">
+                <div class="header-info">
+                    <div class="username" id="username">—</div>
+                    <div class="portfolio-label">Portfolio</div>
+                </div>
+            </div>
+            <div class="header-values">
+                <div class="value-block">
+                    <div class="value-label">Invested</div>
+                    <div class="value-amount">
+                        <span id="investedValue">0</span><span class="hat-suffix">HAT</span>
+                    </div>
+                    <div class="value-pnl" id="investedPnl"></div>
+                </div>
+                <div class="value-block">
+                    <div class="value-label">Balance</div>
+                    <div class="hat-balance">
+                        <span id="hatBalance">0</span><span class="hat-suffix">HAT</span>
+                    </div>
+                    <div class="balance-sub">Available</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="holdings" id="holdings">
+            <div class="empty-state">
+                <div class="empty-icon">📊</div>
+                <p>No holdings yet</p>
+            </div>
+        </div>
+
+        <div class="footer">
+            <div class="footer-stat">
+                <div class="footer-stat-label">Net Worth</div>
+                <div class="footer-stat-value" id="netWorth">0</div>
+            </div>
+            <div class="footer-stat">
+                <div class="footer-stat-label">Gods</div>
+                <div class="footer-stat-value" id="godsCount">0</div>
+            </div>
+            <div class="footer-stat">
+                <div class="footer-stat-label">Shares</div>
+                <div class="footer-stat-value" id="totalShares">0</div>
+            </div>
+            <div class="footer-stat">
+                <div class="footer-stat-label">Best God</div>
+                <div class="footer-stat-value" id="bestGod">—</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="overlay_client.js"></script>
+    <script>
+        function generateSparkline(avgCost, currentPrice, width = 50, height = 24) {
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            canvas.className = 'sparkline';
+
+            const ctx = canvas.getContext('2d');
+            const padding = 2;
+            const graphWidth = width - padding * 2;
+            const graphHeight = height - padding * 2;
+
+            // Generate 7 interpolated points with small variance
+            const points = [];
+            const numPoints = 7;
+            const minVariance = Math.min(avgCost, currentPrice) * 0.02;
+            const maxVariance = Math.max(avgCost, currentPrice) * 0.05;
+
+            for (let i = 0; i < numPoints; i++) {
+                const t = i / (numPoints - 1);
+                const baseValue = avgCost + (currentPrice - avgCost) * t;
+                const variance = (Math.random() - 0.5) * (maxVariance - minVariance) + minVariance;
+                points.push(baseValue + variance);
+            }
+
+            // Normalize points to graph height
+            const minVal = Math.min(...points);
+            const maxVal = Math.max(...points);
+            const range = maxVal - minVal || 1;
+
+            const normalizedPoints = points.map(p =>
+                padding + graphHeight - ((p - minVal) / range) * graphHeight
+            );
+
+            // Draw line
+            ctx.strokeStyle = currentPrice > avgCost ? HatmasOverlay.getColor('--hm-green') : HatmasOverlay.getColor('--hm-red');
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+
+            normalizedPoints.forEach((y, i) => {
+                const x = padding + (i / (numPoints - 1)) * graphWidth;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+
+            return canvas;
+        }
+
+        function formatValue(val) {
+            return HatmasOverlay.hatPrice(val, {compact: true, size: 'sm', label: false});
+        }
+
+        function onShow(data) {
+            if (!data || !data.username) return;
+
+            // Update header
+            document.getElementById('username').textContent = data.display_name || data.username;
+
+            // Profile picture
+            const pfp = document.getElementById('pfp');
+            if (data.profile_image_url) {
+                pfp.src = data.profile_image_url;
+                pfp.style.display = '';
+            } else {
+                pfp.style.display = 'none';
+            }
+
+            // Update invested value and P&L
+            const investedValue = data.total_value || 0;
+            const pnl = data.total_pnl || 0;
+            const pnlPct = investedValue > 0 ? (pnl / investedValue * 100) : 0;
+
+            document.getElementById('investedValue').innerHTML = formatValue(investedValue);
+
+            const pnlElement = document.getElementById('investedPnl');
+            pnlElement.innerHTML = `${pnl > 0 ? '+' : ''}${formatValue(pnl)} (${pnlPct > 0 ? '+' : ''}${pnlPct.toFixed(1)}%)`;
+            pnlElement.className = 'value-pnl ' + (pnl > 0 ? 'positive' : pnl < 0 ? 'negative' : 'neutral');
+
+            // Update hat balance
+            document.getElementById('hatBalance').innerHTML = formatValue(data.hat_balance || 0);
+
+            // Render holdings
+            const holdingsContainer = document.getElementById('holdings');
+            if (!data.holdings || data.holdings.length === 0) {
+                holdingsContainer.innerHTML = '<div class="empty-state"><div class="empty-icon">📊</div><p>No holdings yet</p></div>';
+            } else {
+                holdingsContainer.innerHTML = '';
+                data.holdings.forEach((holding, index) => {
+                    const row = document.createElement('div');
+                    row.className = 'holding-row';
+                    row.style.animationDelay = `${index * 0.05}s`;
+
+                    // God icon
+                    const icon = document.createElement('img');
+                    icon.className = 'god-icon';
+                    icon.alt = holding.god_name;
+                    icon.src = `/icons/custom/${holding.god_name}.png`;
+                    icon.onerror = () => {
+                        icon.src = `/icons/gods/${holding.god_name.toLowerCase()}.png`;
+                    };
+                    row.appendChild(icon);
+
+                    // Holding info
+                    const info = document.createElement('div');
+                    info.className = 'holding-info';
+
+                    const godName = document.createElement('div');
+                    godName.className = 'god-name';
+                    godName.textContent = holding.god_name;
+                    info.appendChild(godName);
+
+                    const sharesCount = document.createElement('div');
+                    sharesCount.className = 'shares-count';
+                    sharesCount.innerHTML = `${holding.shares} shares @ ${HatmasOverlay.hatPrice(holding.avg_cost, {size: 'sm', label: false})}`;
+                    info.appendChild(sharesCount);
+
+                    row.appendChild(info);
+
+                    // Sparkline
+                    const sparkline = generateSparkline(holding.avg_cost, holding.price);
+                    row.appendChild(sparkline);
+
+                    // Value and P&L
+                    const valueBlock = document.createElement('div');
+                    valueBlock.className = 'holding-value';
+
+                    const currentValue = document.createElement('div');
+                    currentValue.className = 'holding-current';
+                    currentValue.innerHTML = formatValue(holding.value);
+                    valueBlock.appendChild(currentValue);
+
+                    const pnlValue = document.createElement('div');
+                    pnlValue.className = 'holding-pnl ' + (holding.pnl > 0 ? 'positive' : holding.pnl < 0 ? 'negative' : 'neutral');
+                    pnlValue.innerHTML = `${holding.pnl > 0 ? '+' : ''}${formatValue(holding.pnl)} (${holding.pnl_pct > 0 ? '+' : ''}${holding.pnl_pct.toFixed(1)}%)`;
+                    valueBlock.appendChild(pnlValue);
+
+                    row.appendChild(valueBlock);
+                    holdingsContainer.appendChild(row);
+                });
+            }
+
+            // Update footer stats
+            const netWorth = investedValue + (data.hat_balance || 0);
+            document.getElementById('netWorth').innerHTML = formatValue(netWorth);
+            document.getElementById('godsCount').textContent = (data.holdings || []).length;
+
+            const totalShares = (data.holdings || []).reduce((sum, h) => sum + h.shares, 0);
+            document.getElementById('totalShares').textContent = Math.round(totalShares);
+
+            if (data.holdings && data.holdings.length > 0) {
+                const bestGod = data.holdings.reduce((best, h) =>
+                    (h.pnl_pct > best.pnl_pct) ? h : best
+                );
+                document.getElementById('bestGod').textContent = bestGod.god_name;
+            } else {
+                document.getElementById('bestGod').textContent = '—';
+            }
+        }
+
+        function onHide() {
+            // Optional: reset state on hide
+        }
+
+        // Connect to overlay client
+        HatmasOverlay.connect('economy_portfolio', { onShow, onHide, container: '#card' });
+    </script>
+</body>
+</html>

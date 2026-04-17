@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HatmasBot Economy Match Live</title>
+  <link rel="stylesheet" href="hatmas_theme.css">
+  <style>
+    body {
+      background: transparent;
+      overflow: hidden;
+      width: 320px;
+      height: 280px;
+      margin: 0;
+      padding: 0;
+      font-family: 'Poppins', sans-serif;
+    }
+
+    .panel {
+      width: 300px;
+      background: var(--hm-bg);
+      border: 1px solid var(--hm-border);
+      border-radius: 10px;
+      overflow: hidden;
+      position: relative;
+      margin: 10px auto;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--hm-border-subtle);
+    }
+
+    .god-img {
+      width: 38px;
+      height: 38px;
+      border-radius: 6px;
+      overflow: hidden;
+      background: var(--hm-icon-bg);
+      flex-shrink: 0;
+    }
+
+    .god-img img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .god-info {
+      flex: 1;
+    }
+
+    .god-name {
+      font-family: 'BigNoodleTitling', 'Poppins', sans-serif;
+      font-weight: normal;
+      font-size: 20px;
+      color: var(--hm-text);
+      line-height: 1.1;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin: 0;
+    }
+
+    .match-type {
+      font-family: 'Poppins', sans-serif;
+      font-size: 11px;
+      color: var(--hm-text-muted);
+      margin: 0;
+    }
+
+    @keyframes pulse {
+      0%, 100% {
+        opacity: 1;
+      }
+      50% {
+        opacity: 0.3;
+      }
+    }
+
+    .price-area {
+      padding: 12px 14px 8px;
+    }
+
+    .price-row {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+    }
+
+    .big-price {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      font-size: 30px;
+      color: var(--hm-text);
+      line-height: 1;
+    }
+
+    .pct {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      font-size: 15px;
+    }
+
+    .pct.up {
+      color: var(--hm-green);
+    }
+
+    .pct.down {
+      color: var(--hm-red);
+    }
+
+    .open-label {
+      font-family: 'Poppins', sans-serif;
+      font-size: 11px;
+      color: var(--hm-text-muted);
+      margin-top: 3px;
+    }
+
+    .chart {
+      width: 100%;
+      height: 60px;
+      padding: 4px 14px;
+      box-sizing: border-box;
+    }
+
+    .chart canvas {
+      width: 100%;
+      height: 100%;
+    }
+
+    .footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 14px;
+      border-top: 1px solid var(--hm-border-subtle);
+    }
+
+    .kda {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      font-size: 14px;
+      letter-spacing: 0.5px;
+    }
+
+    .kda .k {
+      color: var(--hm-green);
+    }
+
+    .kda .d {
+      color: var(--hm-red);
+    }
+
+    .kda .a {
+      color: var(--hm-blue);
+    }
+
+    .kda .sep {
+      color: var(--hm-text-muted);
+    }
+
+    .trade-status {
+      font-family: 'BigNoodleTitling', 'Poppins', sans-serif;
+      font-size: 16px;
+      font-weight: normal;
+      color: var(--hm-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      text-align: right;
+      line-height: 1.2;
+    }
+
+    .flash {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      pointer-events: none;
+      border-radius: 10px;
+    }
+
+    .flash.kill {
+      background: var(--hm-green-bg);
+    }
+
+    .flash.death {
+      background: var(--hm-red-bg);
+    }
+
+    .flash.active {
+      animation: flash 0.5s ease-out;
+    }
+
+    @keyframes flash {
+      0% {
+        opacity: 1;
+      }
+      100% {
+        opacity: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="panel hm-panel">
+    <div class="flash"></div>
+
+    <div class="header">
+      <div class="god-img">
+        <img id="god-icon" src="" alt="">
+      </div>
+      <div class="god-info">
+        <h2 class="god-name" id="god-name">—</h2>
+        <p class="match-type">Live Price</p>
+      </div>
+    </div>
+
+    <div class="price-area">
+      <div class="price-row">
+        <span class="big-price" id="current-price"><img class="hat-icon" src="/overlays/hat.png" alt="hats">0 hats</span>
+
+        <span class="pct" id="price-change">+0%</span>
+      </div>
+      <div class="open-label" id="open-label">open <img class="hat-icon-sm" src="/overlays/hat.png" alt="hats">0 hats</div>
+    </div>
+
+    <div class="chart">
+      <canvas id="price-chart" width="272" height="60"></canvas>
+    </div>
+
+    <div class="footer">
+      <div class="kda" id="kda-display">
+        <span class="k">0</span><span class="sep">/</span><span class="d">0</span><span class="sep">/</span><span class="a">0</span>
+      </div>
+      <div>
+        <div class="trade-status">!BUY · !SELL</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="overlay_client.js"></script>
+  <script>
+    let state = {
+      god: null,
+      icon: null,
+      openPrice: 0,
+      currentPrice: 0,
+      priceHistory: [],
+      kda: { k: 0, d: 0, a: 0 },
+      lastEvent: null
+    };
+
+    function onShow(data) {
+      if (!data || !data.god) return;
+
+      // Kill/death re-show: data has an "event" field (kill or death)
+      // Initial show: data has "volatility" field from economy_god_detected
+      if (data.event && state.god === data.god) {
+        // Re-show on kill/death — update data, don't reset state
+        onUpdate(data);
+        return;
+      }
+
+      // Initial show — full state reset
+      state.god = data.god;
+      state.openPrice = data.price || 0;
+      state.currentPrice = data.price || 0;
+      state.priceHistory = [state.openPrice];
+      state.kda = { k: 0, d: 0, a: 0 };
+      state.lastEvent = null;
+
+      // Update god name
+      document.getElementById('god-name').textContent = data.god;
+
+      // Try to load god icon
+      const iconPaths = [
+        `/icons/custom/${data.god}.png`,
+        `/icons/gods/${data.god.toLowerCase()}.png`
+      ];
+      const iconEl = document.getElementById('god-icon');
+      loadIconWithFallback(iconEl, iconPaths);
+
+      // Update price display
+      updatePriceDisplay();
+
+      // Reset chart
+      redrawChart();
+    }
+
+    function onUpdate(data) {
+      if (!data || !data.god) return;
+
+      state.currentPrice = data.price || state.currentPrice;
+      if (data.history && Array.isArray(data.history)) {
+        state.priceHistory = data.history;
+      }
+      if (data.kda) {
+        state.kda = data.kda;
+      }
+      state.lastEvent = data.event;
+
+      // Update displays
+      updatePriceDisplay();
+      updateKDADisplay();
+
+      // Flash on kill or death
+      if (data.event === 'kill') {
+        flashOverlay('kill');
+      } else if (data.event === 'death') {
+        flashOverlay('death');
+      }
+
+      // Redraw chart
+      redrawChart();
+    }
+
+    function onHide() {
+      // Panel hides (handled by overlay_client.js visibility)
+    }
+
+    function updatePriceDisplay() {
+      const changePct = state.openPrice > 0
+        ? ((state.currentPrice - state.openPrice) / state.openPrice) * 100
+        : 0;
+
+      document.getElementById('current-price').innerHTML = HatmasOverlay.hatPrice(state.currentPrice);
+
+      const pctEl = document.getElementById('price-change');
+      pctEl.textContent = `${changePct >= 0 ? '+' : ''}${changePct.toFixed(1)}%`;
+      pctEl.classList.remove('up', 'down');
+      pctEl.classList.add(changePct >= 0 ? 'up' : 'down');
+
+      document.getElementById('open-label').innerHTML = `open ${HatmasOverlay.hatPrice(state.openPrice)}`;
+    }
+
+    function updateKDADisplay() {
+      const kdaEl = document.getElementById('kda-display');
+      kdaEl.innerHTML = `<span class="k">${state.kda.k}</span><span class="sep">/</span><span class="d">${state.kda.d}</span><span class="sep">/</span><span class="a">${state.kda.a}</span>`;
+    }
+
+    function flashOverlay(type) {
+      const flashEl = document.querySelector('.flash');
+      flashEl.classList.remove('kill', 'death', 'active');
+      void flashEl.offsetWidth; // Trigger reflow
+      flashEl.classList.add(type, 'active');
+    }
+
+    function redrawChart() {
+      const canvas = document.getElementById('price-chart');
+      const ctx = canvas.getContext('2d');
+      const width = canvas.width;
+      const height = canvas.height;
+      const padding = 4;
+
+      // Clear canvas
+      ctx.clearRect(0, 0, width, height);
+
+      if (!state.priceHistory || state.priceHistory.length === 0) return;
+
+      // Calculate price range
+      const minPrice = Math.min(...state.priceHistory, state.openPrice);
+      const maxPrice = Math.max(...state.priceHistory, state.openPrice);
+      const priceRange = maxPrice - minPrice || 1;
+
+      const plotWidth = width - padding * 2;
+      const plotHeight = height - padding * 2;
+
+      // Helper to convert price to canvas Y
+      const priceToY = (price) => {
+        return height - padding - ((price - minPrice) / priceRange) * plotHeight;
+      };
+
+      // Helper to convert index to canvas X
+      const indexToX = (index) => {
+        const step = plotWidth / (state.priceHistory.length - 1 || 1);
+        return padding + index * step;
+      };
+
+      // Resolve CSS colors for canvas
+      const lastPrice = state.priceHistory[state.priceHistory.length - 1];
+      const up = lastPrice >= state.openPrice;
+      const lineColor = up ? HatmasOverlay.getColor('--hm-green') : HatmasOverlay.getColor('--hm-red');
+      const glowColor = up ? HatmasOverlay.getColor('--hm-green-glow') : HatmasOverlay.getColor('--hm-red-glow');
+      const borderColor = HatmasOverlay.getColor('--hm-border');
+
+      // Draw open price dashed line
+      ctx.strokeStyle = borderColor;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      const openY = priceToY(state.openPrice);
+      ctx.beginPath();
+      ctx.moveTo(padding, openY);
+      ctx.lineTo(width - padding, openY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Draw gradient fill
+      const gradient = ctx.createLinearGradient(0, padding, 0, height - padding);
+      gradient.addColorStop(0, glowColor);
+      gradient.addColorStop(1, 'rgba(0,0,0,0)');
+
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.moveTo(indexToX(0), priceToY(state.priceHistory[0]));
+      for (let i = 0; i < state.priceHistory.length; i++) {
+        ctx.lineTo(indexToX(i), priceToY(state.priceHistory[i]));
+      }
+      ctx.lineTo(indexToX(state.priceHistory.length - 1), height - padding);
+      ctx.lineTo(indexToX(0), height - padding);
+      ctx.closePath();
+      ctx.fill();
+
+      // Draw price line
+      ctx.strokeStyle = lineColor;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(indexToX(0), priceToY(state.priceHistory[0]));
+      for (let i = 1; i < state.priceHistory.length; i++) {
+        ctx.lineTo(indexToX(i), priceToY(state.priceHistory[i]));
+      }
+      ctx.stroke();
+
+      // Draw end dot
+      const lastX = indexToX(state.priceHistory.length - 1);
+      const lastY = priceToY(lastPrice);
+      ctx.fillStyle = lineColor;
+      ctx.beginPath();
+      ctx.arc(lastX, lastY, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    function loadIconWithFallback(el, paths) {
+      let currentIndex = 0;
+
+      function tryLoad() {
+        if (currentIndex >= paths.length) {
+          el.src = '';
+          return;
+        }
+        el.src = paths[currentIndex];
+        currentIndex++;
+      }
+
+      el.onerror = tryLoad;
+      tryLoad();
+    }
+
+    // Connect to overlay client
+    HatmasOverlay.connect('economy_match_live', { onShow, onUpdate, onHide });
+  </script>
+</body>
+</html>

@@ -27,8 +27,11 @@ from core.config import (
     TITLE_TEMPLATE_GOD, TITLE_TEMPLATE_LOBBY,
     SR_PLAYLIST_AUTO_HIDE_SECONDS,
 )
+from core.overlay_manager import OverlayManager
 
 TTS_AUDIO_DIR = DATA_DIR / "tts_audio"
+VOICELINE_DIR = DATA_DIR / "smite_voicelines"
+ANIMATION_DIR = DATA_DIR / "smite_animations"
 TTS_AUDIO_DIR.mkdir(exist_ok=True)
 
 
@@ -37,6 +40,7 @@ class WebServer:
         self.bot = bot
         self.app = web.Application()
         self.runner = None
+        self.overlay = OverlayManager(self)
         self._state = {
             "now_playing": None,
             "queue": [],
@@ -48,6 +52,7 @@ class WebServer:
             "gamble_result_queue": [],  # Queue of gamble results for visual overlay
             "tts_queue": [],              # Queue of TTS messages for highlighted message overlay
             "kill_event_queue": [],       # Queue of kill/death events for overlay
+            "voiceline_event_queue": [],  # Queue of voice line events for overlay
             "youtube_playback": {
                 "video_id": None,
                 "status": "idle",  # idle | pending | playing
@@ -81,19 +86,33 @@ class WebServer:
         self.app.router.add_get("/overlay/tts", self.handle_tts_overlay)
         self.app.router.add_get("/api/kill_events", self.handle_kill_event_queue)
         self.app.router.add_get("/api/kill_stats", self.handle_kill_stats)
-        self.app.router.add_get("/overlay/kills", self.handle_kills_overlay)
+        self.app.router.add_get("/api/death_count", self.handle_death_count)
+        self.app.router.add_get("/overlay/deaths", self.handle_deaths_overlay)
+        self.app.router.add_get("/api/voiceline_events", self.handle_voiceline_event_queue)
+        self.app.router.add_get("/api/voiceline_audio/{god}/{folder}/{filename}", self.handle_voiceline_audio)
+        self.app.router.add_get("/api/voiceline_video/{god}/{filename}", self.handle_voiceline_video)
+        self.app.router.add_get("/overlay/voicelines", self.handle_voiceline_overlay)
         self.app.router.add_get("/api/suggestions", self.handle_get_suggestions)
         self.app.router.add_get("/api/state", self.handle_get_state)
         self.app.router.add_post("/api/state", self.handle_update_state)
         self.app.router.add_post("/api/action", self.handle_action)
+        self.app.router.add_get("/ws/overlays", self.handle_overlay_ws)
         self.app.router.add_static("/overlays/", OVERLAY_DIR)
+        # Serve god icon directories for overlays
+        from core.config import CUSTOM_GOD_ICONS_DIR, GOD_ICONS_DIR
+        if CUSTOM_GOD_ICONS_DIR.exists():
+            self.app.router.add_static("/icons/custom/", CUSTOM_GOD_ICONS_DIR)
+        if GOD_ICONS_DIR.exists():
+            self.app.router.add_static("/icons/gods/", GOD_ICONS_DIR)
 
     # === API HANDLERS ===
 
     def trigger_like_event(self):
         """Signal the overlay that a like just happened (triggers heart animation)."""
         import time
-        self._state["like_event"] = time.time()
+        ts = time.time()
+        self._state["like_event"] = ts
+        asyncio.create_task(self.overlay.emit("song_like", {"like_event": ts}))
 
     def trigger_sound_alert(self, alert_type):
         """Trigger a sound alert for the overlay.
@@ -114,6 +133,7 @@ class WebServer:
         # Cap queue at 20 to prevent unbounded growth
         if len(self._state["gamble_result_queue"]) > 20:
             self._state["gamble_result_queue"] = self._state["gamble_result_queue"][-20:]
+        asyncio.create_task(self.overlay.emit("gamble_result", result))
 
     async def handle_gamble_queue(self, request):
         """Return and drain the gamble result queue. The overlay calls this to
@@ -148,6 +168,11 @@ class WebServer:
             self._cleanup_tts_audio()
 
             print(f"[WebServer] TTS queued: {display_name} — {message[:60]}...")
+            asyncio.create_task(self.overlay.emit("tts_message", {
+                "user": display_name,
+                "message": message,
+                "audio": f"/api/tts_audio/{filename}",
+            }))
         except Exception as e:
             print(f"[WebServer] TTS generation failed: {e}")
 
@@ -187,13 +212,22 @@ class WebServer:
         event_type: 'kill' or 'death'
         kill_type: 'player_kill', 'double_kill', 'triple_kill', etc."""
         import time
-        self._state["kill_event_queue"].append({
+        event_data = {
             "event": event_type,
             "kill_type": kill_type,
             "timestamp": time.time(),
-        })
+        }
+        self._state["kill_event_queue"].append(event_data)
         if len(self._state["kill_event_queue"]) > 20:
             self._state["kill_event_queue"] = self._state["kill_event_queue"][-20:]
+        # Emit to overlay manager (kill, death, or multikill)
+        if event_type == "kill":
+            if kill_type and kill_type != "player_kill":
+                asyncio.create_task(self.overlay.emit("multikill", event_data))
+            else:
+                asyncio.create_task(self.overlay.emit("kill", event_data))
+        elif event_type == "death":
+            asyncio.create_task(self.overlay.emit("death", event_data))
 
     async def handle_kill_event_queue(self, request):
         """Return and drain the kill event queue for the overlay."""
@@ -226,12 +260,73 @@ class WebServer:
             "last_kda": None, "last_read_ago": None, "kda_failures": 0,
         })
 
-    async def handle_kills_overlay(self, request):
-        """Serve the kill/death overlay HTML."""
-        html_path = OVERLAY_DIR / "kills.html"
+    # === DEATH COUNTER HANDLERS ===
+
+    async def handle_death_count(self, request):
+        """Return the daily death count for the overlay."""
+        if self.bot and "deathcounter" in self.bot.plugins:
+            dc = self.bot.plugins["deathcounter"]
+            return web.json_response(dc.get_state())
+        return web.json_response({"count": 0, "date": None})
+
+    async def handle_deaths_overlay(self, request):
+        """Serve the death counter overlay HTML."""
+        html_path = OVERLAY_DIR / "deaths.html"
         if html_path.exists():
-            return web.FileResponse(html_path)
-        return web.Response(text="Kill overlay not found", status=404)
+            return self._no_cache_file_response(html_path)
+        return web.Response(text="Deaths overlay not found", status=404)
+
+    # === VOICE LINE HANDLERS ===
+
+    def trigger_voiceline_event(self, event):
+        """Push a voice line event onto the queue for the overlay."""
+        self._state["voiceline_event_queue"].append(event)
+        if len(self._state["voiceline_event_queue"]) > 10:
+            self._state["voiceline_event_queue"] = self._state["voiceline_event_queue"][-10:]
+        asyncio.create_task(self.overlay.emit("voiceline_play", event))
+
+    async def handle_voiceline_event_queue(self, request):
+        """Return and drain the voice line event queue for the overlay."""
+        queue = list(self._state["voiceline_event_queue"])
+        self._state["voiceline_event_queue"] = []
+        return web.json_response(queue)
+
+    async def handle_voiceline_audio(self, request):
+        """Serve a voice line .ogg file."""
+        god = request.match_info["god"]
+        folder = request.match_info["folder"]
+        filename = request.match_info["filename"]
+        # Sanitize — only allow .ogg files, no path traversal
+        if ".." in filename or "/" in filename or not filename.endswith(".ogg"):
+            return web.Response(text="Not found", status=404)
+        filepath = VOICELINE_DIR / god / folder / filename
+        if filepath.exists():
+            return web.FileResponse(filepath, headers={
+                "Content-Type": "audio/ogg",
+                "Cache-Control": "no-cache",
+            })
+        return web.Response(text="Not found", status=404)
+
+    async def handle_voiceline_video(self, request):
+        """Serve a voice line animation .mp4 file."""
+        god = request.match_info["god"]
+        filename = request.match_info["filename"]
+        if ".." in filename or "/" in filename or not filename.endswith(".mp4"):
+            return web.Response(text="Not found", status=404)
+        filepath = ANIMATION_DIR / god / filename
+        if filepath.exists():
+            return web.FileResponse(filepath, headers={
+                "Content-Type": "video/mp4",
+                "Cache-Control": "no-cache",
+            })
+        return web.Response(text="Not found", status=404)
+
+    async def handle_voiceline_overlay(self, request):
+        """Serve the voice line overlay HTML."""
+        html_path = OVERLAY_DIR / "voicelines.html"
+        if html_path.exists():
+            return self._no_cache_file_response(html_path)
+        return web.Response(text="Voice line overlay not found", status=404)
 
     async def handle_get_suggestions(self, request):
         """Return all suggestions for the dashboard."""
@@ -251,10 +346,10 @@ class WebServer:
             }
             # Include current title templates and command rotation for the dashboard
             if "smite" in self.bot.plugins:
-                from core.config import TITLE_TEMPLATE_GOD, TITLE_TEMPLATE_LOBBY
+                import core.config as _cfg
                 state["title_templates"] = {
-                    "god": TITLE_TEMPLATE_GOD,
-                    "lobby": TITLE_TEMPLATE_LOBBY,
+                    "god": _cfg.TITLE_TEMPLATE_GOD,
+                    "lobby": _cfg.TITLE_TEMPLATE_LOBBY,
                 }
                 state["command_rotation"] = self.bot.plugins["smite"].get_rotation_commands()
                 state["daily_record"] = {
@@ -493,44 +588,171 @@ class WebServer:
                 plugin._update_web_state()
             return web.json_response({"ok": True})
 
+        elif action == "sim_economy":
+            # Simulate a full economy match lifecycle from the control panel
+            if "economy" not in self.bot.plugins:
+                return web.json_response({"error": "Economy plugin not loaded"}, status=400)
+            economy = self.bot.plugins["economy"]
+            god = data.get("god", "Ymir")
+            outcome = data.get("outcome", "win")
+            kills = int(data.get("kills", 7))
+            deaths = int(data.get("deaths", 3))
+            assists = int(data.get("assists", 4))
+            speed = float(data.get("speed", 1.0))
+            force = bool(data.get("force", False))
+            # Run simulation as background task (it takes time with delays)
+            async def run_sim():
+                result = await economy.simulate_game(
+                    god, outcome, kills, deaths, assists, speed, force=force
+                )
+                print(f"[Economy] Sim result: {result}")
+            asyncio.create_task(run_sim())
+            return web.json_response({"ok": True, "message": f"Simulating {god} {outcome}..."})
+
+        elif action == "test_overlay":
+            # Test individual economy overlay by emitting its trigger event with sample data
+            if "economy" not in self.bot.plugins:
+                return web.json_response({"error": "Economy plugin not loaded"}, status=400)
+            economy = self.bot.plugins["economy"]
+            overlay = data.get("overlay", "")
+
+            if overlay == "dividend":
+                await economy.emit_test_dividend()
+            elif overlay == "leaderboard":
+                await economy.emit_test_leaderboard()
+            elif overlay == "portfolio":
+                await economy.emit_test_portfolio()
+            elif overlay == "tradefeed":
+                await economy.emit_test_tradefeed()
+            elif overlay == "match_end":
+                await economy.emit_test_match_end()
+            elif overlay == "ticker":
+                await economy.emit_test_ticker()
+            else:
+                return web.json_response({"error": f"Unknown overlay: {overlay}"}, status=400)
+
+            return web.json_response({"ok": True, "message": f"Triggered {overlay}"})
+
+        elif action == "reload_prices":
+            if "economy" not in self.bot.plugins:
+                return web.json_response({"error": "Economy plugin not loaded"}, status=400)
+            economy = self.bot.plugins["economy"]
+            result = await economy.reload_prices()
+            return web.json_response({"ok": True, **result})
+
         return web.json_response({"error": f"Unknown action: {action}"}, status=400)
 
+    # === WEBSOCKET HANDLER ===
+
+    async def handle_overlay_ws(self, request):
+        """WebSocket endpoint for overlay manager communication."""
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+
+        overlay_name = request.query.get("name", "")
+        if not overlay_name:
+            await ws.close(message=b"Missing overlay name")
+            return ws
+
+        self.overlay.register_ws(overlay_name, ws)
+        print(f"[Overlay] WS connected: {overlay_name}")
+
+        # If this overlay is already marked visible (e.g. always-on overlays
+        # like ticker/deaths after an OBS source refresh), re-send the show
+        # event with the original data so the overlay can fully restore itself
+        if self.overlay._visible.get(overlay_name, False):
+            cached_data = self.overlay._last_show_data.get(overlay_name, {})
+            await self.overlay._send(overlay_name, "show", cached_data)
+            print(f"[Overlay] Re-sent show to {overlay_name} (was already visible)")
+
+        try:
+            async for msg in ws:
+                if msg.type == web.WSMsgType.TEXT:
+                    # Handle messages from overlays (e.g., youtube_player reports)
+                    try:
+                        data = json.loads(msg.data)
+                        action = data.get("data", {}).get("action")
+                        if action:
+                            # Forward to action handler as if it were a POST
+                            await self._handle_ws_action(action, data.get("data", {}))
+                    except Exception as e:
+                        print(f"[Overlay] WS message error: {e}")
+                elif msg.type == web.WSMsgType.ERROR:
+                    print(f"[Overlay] WS error: {overlay_name} — {ws.exception()}")
+        finally:
+            self.overlay.unregister_ws(overlay_name, ws)
+            print(f"[Overlay] WS disconnected: {overlay_name}")
+
+        return ws
+
+    async def _handle_ws_action(self, action, data):
+        """Handle action messages received via websocket from overlays."""
+        if action == "youtube_ended":
+            self._state["youtube_playback"]["status"] = "idle"
+            self._state["youtube_playback"]["video_id"] = None
+            if self.bot and "songrequest" in self.bot.plugins:
+                asyncio.create_task(
+                    self.bot.plugins["songrequest"].on_youtube_ended()
+                )
+        elif action == "youtube_started":
+            self._state["youtube_playback"]["status"] = "playing"
+            if self.bot and "songrequest" in self.bot.plugins:
+                asyncio.create_task(
+                    self.bot.plugins["songrequest"].on_youtube_started()
+                )
+        elif action == "youtube_progress":
+            progress_ms = data.get("progress_ms", 0)
+            if self.bot and "songrequest" in self.bot.plugins:
+                asyncio.create_task(
+                    self.bot.plugins["songrequest"].on_youtube_progress(progress_ms)
+                )
+
     # === OVERLAY PAGES ===
+
+    @staticmethod
+    def _no_cache_file_response(html_path):
+        """Serve an HTML file with no-cache headers so OBS browser sources
+        always pick up the latest version without manual cache refresh."""
+        resp = web.FileResponse(html_path)
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+        return resp
 
     async def handle_now_playing_overlay(self, request):
         html_path = OVERLAY_DIR / "nowplaying.html"
         if html_path.exists():
-            return web.FileResponse(html_path)
+            return self._no_cache_file_response(html_path)
         return web.Response(text="Overlay not found", status=404)
 
     async def handle_youtube_player_overlay(self, request):
         html_path = OVERLAY_DIR / "youtube_player.html"
         if html_path.exists():
-            return web.FileResponse(html_path)
+            return self._no_cache_file_response(html_path)
         return web.Response(text="YouTube player overlay not found", status=404)
 
     async def handle_snap_overlay(self, request):
         html_path = OVERLAY_DIR / "snap.html"
         if html_path.exists():
-            return web.FileResponse(html_path)
+            return self._no_cache_file_response(html_path)
         return web.Response(text="Overlay not found", status=404)
 
     async def handle_god_overlay(self, request):
         html_path = OVERLAY_DIR / "god_overlay.html"
         if html_path.exists():
-            return web.FileResponse(html_path)
+            return self._no_cache_file_response(html_path)
         return web.Response(text="God overlay not found", status=404)
 
     async def handle_sound_alerts_overlay(self, request):
         html_path = OVERLAY_DIR / "sound_alerts.html"
         if html_path.exists():
-            return web.FileResponse(html_path)
+            return self._no_cache_file_response(html_path)
         return web.Response(text="Sound alerts overlay not found", status=404)
 
     async def handle_tts_overlay(self, request):
         html_path = OVERLAY_DIR / "tts.html"
         if html_path.exists():
-            return web.FileResponse(html_path)
+            return self._no_cache_file_response(html_path)
         return web.Response(text="TTS overlay not found", status=404)
 
     # === CONTROL PANEL ===
@@ -538,13 +760,24 @@ class WebServer:
     async def handle_control_panel(self, request):
         html_path = OVERLAY_DIR / "control_panel.html"
         if html_path.exists():
-            return web.FileResponse(html_path)
+            return self._no_cache_file_response(html_path)
         return web.Response(text="Control panel not found", status=404)
 
     # === STATE MANAGEMENT ===
 
     def update_now_playing(self, data):
+        old = self._state.get("now_playing")
         self._state["now_playing"] = data
+        if data and data.get("is_playing"):
+            # Detect song change (new title or was not playing)
+            old_title = old.get("title") if old else None
+            if old_title != data.get("title"):
+                asyncio.create_task(self.overlay.emit("song_change", data))
+            else:
+                # Same song, just send update for progress etc.
+                asyncio.create_task(self.overlay.emit("song_update", data))
+        elif not data or not data.get("is_playing"):
+            asyncio.create_task(self.overlay.emit("song_stopped", data))
 
     def update_queue(self, queue):
         self._state["queue"] = queue
@@ -558,10 +791,18 @@ class WebServer:
             "video_id": video_id,
             "status": "pending",
         }
+        asyncio.create_task(self.overlay.emit("youtube_play", {"video_id": video_id}))
 
     def update_smite_state(self, data):
         """Update the Smite match/god state for the overlay."""
+        old = self._state.get("smite", {})
         self._state["smite"] = data
+        # Emit god_detected when god info appears
+        if data.get("god") and (not old.get("god") or old["god"].get("name") != data["god"].get("name")):
+            asyncio.create_task(self.overlay.emit("god_detected", data))
+        # Emit match_end_confirmed when match state clears
+        if old.get("in_match") and not data.get("in_match"):
+            asyncio.create_task(self.overlay.emit("match_end_confirmed", data))
 
     def clear_youtube_playback(self):
         """Stop YouTube playback (e.g., on skip)."""
@@ -569,6 +810,7 @@ class WebServer:
             "video_id": None,
             "status": "idle",
         }
+        asyncio.create_task(self.overlay.emit("youtube_ended"))
 
     # === SERVER LIFECYCLE ===
 
@@ -583,8 +825,17 @@ class WebServer:
         print(f"[WebServer] YouTube Player:   http://{WEB_HOST}:{WEB_PORT}/overlay/youtube_player")
         print(f"[WebServer] God Overlay:      http://{WEB_HOST}:{WEB_PORT}/overlay/god")
         print(f"[WebServer] TTS Overlay:      http://{WEB_HOST}:{WEB_PORT}/overlay/tts")
-        print(f"[WebServer] Kill Overlay:     http://{WEB_HOST}:{WEB_PORT}/overlay/kills")
+        print(f"[WebServer] Overlay WS:       ws://{WEB_HOST}:{WEB_PORT}/ws/overlays")
+        # Emit bot_ready after a brief delay to let overlays connect
+        asyncio.create_task(self._emit_bot_ready())
+
+    async def _emit_bot_ready(self):
+        """Emit bot_ready after a brief delay to let overlays connect via WS."""
+        await asyncio.sleep(3)
+        await self.overlay.emit("bot_ready")
 
     async def stop(self):
+        await self.overlay.emit("bot_shutdown")
+        await self.overlay.shutdown()
         if self.runner:
             await self.runner.cleanup()

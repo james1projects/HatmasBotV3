@@ -130,7 +130,6 @@
     box-shadow: 0 0 4px rgba(255, 215, 0, 0.5);
   }
 
-  /* Pulse animation for stat changes */
   @keyframes statPulse {
     0% { transform: scale(1); }
     50% { transform: scale(1.08); }
@@ -161,10 +160,8 @@
   </div>
 </div>
 
+<script src="/overlays/overlay_client.js"></script>
 <script>
-const API_URL = '/api/state';
-const POLL_MS = 1500;
-
 let currentGod = null;
 let lastKDA = '';
 
@@ -174,14 +171,8 @@ function formatGold(gold) {
   return String(gold);
 }
 
-function update(smite) {
-  const container = document.getElementById('container');
-
-  if (!smite || !smite.in_match || !smite.god) {
-    container.classList.remove('visible');
-    currentGod = null;
-    return;
-  }
+function renderSmiteData(smite) {
+  if (!smite || !smite.god) return;
 
   const god = smite.god;
   const stats = god.stats || {};
@@ -219,7 +210,7 @@ function update(smite) {
   // Pulse on KDA change
   if (lastKDA && lastKDA !== kdaStr) {
     kdaEl.classList.remove('pulse');
-    void kdaEl.offsetWidth; // force reflow
+    void kdaEl.offsetWidth;
     kdaEl.classList.add('pulse');
   }
   lastKDA = kdaStr;
@@ -231,25 +222,24 @@ function update(smite) {
   } else {
     goldEl.textContent = '';
   }
-
-  // Show
-  container.classList.add('visible');
 }
 
-async function poll() {
-  try {
-    const resp = await fetch(API_URL);
-    if (resp.ok) {
-      const state = await resp.json();
-      update(state.smite);
-    }
-  } catch (e) {
-    // Silent fail — overlay stays in last state
+HatmasOverlay.connect('god_overlay', {
+  container: '#container',
+  onShow(data) {
+    // god_detected event — data is the full smite state
+    renderSmiteData(data);
+  },
+  onUpdate(data) {
+    // Live stat updates while in match
+    renderSmiteData(data);
+  },
+  onHide() {
+    // match_end_confirmed — reset
+    currentGod = null;
+    lastKDA = '';
   }
-}
-
-setInterval(poll, POLL_MS);
-poll();
+});
 </script>
 
 </body>

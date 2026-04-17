@@ -129,8 +129,8 @@
   </div>
 </div>
 
+<script src="/overlays/overlay_client.js"></script>
 <script>
-  const POLL_INTERVAL = 500;
   const HIDE_DELAY = 1500;
   const VOLUME = 0.8;
 
@@ -154,25 +154,10 @@
       gainNode.gain.value = VOLUME;
       gainNode.connect(audioCtx.destination);
     }
-    // Resume if suspended (autoplay policy)
     if (audioCtx.state === 'suspended') {
       audioCtx.resume();
     }
     return audioCtx;
-  }
-
-  // ─── Poll server queue ───────────────────────────────────
-  async function pollQueue() {
-    try {
-      const resp = await fetch('/api/tts_queue');
-      if (resp.ok) {
-        const items = await resp.json();
-        if (items.length > 0) {
-          localQueue.push(...items);
-          processQueue();
-        }
-      }
-    } catch (e) {}
   }
 
   // ─── Process local queue one at a time ───────────────────
@@ -186,7 +171,6 @@
   async function playTTS(username, message, audioUrl) {
     isPlaying = true;
 
-    // Update display
     usernameEl.textContent = username;
     messageEl.textContent = message;
     container.classList.add('visible');
@@ -195,15 +179,12 @@
 
     try {
       const ctx = getAudioContext();
-
-      // Fetch audio file as ArrayBuffer
       const response = await fetch(audioUrl);
       if (!response.ok) throw new Error(`Audio fetch failed: ${response.status}`);
 
       const arrayBuffer = await response.arrayBuffer();
       const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
 
-      // Create source and play
       const source = ctx.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(gainNode);
@@ -213,16 +194,12 @@
       };
 
       source.start(0);
-      console.log('[TTS] Playing audio via Web Audio API');
-
     } catch (err) {
       console.error('[TTS] Playback error:', err);
-      // Fallback: try regular <audio> element
       try {
         await playFallback(audioUrl);
       } catch (e2) {
         console.error('[TTS] Fallback also failed:', e2);
-        // Show visual for 5s then move on
         setTimeout(onSpeechDone, 5000);
       }
     }
@@ -252,17 +229,36 @@
     }, HIDE_DELAY);
   }
 
-  // ─── Init ───────────────────────────────────────────────
+  // ─── Overlay Manager Connection ─────────────────────────
+  // TTS manages its own show/hide because it needs to stay visible
+  // while audio is playing, then hide after audio ends.
+  // The overlay manager's show delivers TTS items to the queue.
+
+  HatmasOverlay.connect('tts', {
+    container: '#tts-container',
+    onShow(data) {
+      // tts_message event — data has {user, message, audio}
+      if (data && data.user && data.message) {
+        localQueue.push(data);
+        processQueue();
+      }
+    },
+    onUpdate(data) {
+      // Additional TTS messages while visible
+      if (data && data.user && data.message) {
+        localQueue.push(data);
+        processQueue();
+      }
+    },
+    onHide() {
+      // Overlay manager auto-hide — we manage our own timing
+    }
+  });
+
   // Pre-initialize AudioContext on load (OBS doesn't need user gesture)
   try {
     getAudioContext();
-    console.log('[TTS] AudioContext initialized:', audioCtx.state);
-  } catch(e) {
-    console.log('[TTS] AudioContext init deferred');
-  }
-
-  setInterval(pollQueue, POLL_INTERVAL);
-  console.log('[TTS] Overlay ready (Web Audio API + server-side gTTS)');
+  } catch(e) {}
 </script>
 </body>
 </html>

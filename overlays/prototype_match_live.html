@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Hatmas Market — Live Match Tracker</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Inter:wght@400;500;600;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: transparent;
+    overflow: hidden;
+    width: 380px;
+    height: 260px;
+  }
+
+  .tracker {
+    width: 360px;
+    background: linear-gradient(145deg, rgba(10,10,20,0.94) 0%, rgba(8,8,16,0.97) 100%);
+    border: 1px solid rgba(212,175,55,0.25);
+    border-radius: 12px;
+    padding: 16px 20px;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  }
+
+  .tracker::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, #d4af37, transparent);
+  }
+
+  /* Header with god info */
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  .god-portrait {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #1a2a4a, #0a1a3a);
+    border: 2px solid #d4af37;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    box-shadow: 0 0 15px rgba(212,175,55,0.3);
+    animation: portrait-pulse 3s ease-in-out infinite;
+  }
+
+  @keyframes portrait-pulse {
+    0%, 100% { box-shadow: 0 0 10px rgba(212,175,55,0.2); }
+    50% { box-shadow: 0 0 20px rgba(212,175,55,0.5); }
+  }
+
+  .god-details {
+    flex: 1;
+  }
+
+  .god-name {
+    font-family: 'Inter', sans-serif;
+    font-weight: 700;
+    font-size: 16px;
+    color: #e8e8f0;
+  }
+
+  .match-label {
+    font-family: 'Inter', sans-serif;
+    font-size: 11px;
+    color: #64748b;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .live-badge {
+    font-family: 'Orbitron', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    color: #ef4444;
+    background: rgba(239,68,68,0.15);
+    border: 1px solid rgba(239,68,68,0.3);
+    padding: 2px 8px;
+    border-radius: 4px;
+    letter-spacing: 2px;
+    animation: live-blink 2s infinite;
+  }
+
+  @keyframes live-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  /* Price display */
+  .price-section {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+
+  .current-price {
+    font-family: 'Orbitron', monospace;
+    font-weight: 900;
+    font-size: 36px;
+    color: #d4af37;
+    line-height: 1;
+  }
+
+  .price-change {
+    font-family: 'Orbitron', monospace;
+    font-weight: 700;
+    font-size: 16px;
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+
+  .price-change.up {
+    color: #4ade80;
+    background: rgba(74,222,128,0.12);
+  }
+
+  .price-change.down {
+    color: #f87171;
+    background: rgba(248,113,113,0.12);
+  }
+
+  .open-price {
+    font-family: 'Inter', sans-serif;
+    font-size: 11px;
+    color: #64748b;
+    margin-bottom: 12px;
+  }
+
+  /* Chart */
+  .chart-container {
+    width: 100%;
+    height: 80px;
+    position: relative;
+    margin-bottom: 10px;
+  }
+
+  .chart-container canvas {
+    width: 100%;
+    height: 100%;
+  }
+
+  .open-line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    border-top: 1px dashed rgba(148,163,184,0.3);
+    pointer-events: none;
+  }
+
+  .open-line-label {
+    position: absolute;
+    right: 0;
+    transform: translateY(-50%);
+    font-family: 'Inter', sans-serif;
+    font-size: 9px;
+    color: #64748b;
+    background: rgba(10,10,20,0.9);
+    padding: 0 4px;
+  }
+
+  /* KDA bar */
+  .kda-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: 10px;
+    border-top: 1px solid rgba(212,175,55,0.1);
+  }
+
+  .kda {
+    font-family: 'Orbitron', monospace;
+    font-weight: 700;
+    font-size: 14px;
+    color: #e8e8f0;
+    letter-spacing: 1px;
+  }
+
+  .kda .k { color: #4ade80; }
+  .kda .d { color: #f87171; }
+  .kda .a { color: #60a5fa; }
+  .kda .sep { color: #475569; margin: 0 2px; }
+
+  .shareholders {
+    font-family: 'Inter', sans-serif;
+    font-size: 11px;
+    color: #94a3b8;
+  }
+
+  .shareholders span {
+    color: #d4af37;
+    font-weight: 600;
+  }
+
+  /* Kill flash effect */
+  .kill-flash {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at center, rgba(74,222,128,0.15), transparent 70%);
+    opacity: 0;
+    pointer-events: none;
+    border-radius: 12px;
+  }
+
+  .kill-flash.active {
+    animation: flash-green 0.6s ease-out;
+  }
+
+  .death-flash {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at center, rgba(248,113,113,0.15), transparent 70%);
+    opacity: 0;
+    pointer-events: none;
+    border-radius: 12px;
+  }
+
+  .death-flash.active {
+    animation: flash-red 0.6s ease-out;
+  }
+
+  @keyframes flash-green {
+    0% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  @keyframes flash-red {
+    0% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+</style>
+</head>
+<body>
+
+<div class="tracker" id="tracker">
+  <div class="kill-flash" id="killFlash"></div>
+  <div class="death-flash" id="deathFlash"></div>
+
+  <div class="header">
+    <div class="god-portrait">❄️</div>
+    <div class="god-details">
+      <div class="god-name">Ymir</div>
+      <div class="match-label">Conquest — In Progress</div>
+    </div>
+    <div class="live-badge">LIVE</div>
+  </div>
+
+  <div class="price-section">
+    <div class="current-price" id="currentPrice">287</div>
+    <div class="price-change up" id="priceChange">▲ +2.4%</div>
+  </div>
+
+  <div class="open-price">Opened at <strong style="color:#94a3b8">280</strong> · Shareholders: <strong style="color:#d4af37">47</strong></div>
+
+  <div class="chart-container">
+    <canvas id="chartCanvas"></canvas>
+  </div>
+
+  <div class="kda-bar">
+    <div class="kda">
+      <span class="k" id="kills">3</span><span class="sep">/</span>
+      <span class="d" id="deaths">1</span><span class="sep">/</span>
+      <span class="a" id="assists">4</span>
+    </div>
+    <div class="shareholders">
+      Trading <span>OPEN</span>
+    </div>
+  </div>
+</div>
+
+<script>
+  const OPEN_PRICE = 280;
+  let currentPrice = 287;
+  let kills = 3, deaths = 1, assists = 4;
+  let priceHistory = [280, 280, 282, 284, 283, 286, 284, 285, 287];
+  let matchTime = priceHistory.length;
+
+  const canvas = document.getElementById('chartCanvas');
+  const ctx = canvas.getContext('2d');
+
+  function resizeCanvas() {
+    const rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width = rect.width * 2;
+    canvas.height = rect.height * 2;
+    ctx.scale(2, 2);
+  }
+  resizeCanvas();
+
+  function drawChart() {
+    const w = canvas.width / 2;
+    const h = canvas.height / 2;
+    ctx.clearRect(0, 0, w, h);
+
+    if (priceHistory.length < 2) return;
+
+    const allPrices = [...priceHistory, OPEN_PRICE];
+    const min = Math.min(...allPrices) - 5;
+    const max = Math.max(...allPrices) + 5;
+    const range = max - min;
+    const pad = { top: 4, bottom: 4, left: 0, right: 0 };
+
+    const toX = (i) => pad.left + (i / Math.max(priceHistory.length - 1, 1)) * (w - pad.left - pad.right);
+    const toY = (v) => pad.top + (1 - (v - min) / range) * (h - pad.top - pad.bottom);
+
+    // Open price line
+    const openY = toY(OPEN_PRICE);
+    ctx.beginPath();
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = 'rgba(148,163,184,0.25)';
+    ctx.lineWidth = 1;
+    ctx.moveTo(0, openY);
+    ctx.lineTo(w, openY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // "OPEN" label
+    ctx.font = '9px Inter, sans-serif';
+    ctx.fillStyle = 'rgba(148,163,184,0.5)';
+    ctx.textAlign = 'right';
+    ctx.fillText('OPEN', w - 2, openY - 3);
+
+    // Price line
+    const lastPrice = priceHistory[priceHistory.length - 1];
+    const isUp = lastPrice >= OPEN_PRICE;
+    const lineColor = isUp ? '#4ade80' : '#f87171';
+
+    // Gradient fill
+    const grad = ctx.createLinearGradient(0, 0, 0, h);
+    if (isUp) {
+      grad.addColorStop(0, 'rgba(74,222,128,0.2)');
+      grad.addColorStop(1, 'rgba(74,222,128,0)');
+    } else {
+      grad.addColorStop(0, 'rgba(248,113,113,0)');
+      grad.addColorStop(1, 'rgba(248,113,113,0.2)');
+    }
+
+    // Fill area
+    ctx.beginPath();
+    ctx.moveTo(toX(0), toY(priceHistory[0]));
+    for (let i = 1; i < priceHistory.length; i++) {
+      ctx.lineTo(toX(i), toY(priceHistory[i]));
+    }
+    ctx.lineTo(toX(priceHistory.length - 1), h);
+    ctx.lineTo(toX(0), h);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Line
+    ctx.beginPath();
+    ctx.moveTo(toX(0), toY(priceHistory[0]));
+    for (let i = 1; i < priceHistory.length; i++) {
+      ctx.lineTo(toX(i), toY(priceHistory[i]));
+    }
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.stroke();
+
+    // Dot at current
+    const lastX = toX(priceHistory.length - 1);
+    const lastY = toY(lastPrice);
+    ctx.beginPath();
+    ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
+    ctx.fillStyle = lineColor;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(lastX, lastY, 7, 0, Math.PI * 2);
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.4;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  function updateDisplay() {
+    const change = ((currentPrice - OPEN_PRICE) / OPEN_PRICE * 100);
+    const isUp = change >= 0;
+
+    document.getElementById('currentPrice').textContent = Math.round(currentPrice);
+    const changeEl = document.getElementById('priceChange');
+    changeEl.textContent = `${isUp ? '▲' : '▼'} ${isUp ? '+' : ''}${change.toFixed(1)}%`;
+    changeEl.className = `price-change ${isUp ? 'up' : 'down'}`;
+
+    document.getElementById('kills').textContent = kills;
+    document.getElementById('deaths').textContent = deaths;
+    document.getElementById('assists').textContent = assists;
+
+    drawChart();
+  }
+
+  function triggerKill() {
+    kills++;
+    currentPrice += currentPrice * 0.015;
+    priceHistory.push(Math.round(currentPrice * 10) / 10);
+    document.getElementById('killFlash').classList.add('active');
+    setTimeout(() => document.getElementById('killFlash').classList.remove('active'), 600);
+    updateDisplay();
+  }
+
+  function triggerDeath() {
+    deaths++;
+    currentPrice -= currentPrice * 0.02;
+    currentPrice = Math.max(10, currentPrice);
+    priceHistory.push(Math.round(currentPrice * 10) / 10);
+    document.getElementById('deathFlash').classList.add('active');
+    setTimeout(() => document.getElementById('deathFlash').classList.remove('active'), 600);
+    updateDisplay();
+  }
+
+  // Simulate live match events
+  const events = [
+    { delay: 2000,  type: 'kill' },
+    { delay: 5000,  type: 'kill' },
+    { delay: 8000,  type: 'death' },
+    { delay: 11000, type: 'kill' },
+    { delay: 14000, type: 'assist' },
+    { delay: 17000, type: 'kill' },
+    { delay: 20000, type: 'kill' },
+    { delay: 23000, type: 'death' },
+    { delay: 26000, type: 'kill' },
+    { delay: 29000, type: 'assist' },
+    { delay: 32000, type: 'kill' },
+    { delay: 35000, type: 'kill' },
+  ];
+
+  events.forEach(e => {
+    setTimeout(() => {
+      if (e.type === 'kill') triggerKill();
+      else if (e.type === 'death') triggerDeath();
+      else {
+        assists++;
+        currentPrice += currentPrice * 0.005;
+        priceHistory.push(Math.round(currentPrice * 10) / 10);
+        updateDisplay();
+      }
+    }, e.delay);
+  });
+
+  drawChart();
+</script>
+</body>
+</html>

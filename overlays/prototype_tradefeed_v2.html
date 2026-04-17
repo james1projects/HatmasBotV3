@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Hatmas Market — Trade Feed</title>
+<link rel="stylesheet" href="hatmas_theme.css">
+<style>
+  body {
+    background: transparent;
+    overflow: hidden;
+    width: 320px;
+    height: 340px;
+  }
+
+  .feed {
+    width: 300px;
+    background: var(--hm-bg);
+    border: 1px solid var(--hm-border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .feed-header {
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--hm-border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .feed-title {
+    font-family: 'BigNoodleTitling', 'Poppins', sans-serif;
+    font-size: 17px;
+    color: var(--hm-text-secondary);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  .feed-live {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--hm-green);
+    animation: blink 2s infinite;
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  .feed-list {
+    padding: 4px 0;
+    max-height: 240px;
+    overflow: hidden;
+  }
+
+  .trade {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 14px;
+    opacity: 0;
+    transform: translateY(-8px);
+    animation: trade-enter 0.3s ease-out forwards;
+  }
+
+  @keyframes trade-enter {
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .trade-icon {
+    width: 24px;
+    height: 24px;
+    border-radius: 5px;
+    overflow: hidden;
+    background: var(--hm-icon-bg);
+    flex-shrink: 0;
+  }
+
+  .trade-icon img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .trade-text {
+    flex: 1;
+    font-family: 'Poppins', sans-serif;
+    font-size: 11px;
+    color: var(--hm-text-secondary);
+    line-height: 1.3;
+  }
+
+  .trade-text .user {
+    color: var(--hm-text);
+    font-weight: 600;
+  }
+
+  .trade-text .action-buy {
+    color: var(--hm-green);
+    font-weight: 600;
+  }
+
+  .trade-text .action-sell {
+    color: var(--hm-red);
+    font-weight: 600;
+  }
+
+  .trade-text .god {
+    color: var(--hm-text);
+    font-weight: 600;
+  }
+
+  .trade-text .amount {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    color: var(--hm-text-secondary);
+  }
+
+  .trade-time {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: var(--hm-text-muted);
+    flex-shrink: 0;
+  }
+
+  /* Divider between trades */
+  .trade + .trade {
+    border-top: 1px solid var(--hm-separator);
+  }
+
+  /* Special trade types */
+  .trade.dividend {
+    background: var(--hm-bg-subtle);
+  }
+
+  .trade-text .dividend-label {
+    color: var(--hm-gold);
+    font-weight: 600;
+  }
+
+  .trade.free-share {
+    background: var(--hm-blue-bg);
+  }
+
+  .trade-text .free-label {
+    color: var(--hm-blue);
+    font-weight: 600;
+  }
+
+</style>
+</head>
+<body>
+
+<div class="feed hm-panel">
+  <div class="feed-header">
+    <span class="feed-title">Trade Feed</span>
+    <div class="feed-live"></div>
+  </div>
+
+  <div class="feed-list" id="feedList"></div>
+</div>
+
+<script>
+const CUSTOM_ICON_PATH = '../Custom God Icons/';
+const DEFAULT_ICON_PATH = '../data/god_icons/';
+
+function iconUrl(name) {
+  return CUSTOM_ICON_PATH + name + '.png';
+}
+function fallbackUrl(name) {
+  return DEFAULT_ICON_PATH + name.toLowerCase().replace(/\s+/g, '-') + '.png';
+}
+
+// Mock trade events
+const trades = [
+  { type: "buy",       user: "CoolViewer99",   god: "Ymir",       amount: 1200, time: "2s" },
+  { type: "sell",      user: "PanicSeller",     god: "Agni",       amount: 800,  time: "8s" },
+  { type: "buy",       user: "SmiteTrader",     god: "Ymir",       amount: 3500, time: "15s" },
+  { type: "dividend",  god: "Ymir",             amount: 2340, holders: 47,   time: "22s" },
+  { type: "buy",       user: "xXDiamondXx",     god: "Danzaburou", amount: 500,  time: "30s" },
+  { type: "sell",      user: "FrostyInvestor",   god: "Thanatos",   amount: 2100, time: "35s" },
+  { type: "buy",       user: "HatCollector",    god: "Ymir",       amount: 900,  time: "41s" },
+  { type: "free",      god: "Ymir",             viewers: 142,                    time: "48s" },
+  { type: "buy",       user: "NewTrader",       god: "Bellona",    amount: 400,  time: "55s" },
+  { type: "sell",      user: "CoolViewer99",    god: "Loki",       amount: 640,  time: "1m" },
+];
+
+function formatAmount(v) {
+  if (v >= 1000) return (v / 1000).toFixed(1) + 'k';
+  return v.toString();
+}
+
+function renderTrade(t) {
+  const icon = `<div class="trade-icon"><img src="${iconUrl(t.god)}" onerror="this.src='${fallbackUrl(t.god)}'"></div>`;
+
+  let text = '';
+  let cls = 'trade';
+
+  if (t.type === 'buy') {
+    text = `<span class="user">${t.user}</span> <span class="action-buy">bought</span> <span class="amount">${formatAmount(t.amount)}</span> of <span class="god">${t.god}</span>`;
+  } else if (t.type === 'sell') {
+    text = `<span class="user">${t.user}</span> <span class="action-sell">sold</span> <span class="amount">${formatAmount(t.amount)}</span> of <span class="god">${t.god}</span>`;
+  } else if (t.type === 'dividend') {
+    cls += ' dividend';
+    text = `<span class="dividend-label">Dividend</span> — <span class="god">${t.god}</span> paid <span class="amount">${formatAmount(t.amount)}</span> to <span class="amount">${t.holders}</span> holders`;
+  } else if (t.type === 'free') {
+    cls += ' free-share';
+    text = `<span class="free-label">Free share</span> — <span class="god">${t.god}</span> distributed to <span class="amount">${t.viewers}</span> viewers`;
+  }
+
+  return `<div class="${cls}">${icon}<div class="trade-text">${text}</div><span class="trade-time">${t.time}</span></div>`;
+}
+
+// Animate trades appearing one by one
+const feedEl = document.getElementById('feedList');
+let index = 0;
+
+function addNext() {
+  if (index >= trades.length) return;
+  const html = renderTrade(trades[index]);
+  feedEl.insertAdjacentHTML('afterbegin', html);
+
+  // Remove oldest if more than 8 visible
+  while (feedEl.children.length > 8) {
+    feedEl.removeChild(feedEl.lastChild);
+  }
+
+  index++;
+  setTimeout(addNext, 2500);
+}
+
+// Start with first 3 visible
+for (let i = 0; i < 3; i++) {
+  feedEl.insertAdjacentHTML('beforeend', renderTrade(trades[i]));
+  index++;
+}
+
+// Then stream in the rest
+setTimeout(addNext, 3000);
+</script>
+</body>
+</html>

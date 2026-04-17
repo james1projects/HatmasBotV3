@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Voice Line Overlay</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: transparent;
+    overflow: hidden;
+    font-family: 'Segoe UI', Arial, sans-serif;
+  }
+
+  #container {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    pointer-events: none;
+    z-index: 100;
+    display: none;
+  }
+
+  /* Video element — shown only when animation exists */
+  #animation {
+    max-width: 400px;
+    max-height: 400px;
+    border-radius: 12px;
+    display: none;
+  }
+
+  /* Text label below the video/audio */
+  #label {
+    margin-top: 12px;
+    padding: 8px 24px;
+    border-radius: 8px;
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.7);
+    display: inline-block;
+  }
+
+  #label.god_joke {
+    background: linear-gradient(135deg, rgba(255,215,0,0.85), rgba(200,165,0,0.85));
+    color: #fff;
+    border: 2px solid rgba(255,225,100,0.6);
+    box-shadow: 0 0 20px rgba(255,215,0,0.4);
+  }
+
+  #label.god_taunt {
+    background: linear-gradient(135deg, rgba(255,68,68,0.85), rgba(200,40,40,0.85));
+    color: #fff;
+    border: 2px solid rgba(255,100,100,0.6);
+    box-shadow: 0 0 20px rgba(255,50,50,0.4);
+  }
+
+  #label.god_laugh {
+    background: linear-gradient(135deg, rgba(155,89,182,0.85), rgba(120,60,150,0.85));
+    color: #fff;
+    border: 2px solid rgba(180,120,200,0.6);
+    box-shadow: 0 0 20px rgba(155,89,182,0.4);
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: scale(0.8); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+
+  @keyframes fadeOut {
+    from { opacity: 1; }
+    to   { opacity: 0; }
+  }
+
+  .fade-in {
+    animation: fadeIn 0.3s ease-out forwards;
+  }
+
+  .fade-out {
+    animation: fadeOut 0.5s ease-in forwards;
+  }
+</style>
+</head>
+<body>
+
+<div id="container">
+  <video id="animation" muted playsinline></video>
+  <audio id="audio"></audio>
+  <div id="label"></div>
+</div>
+
+<script src="/overlays/overlay_client.js"></script>
+<script>
+  const container = document.getElementById('container');
+  const videoEl = document.getElementById('animation');
+  const audioEl = document.getElementById('audio');
+  const labelEl = document.getElementById('label');
+
+  let queue = [];
+  let playing = false;
+
+  function processQueue() {
+    if (playing || queue.length === 0) return;
+    playing = true;
+    const event = queue.shift();
+    playEvent(event);
+  }
+
+  function playEvent(event) {
+    const typeLabels = {
+      god_joke: 'Joke',
+      god_taunt: 'Taunt',
+      god_laugh: 'Laugh',
+    };
+    labelEl.textContent = event.god + ' ' + (typeLabels[event.type] || event.type);
+    labelEl.className = event.type;
+
+    container.style.display = 'block';
+    container.classList.remove('fade-out');
+    container.classList.add('fade-in');
+
+    let audioEnded = false;
+    let videoEnded = !event.video_url;
+
+    function checkDone() {
+      if (audioEnded && videoEnded) {
+        setTimeout(() => {
+          container.classList.remove('fade-in');
+          container.classList.add('fade-out');
+          setTimeout(() => {
+            container.style.display = 'none';
+            videoEl.style.display = 'none';
+            audioEl.onended = null;
+            audioEl.onerror = null;
+            audioEl.oncanplaythrough = null;
+            videoEl.onended = null;
+            videoEl.onerror = null;
+            videoEl.oncanplay = null;
+            audioEl.removeAttribute('src');
+            audioEl.load();
+            videoEl.removeAttribute('src');
+            videoEl.load();
+            playing = false;
+            processQueue();
+          }, 600);
+        }, 500);
+      }
+    }
+
+    audioEl.onended = () => { audioEnded = true; checkDone(); };
+    audioEl.onerror = () => { audioEnded = true; checkDone(); };
+    audioEl.oncanplaythrough = () => {};
+    audioEl.src = event.audio_url;
+
+    if (event.video_url) {
+      videoEl.style.display = 'block';
+      videoEl.onended = () => { videoEnded = true; checkDone(); };
+      videoEl.onerror = () => { videoEnded = true; checkDone(); };
+      videoEl.src = event.video_url;
+      videoEl.oncanplay = () => {
+        videoEl.play().catch(() => {});
+        audioEl.play().catch(e => { audioEnded = true; checkDone(); });
+      };
+    } else {
+      videoEl.style.display = 'none';
+      audioEl.play().catch(e => { audioEnded = true; checkDone(); });
+    }
+
+    // Safety timeout — auto-hide after 15 seconds max
+    setTimeout(() => {
+      if (playing) {
+        audioEl.pause();
+        videoEl.pause();
+        audioEnded = true;
+        videoEnded = true;
+        checkDone();
+      }
+    }, 15000);
+  }
+
+  // ─── Overlay Manager Connection ─────────────────────────
+  // Voicelines manages its own show/hide because it needs to
+  // stay visible during audio/video playback.
+
+  HatmasOverlay.connect('voicelines', {
+    container: '#container',
+    onShow(data) {
+      // voiceline_play event — data is the voiceline event object
+      if (data && data.god) {
+        queue.push(data);
+        processQueue();
+      }
+    },
+    onUpdate(data) {
+      // Additional voiceline events while visible
+      if (data && data.god) {
+        queue.push(data);
+        processQueue();
+      }
+    },
+    onHide() {
+      // Overlay manager auto-hide — we manage our own timing
+    }
+  });
+</script>
+</body>
+</html>

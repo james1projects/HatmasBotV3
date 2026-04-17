@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Daily Death Counter</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    font-family: 'Impact', 'Arial Black', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+  }
+  #wrap {
+    display: inline-block;
+    padding: 12px 20px;
+    line-height: 1;
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+  #wrap.visible {
+    opacity: 1;
+  }
+  #label {
+    display: block;
+    font-size: 26px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #ff4444;
+    text-shadow:
+      -2px -2px 0 #000,
+       2px -2px 0 #000,
+      -2px  2px 0 #000,
+       2px  2px 0 #000;
+  }
+  #counter {
+    display: block;
+    font-size: 88px;
+    color: #ffffff;
+    text-shadow:
+      -3px -3px 0 #000,
+       3px -3px 0 #000,
+      -3px  3px 0 #000,
+       3px  3px 0 #000,
+       0 0 12px rgba(0, 0, 0, 0.6);
+  }
+</style>
+</head>
+<body>
+  <div id="wrap">
+    <span id="label">Deaths Today</span>
+    <span id="counter">0</span>
+  </div>
+
+  <script src="/overlays/overlay_client.js"></script>
+  <script>
+    const counterEl = document.getElementById('counter');
+
+    // Still poll the death count endpoint for live updates,
+    // but show/hide is controlled by the overlay manager.
+    // Deaths overlay shows on bot_ready, hides on bot_shutdown.
+    let lastCount = null;
+
+    async function pollDeathCount() {
+      try {
+        const res = await fetch('/api/death_count', { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (typeof data.count === 'number' && data.count !== lastCount) {
+          counterEl.textContent = data.count;
+          lastCount = data.count;
+        }
+      } catch (_) {}
+    }
+
+    HatmasOverlay.connect('deaths', {
+      container: '#wrap',
+      onShow(data) {
+        // Start polling death count when overlay is shown
+        pollDeathCount();
+      },
+      onUpdate(data) {
+        // Update count if pushed via websocket (e.g., on death event)
+        if (data && typeof data.count === 'number') {
+          counterEl.textContent = data.count;
+          lastCount = data.count;
+        }
+      },
+      onHide() {
+        // Overlay hidden on bot_shutdown
+      }
+    });
+
+    // Poll death count periodically while visible
+    setInterval(() => {
+      if (HatmasOverlay.isVisible()) {
+        pollDeathCount();
+      }
+    }, 1000);
+  </script>
+</body>
+</html>

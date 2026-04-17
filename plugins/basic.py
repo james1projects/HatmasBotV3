@@ -40,7 +40,6 @@ class BasicPlugin:
     def setup(self, bot):
         self.bot = bot
         bot.register_command("hello", self.cmd_hello)
-        bot.register_command("commands", self.cmd_commands)
         bot.register_command("uptime", self.cmd_uptime)
         bot.register_command("socials", self.cmd_socials)
         bot.register_command("suggest", self.cmd_suggest)
@@ -52,16 +51,6 @@ class BasicPlugin:
         await self.bot.send_reply(
             message,
             f"Hello {name}!",
-            whisper
-        )
-
-    async def cmd_commands(self, message, args, whisper=False):
-        cmds = sorted(self.bot._custom_commands.keys())
-        if message.chatter and not self.bot.is_mod(message.chatter):
-            cmds = [c for c in cmds if not self.bot._custom_commands[c]["mod_only"]]
-        await self.bot.send_reply(
-            message,
-            f"Commands: {', '.join('!' + c for c in cmds)}",
             whisper
         )
 

@@ -637,10 +637,14 @@ class GodRequestPlugin:
             )
             return
 
+        if len(self.queue) == 0:
+            await self.bot.send_reply(message, "Queue is empty.", whisper)
+            return
+
         if pos < 1 or pos > len(self.queue):
             await self.bot.send_reply(
                 message,
-                f"Invalid position. Queue has {len(self.queue)} entries (1-{len(self.queue)}).",
+                f"Invalid position. Use a number between 1 and {len(self.queue)}.",
                 whisper
             )
             return
