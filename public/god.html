@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#202C39">
+<title>{{OG_TITLE}}</title>
+<meta name="description" content="{{OG_DESCRIPTION}}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Hatmas Market">
+<meta property="og:url" content="{{OG_URL}}">
+<meta property="og:title" content="{{OG_TITLE}}">
+<meta property="og:description" content="{{OG_DESCRIPTION}}">
+<meta property="og:image" content="https://hatmaster.tv/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{OG_TITLE}}">
+<meta name="twitter:description" content="{{OG_DESCRIPTION}}">
+<meta name="twitter:image" content="https://hatmaster.tv/og-image.png">
+<link rel="stylesheet" href="/theme.css">
+<style>
+  .wrap {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 16px 14px 80px;
+  }
+
+  .brand-band {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 1px solid var(--border);
+    padding: 8px 0 12px;
+    margin-bottom: 16px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--text-dim);
+  }
+  .brand-band a.left {
+    color: var(--accent);
+    font-weight: 700;
+  }
+  .brand-band .status .dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--text-fade);
+    margin-right: 6px;
+    vertical-align: middle;
+    transition: background 0.2s;
+  }
+  .brand-band .status .dot.connected {
+    background: var(--green);
+    box-shadow: 0 0 6px var(--green);
+  }
+  .brand-band .status .dot.disconnected { background: var(--red); }
+
+  /* ─── header ──────────────────────────────────────────────────── */
+  /* The page-kicker sits between the brand-band and the .head
+     section as a small mono label introducing what this page is.
+     Inherits font + color from theme.css .kicker. */
+  .page-kicker {
+    margin: 14px 0 10px;
+  }
+  .head {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    padding: 4px 0 20px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 18px;
+  }
+  .portrait {
+    width: 96px; height: 96px;
+    border-radius: 50%;
+    background: var(--bg-2);
+    object-fit: cover;
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .head .info { flex: 1; min-width: 0; }
+  .head h1 {
+    margin: 0 0 8px;
+    font-size: 36px;
+    line-height: 1.0;
+    letter-spacing: -0.025em;
+    font-weight: 700;
+  }
+  .price-row {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .price {
+    font-family: var(--font-mono);
+    font-feature-settings: 'tnum' 1;
+    font-variant-numeric: tabular-nums;
+    font-size: 36px;
+    font-weight: 700;
+    color: var(--accent);
+    transition: color 0.4s;
+    line-height: 1;
+  }
+  .price.flash { color: var(--tick-flash); }
+  .price-sub {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+  }
+
+  /* ─── card primitive ──────────────────────────────────────────── */
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    margin: 14px 0;
+  }
+
+  /* ─── chart ──────────────────────────────────────────────────── */
+  .chart-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 10px 8px;
+    margin: 14px 0;
+    overflow: hidden;
+  }
+  svg.chart {
+    width: 100%;
+    height: 240px;
+    display: block;
+  }
+
+  /* ─── stats grid ─────────────────────────────────────────────── */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(124px, 1fr));
+    gap: 6px;
+  }
+  .stat {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+  }
+  .stat .label {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    margin-bottom: 4px;
+  }
+  .stat .value {
+    font-family: var(--font-mono);
+    font-feature-settings: 'tnum' 1;
+    font-variant-numeric: tabular-nums;
+    font-size: 17px;
+    font-weight: 600;
+  }
+  .stat .value.up { color: var(--green); }
+  .stat .value.down { color: var(--red); }
+
+  /* ─── holders + matches ───────────────────────────────────────── */
+  .holder, .match-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    margin-bottom: 3px;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .holder:hover, .match-row:hover { background: var(--panel-hi); }
+
+  .holder .rank {
+    font-family: var(--font-mono);
+    color: var(--text-fade);
+    width: 22px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .holder .name {
+    flex: 1;
+    margin: 0 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .holder .badge {
+    display: inline-block;
+    padding: 1px 5px;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    margin-left: 6px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .holder .badge.youtube { color: #ff5e5e; border-color: #ff5e5e44; }
+  .holder .badge.twitch  { color: #c8a4ff; border-color: #c8a4ff44; }
+  .holder .right-col {
+    text-align: right;
+    font-family: var(--font-mono);
+    font-feature-settings: 'tnum' 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .holder .value {
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 13px;
+  }
+  .holder .shares {
+    color: var(--text-dim);
+    font-size: 11px;
+  }
+
+  .match-row .outcome {
+    font-family: var(--font-mono);
+    width: 48px;
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+  }
+  .match-row .outcome.win { color: var(--green); }
+  .match-row .outcome.loss { color: var(--red); }
+  .match-row .kda {
+    flex: 1;
+    text-align: center;
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    font-feature-settings: 'tnum' 1;
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+  }
+  .match-row .delta {
+    font-family: var(--font-mono);
+    font-feature-settings: 'tnum' 1;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    font-weight: 600;
+    width: 64px;
+  }
+  .match-row .delta.up { color: var(--green); }
+  .match-row .delta.down { color: var(--red); }
+  .match-row .when {
+    font-family: var(--font-mono);
+    color: var(--text-fade);
+    font-size: 10px;
+    text-align: right;
+    width: 60px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .breakdown-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .breakdown-row:last-child { border-bottom: none; }
+  .breakdown-row .label { color: var(--text-dim); }
+  .breakdown-row .v {
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-feature-settings: 'tnum' 1;
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+  }
+  .breakdown-row .v.up { color: var(--green); }
+  .breakdown-row .v.down { color: var(--red); }
+
+  .empty {
+    text-align: center;
+    color: var(--text-fade);
+    padding: 16px 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand-band">
+      <a class="left" href="/">// HATMASTER.TV</a>
+      <div class="right-cluster">
+        <div class="status"><span class="dot" id="live-dot"></span><span id="status">connecting…</span></div>
+      </div>
+    </div>
+
+    <div class="kicker page-kicker">// GOD MARKET</div>
+
+    <div class="head">
+      <img class="portrait" id="portrait" src="" alt="">
+      <div class="info">
+        <h1 id="god-name">Loading…</h1>
+        <div class="price-row">
+          <div class="price" id="price">--</div>
+          <div class="price-sub" id="price-sub"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="chart-card">
+      <div class="section-title">Price history</div>
+      <svg class="chart" id="chart" viewBox="0 0 800 240" preserveAspectRatio="none"></svg>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Hatmaster's lifetime</div>
+      <div class="stats-grid" id="stats-grid"></div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Top holders</div>
+      <div class="tab-row" id="holder-tabs">
+        <button class="tab active" data-platform="all">All</button>
+        <button class="tab" data-platform="twitch">Twitch</button>
+        <button class="tab" data-platform="youtube">YouTube</button>
+      </div>
+      <div id="holders"></div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Recent matches</div>
+      <div id="matches"></div>
+    </div>
+
+    <div class="card" id="breakdown-card" style="display: none;">
+      <div class="section-title">Price composition</div>
+      <div id="breakdown"></div>
+    </div>
+
+    <div class="footer-brand">
+      <div class="footer-build">
+        <span class="dot"></span><span id="last-ping">DATA · &lt;1s</span> &nbsp;·&nbsp; HATMASBOT v2.5
+      </div>
+      <div>Made by <a href="https://twitch.tv/hatmaster" target="_blank">Hatmaster</a> &amp; Claude</div>
+      <div class="footer-controls">
+        <button id="icon-toggle" class="icon-toggle"
+                title="Toggle between custom OBS-style icons and official portraits">
+          [ICONS: CUSTOM]
+        </button>
+      </div>
+    </div>
+  </div>
+
+<script>
+  // ─── icon style toggle (persisted in localStorage) ───────────────
+  const ICON_PREF_KEY = 'hatmas:icon-style';
+  function getIconStyle() {
+    return localStorage.getItem(ICON_PREF_KEY) || 'custom';
+  }
+  function setIconStyle(s) {
+    localStorage.setItem(ICON_PREF_KEY, s);
+  }
+  function iconUrl(name, slug) {
+    const safeSlug = slug || String(name).toLowerCase()
+                                          .replace(/\s+/g, '-')
+                                          .replace(/'/g, '');
+    const route = getIconStyle() === 'custom'
+                    ? '/custom-god-icon/' : '/god-icon/';
+    return route + encodeURIComponent(safeSlug);
+  }
+  const $iconToggle = document.getElementById('icon-toggle');
+  function updateToggleLabel() {
+    $iconToggle.textContent = '[ICONS: ' + getIconStyle().toUpperCase() + ']';
+  }
+  updateToggleLabel();
+  $iconToggle.addEventListener('click', () => {
+    const cur = getIconStyle();
+    setIconStyle(cur === 'custom' ? 'official' : 'custom');
+    updateToggleLabel();
+    // Re-set the portrait src so it picks up the new route.
+    if (lastIconSlug) {
+      $portrait.src = iconUrl(canonicalName, lastIconSlug);
+    }
+  });
+  // Cached so the toggle handler can re-build the URL without a full
+  // /api/god refetch.
+  let lastIconSlug = null;
+
+  // Stream embed used to live here, copied from the landing page.
+  // Removed — it makes sense on the hub but not on a per-god page.
+  // Viewers can jump to / from the brand-band link to watch live.
+
+  // Footer "last data" ping — bumped from any successful poll/WS
+  // message so the user can see at a glance that this page is
+  // actually receiving live updates.
+  let _lastPingMs = Date.now();
+  function bumpPing() { _lastPingMs = Date.now(); updatePingLabel(); }
+  function updatePingLabel() {
+    const el = document.getElementById('last-ping');
+    if (!el) return;
+    const ago = Math.floor((Date.now() - _lastPingMs) / 1000);
+    if (ago < 2)       el.textContent = 'DATA · <1s';
+    else if (ago < 60) el.textContent = 'DATA · ' + ago + 's';
+    else               el.textContent = 'DATA · ' + Math.floor(ago / 60) + 'm';
+  }
+  setInterval(updatePingLabel, 1000);
+
+  const godNameRaw = decodeURIComponent(location.pathname.split('/').pop() || '');
+  let canonicalName = godNameRaw;
+
+  const $name = document.getElementById('god-name');
+  const $portrait = document.getElementById('portrait');
+  const $price = document.getElementById('price');
+  const $priceSub = document.getElementById('price-sub');
+  const $statsGrid = document.getElementById('stats-grid');
+  const $holders = document.getElementById('holders');
+  const $matches = document.getElementById('matches');
+  const $breakdown = document.getElementById('breakdown');
+  const $breakdownCard = document.getElementById('breakdown-card');
+  const $chart = document.getElementById('chart');
+  const $liveDot = document.getElementById('live-dot');
+  const $status = document.getElementById('status');
+
+  let priceHistory = [];
+
+  loadGod();
+  async function loadGod() {
+    try {
+      const r = await fetch('/api/god/' + encodeURIComponent(godNameRaw));
+      if (r.status === 404) {
+        $name.textContent = 'GOD NOT FOUND';
+        $status.textContent = 'no data';
+        return;
+      }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      bumpPing();
+      hydrate(data);
+      connectWebSocket();
+    } catch (err) {
+      $name.textContent = "ERR · couldn't load";
+      $status.textContent = err.message || 'error';
+    }
+  }
+
+  function hydrate(data) {
+    canonicalName = data.name;
+    lastIconSlug = data.slug || null;
+    document.title = data.name + ': Hatmas Market';
+    $name.textContent = data.name;
+    $portrait.src = iconUrl(canonicalName, lastIconSlug);
+    $portrait.alt = data.name;
+    $portrait.onerror = () => { $portrait.style.opacity = 0.3; };
+    $price.textContent = Math.round(data.price);
+    $priceSub.textContent = 'HATS / SHARE';
+
+    const lt = data.lifetime || {};
+    const wrText = lt.games > 0 ? (lt.winrate * 100).toFixed(0) + '%' : '--';
+    const wrClass = lt.winrate > 0.5 ? 'up' : (lt.winrate < 0.5 ? 'down' : '');
+    $statsGrid.innerHTML = '';
+    addStat($statsGrid, 'Games', lt.games || 0);
+    addStat($statsGrid, 'Wins', lt.wins || 0, 'up');
+    addStat($statsGrid, 'Losses', lt.losses || 0, 'down');
+    addStat($statsGrid, 'Winrate', wrText, wrClass);
+    addStat($statsGrid, 'Total Kills', lt.kills || 0);
+    addStat($statsGrid, 'Total Deaths', lt.deaths || 0);
+    addStat($statsGrid, 'Total Assists', lt.assists || 0);
+    addStat($statsGrid, 'Avg KDA', lt.kda_avg || 0);
+
+    priceHistory = (data.history || []).map(h => h.price);
+    drawChart(priceHistory);
+
+    // top_holders is now {all, twitch, youtube} so a single tabbed
+    // panel can switch between platform views without re-fetching.
+    _holdersByPlatform = data.top_holders || {};
+    renderHoldersForActiveTab();
+    renderMatches(data.recent_matches || []);
+    renderBreakdown(data.breakdown);
+  }
+
+  // ─── Top-holders tabs ──────────────────────────────────────────
+  let _holdersByPlatform = {};
+  let _activeHolderTab = 'all';
+  document.querySelectorAll('#holder-tabs .tab').forEach(t => {
+    t.addEventListener('click', () => {
+      _activeHolderTab = t.dataset.platform;
+      document.querySelectorAll('#holder-tabs .tab').forEach(o => {
+        o.classList.toggle('active', o === t);
+      });
+      renderHoldersForActiveTab();
+    });
+  });
+  function renderHoldersForActiveTab() {
+    const list = (_holdersByPlatform && _holdersByPlatform[_activeHolderTab]) || [];
+    renderHolders(list);
+  }
+
+  function addStat(parent, label, value, modClass) {
+    const el = document.createElement('div');
+    el.className = 'stat';
+    const cls = modClass ? ` ${modClass}` : '';
+    el.innerHTML = `<div class="label">${escapeHtml(label)}</div>` +
+                   `<div class="value${cls}">${escapeHtml(String(value))}</div>`;
+    parent.appendChild(el);
+  }
+
+  function renderHolders(holders) {
+    if (!holders.length) {
+      $holders.innerHTML = '<div class="empty">No holders yet</div>';
+      return;
+    }
+    $holders.innerHTML = '';
+    holders.forEach((h, idx) => {
+      const el = document.createElement('div');
+      el.className = 'holder';
+      const badgeClass = h.platform === 'youtube' ? 'youtube' : 'twitch';
+      const badgeText = h.platform === 'youtube' ? 'YT' : 'TW';
+      el.innerHTML =
+        `<div class="rank">#${String(idx + 1).padStart(2, '0')}</div>` +
+        `<div class="name">${escapeHtml(h.name)}` +
+        `  <span class="badge ${badgeClass}">${badgeText}</span></div>` +
+        `<div class="right-col">` +
+        `  <div class="value">${Math.round(h.value)} hats</div>` +
+        `  <div class="shares">${h.shares.toFixed(2)} sh</div>` +
+        `</div>`;
+      $holders.appendChild(el);
+    });
+  }
+
+  function renderMatches(matches) {
+    if (!matches.length) {
+      $matches.innerHTML = '<div class="empty">No matches recorded</div>';
+      return;
+    }
+    $matches.innerHTML = '';
+    for (const m of matches) {
+      const el = document.createElement('div');
+      el.className = 'match-row';
+      const outcomeCls = m.outcome === 'win' ? 'win' : 'loss';
+      const outcomeText = m.outcome.toUpperCase();
+      const delta = m.price_change || 0;
+      const deltaCls = delta >= 0 ? 'up' : 'down';
+      const sign = delta >= 0 ? '+' : '';
+      el.innerHTML =
+        `<div class="outcome ${outcomeCls}">${outcomeText}</div>` +
+        `<div class="kda">${m.kills}/${m.deaths}/${m.assists}</div>` +
+        `<div class="delta ${deltaCls}">${sign}${delta.toFixed(1)}%</div>` +
+        `<div class="when">${relativeTime(m.timestamp)}</div>`;
+      $matches.appendChild(el);
+    }
+  }
+
+  function renderBreakdown(b) {
+    if (!b) { $breakdownCard.style.display = 'none'; return; }
+    $breakdownCard.style.display = '';
+    const rows = [
+      ['Base price', b.base.toFixed(0) + ' hats', ''],
+      ['Confidence (sample size)', (b.confidence * 100).toFixed(0) + '%', ''],
+      ['Winrate effect',
+        (b.winrate_pct >= 0 ? '+' : '') + b.winrate_pct.toFixed(1) + '% ' +
+          ' (' + (b.winrate_contribution >= 0 ? '+' : '') +
+          b.winrate_contribution.toFixed(0) + ' hats)',
+        b.winrate_pct >= 0 ? 'up' : 'down'],
+      ['Volume premium',
+        '+' + b.volume_pct.toFixed(1) + '% ' +
+          ' (+' + b.volume_contribution.toFixed(0) + ' hats)',
+        b.volume_contribution > 0 ? 'up' : ''],
+      ['KDA modifier',
+        (b.kda_pct >= 0 ? '+' : '') + b.kda_pct.toFixed(1) + '% ' +
+          ' (' + (b.kda_contribution >= 0 ? '+' : '') +
+          b.kda_contribution.toFixed(0) + ' hats)',
+        b.kda_pct >= 0 ? 'up' : 'down'],
+    ];
+    $breakdown.innerHTML = '';
+    for (const [label, val, cls] of rows) {
+      const el = document.createElement('div');
+      el.className = 'breakdown-row';
+      const valCls = cls ? ` v ${cls}` : ' v';
+      el.innerHTML = `<div class="label">${escapeHtml(label)}</div>` +
+                     `<div class="${valCls}">${escapeHtml(val)}</div>`;
+      $breakdown.appendChild(el);
+    }
+  }
+
+  // ─── chart drawing ───────────────────────────────────────────────
+  function drawChart(values) {
+    const w = 800, h = 240, pad = 14;
+    $chart.innerHTML = '';
+    if (!values || values.length < 2) {
+      const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      txt.setAttribute('x', w / 2);
+      txt.setAttribute('y', h / 2);
+      txt.setAttribute('text-anchor', 'middle');
+      txt.setAttribute('fill', '#7D98A1');
+      txt.setAttribute('font-size', '11');
+      txt.setAttribute('font-family', 'JetBrains Mono, monospace');
+      txt.setAttribute('letter-spacing', '0.16em');
+      txt.textContent = 'AWAITING DATA';
+      $chart.appendChild(txt);
+      return;
+    }
+    const min = Math.min.apply(null, values);
+    const max = Math.max.apply(null, values);
+    const range = (max - min) || 1;
+    const innerW = w - pad * 2;
+    const innerH = h - pad * 2;
+    const step = innerW / (values.length - 1);
+
+    // Gridlines (4 horizontal, dashed for terminal feel)
+    for (let i = 0; i <= 3; i++) {
+      const y = pad + (innerH * i / 3);
+      $chart.appendChild(svg('line', {
+        x1: pad, y1: y, x2: w - pad, y2: y,
+        stroke: '#2B3845', 'stroke-width': '1',
+        'stroke-dasharray': '2,4',
+      }));
+    }
+    // Vertical guides
+    for (let i = 0; i <= 4; i++) {
+      const x = pad + (innerW * i / 4);
+      $chart.appendChild(svg('line', {
+        x1: x, y1: pad, x2: x, y2: h - pad,
+        stroke: '#2B3845', 'stroke-width': '1',
+        'stroke-dasharray': '2,4',
+      }));
+    }
+
+    // Axis labels (mono)
+    const labelMax = svg('text', {
+      x: pad + 4, y: pad + 10, fill: '#7D98A1',
+      'font-size': '10', 'font-family': 'JetBrains Mono, monospace',
+    });
+    labelMax.textContent = Math.round(max);
+    $chart.appendChild(labelMax);
+    const labelMin = svg('text', {
+      x: pad + 4, y: h - pad - 4, fill: '#7D98A1',
+      'font-size': '10', 'font-family': 'JetBrains Mono, monospace',
+    });
+    labelMin.textContent = Math.round(min);
+    $chart.appendChild(labelMin);
+
+    const points = values.map((v, i) => {
+      const x = pad + i * step;
+      const y = h - pad - ((v - min) / range) * innerH;
+      return x.toFixed(1) + ',' + y.toFixed(1);
+    }).join(' ');
+    const last = values[values.length - 1];
+    const first = values[0];
+    // Bronze for "up", Scarlet for "down" — matches the Hatmas
+    // brand palette (no green in the 5-color system).
+    const color = last >= first ? '#DFA06E' : '#DF2935';
+
+    // Area fill
+    const areaPoints = `${pad},${h - pad} ${points} ${w - pad},${h - pad}`;
+    $chart.appendChild(svg('polygon', {
+      points: areaPoints,
+      fill: color, 'fill-opacity': '0.10',
+    }));
+
+    $chart.appendChild(svg('polyline', {
+      points: points,
+      fill: 'none',
+      stroke: color,
+      'stroke-width': '1.6',
+      'stroke-linecap': 'round',
+      'stroke-linejoin': 'round',
+    }));
+
+    // Last point dot
+    const lx = pad + (values.length - 1) * step;
+    const ly = h - pad - ((last - min) / range) * innerH;
+    $chart.appendChild(svg('circle', {
+      cx: lx, cy: ly, r: 3, fill: color,
+      stroke: '#202C39', 'stroke-width': '2',
+    }));
+  }
+  function svg(name, attrs) {
+    const el = document.createElementNS('http://www.w3.org/2000/svg', name);
+    for (const k in attrs) el.setAttribute(k, attrs[k]);
+    return el;
+  }
+
+  // ─── live updates via WebSocket ──────────────────────────────────
+  let ws = null, reconnectTimer = null, reconnectDelay = 1000;
+
+  function connectWebSocket() {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const url = proto + '//' + location.host +
+                '/ws/god/' + encodeURIComponent(canonicalName);
+    try {
+      ws = new WebSocket(url);
+    } catch (err) {
+      scheduleReconnect();
+      return;
+    }
+    ws.onopen = () => {
+      $status.textContent = 'LIVE';
+      $liveDot.className = 'dot connected';
+      reconnectDelay = 1000;
+    };
+    ws.onmessage = (msg) => {
+      try {
+        const payload = JSON.parse(msg.data);
+        bumpPing();
+        handleEvent(payload.event, payload.data);
+      } catch (e) {}
+    };
+    ws.onclose = () => {
+      $status.textContent = 'reconnecting…';
+      $liveDot.className = 'dot disconnected';
+      scheduleReconnect();
+    };
+    ws.onerror = () => {};
+  }
+  function scheduleReconnect() {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => {
+      connectWebSocket();
+      reconnectDelay = Math.min(reconnectDelay * 1.6, 30000);
+    }, reconnectDelay);
+  }
+  function handleEvent(name, data) {
+    if (!data) return;
+    if (name === 'god_stock_update' || name === 'god_stock_update_kd') {
+      const newPrice = Number(data.price);
+      if (!isFinite(newPrice)) return;
+      $price.textContent = Math.round(newPrice);
+      $price.classList.remove('flash');
+      void $price.offsetWidth;
+      $price.classList.add('flash');
+      setTimeout(() => $price.classList.remove('flash'), 500);
+      priceHistory.push(newPrice);
+      if (priceHistory.length > 500) priceHistory.shift();
+      drawChart(priceHistory);
+    } else if (name === 'dividend_paid') {
+      $price.classList.remove('flash');
+      void $price.offsetWidth;
+      $price.classList.add('flash');
+      setTimeout(() => $price.classList.remove('flash'), 800);
+    }
+  }
+  connectWebSocket();
+
+  // ─── helpers ─────────────────────────────────────────────────────
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[c]);
+  }
+  function relativeTime(iso) {
+    if (!iso) return '--';
+    const t = Date.parse(iso.replace(' ', 'T') + 'Z');
+    if (isNaN(t)) return iso;
+    const diff = Date.now() - t;
+    const sec = Math.floor(diff / 1000);
+    if (sec < 60) return 'now';
+    if (sec < 3600) return Math.floor(sec / 60) + 'm';
+    if (sec < 86400) return Math.floor(sec / 3600) + 'h';
+    return Math.floor(sec / 86400) + 'd';
+  }
+</script>
+</body>
+</html>

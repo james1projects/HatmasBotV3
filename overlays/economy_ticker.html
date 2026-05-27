@@ -25,7 +25,7 @@
         .label {
             flex-shrink: 0;
             color: var(--hm-text-secondary);
-            font-family: 'BigNoodleTitling', 'Poppins', sans-serif;
+            font-family: 'BigNoodleTitling', 'Inter', sans-serif;
             font-weight: normal;
             font-size: 16px;
             letter-spacing: 2px;
@@ -56,7 +56,7 @@
         .icon img { width: 100%; height: 100%; object-fit: cover; }
         .item.active .icon { box-shadow: 0 0 0 1.5px rgba(196, 168, 130, 0.2); }
         .info { display: flex; align-items: center; gap: 10px; }
-        .name { font-family: 'Poppins', sans-serif; font-weight: 600; font-size: 13px; color: var(--hm-text); white-space: nowrap; }
+        .name { font-family: 'Inter', sans-serif; font-weight: 600; font-size: 13px; color: var(--hm-text); white-space: nowrap; }
         .price { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 14px; color: var(--hm-text); }
         .change { font-family: 'JetBrains Mono', monospace; font-weight: 500; font-size: 11px; padding: 1px 5px; border-radius: 3px; }
         .change.up { color: var(--hm-green); background: var(--hm-green-bg); }
@@ -88,7 +88,7 @@
             // Determine change class
             const changeClass = god.change_pct > 0 ? 'up' : god.change_pct < 0 ? 'down' : 'flat';
             const changeSign = god.change_pct > 0 ? '+' : '';
-            const changeText = god.change_pct === 0 ? '—' : `${changeSign}${god.change_pct.toFixed(2)}%`;
+            const changeText = god.change_pct === 0 ? '0.00%' : `${changeSign}${god.change_pct.toFixed(2)}%`;
 
             // Icon paths with fallback
             const customIconPath = `/icons/custom/${god.name}.png`;
@@ -140,7 +140,8 @@
             // Determine color from price history trend
             const isUp = history[history.length - 1] >= history[0];
             const color = isUp ? HatmasOverlay.getColor('--hm-green') : HatmasOverlay.getColor('--hm-red');
-            polyline.setAttribute('stroke', color || (isUp ? '#66bb6a' : '#ef5350'));
+            // Bronze for up, Scarlet for down — matches the Hatmas palette.
+            polyline.setAttribute('stroke', color || (isUp ? '#DFA06E' : '#DF2935'));
             polyline.setAttribute('stroke-width', '1.5');
             polyline.setAttribute('opacity', '0.6');
 
@@ -185,7 +186,7 @@
             items.forEach(item => {
                 const changeClass = changePct > 0 ? 'up' : changePct < 0 ? 'down' : 'flat';
                 const changeSign = changePct > 0 ? '+' : '';
-                const changeText = changePct === 0 ? '—' : `${changeSign}${changePct.toFixed(2)}%`;
+                const changeText = changePct === 0 ? '0.00%' : `${changeSign}${changePct.toFixed(2)}%`;
 
                 const priceEl = item.querySelector('.price');
                 const changeEl = item.querySelector('.change');

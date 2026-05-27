@@ -173,6 +173,96 @@ class DigitMatcher:
 
         return best_digit, best_dist
 
+    def match_with_details(self, candidate: np.ndarray) -> dict:
+        """Run the same matching logic as ``match()`` but return the full
+        decision payload — every candidate's distance, the runner-up
+        margin, and an explicit verdict string.
+
+        Used by the detector debug page so the operator can see *why* a
+        digit was accepted or rejected (and what the second-best option
+        was, when it was close).
+
+        The original ``match()`` is intentionally left untouched so the
+        live KDA reading path keeps its exact existing behaviour; this
+        method walks the same algorithm in parallel.
+
+        Returns a dict with these keys:
+            scores:          list[(digit, distance)], sorted ascending by
+                             distance. Empty list if no templates / no
+                             candidates passed the hole filter.
+            best:            (digit, distance) | None. The winner.
+            runner_up:       (digit, distance) | None. The second-best,
+                             or None if there's only one candidate.
+            margin:          float. Gap between best and runner-up
+                             distances. 0.0 if no runner-up.
+            candidate_holes: int. Hole count from the structural filter.
+            verdict:         "accepted"
+                             | "rejected_distance"  (best_dist > MAX_MATCH_DISTANCE)
+                             | "rejected_margin"    (margin < MIN_MATCH_MARGIN)
+                             | "no_templates"
+                             | "no_candidates"      (hole filter cleared
+                                                     the field, e.g. no
+                                                     templates for that
+                                                     hole count)
+        """
+        if not self.templates:
+            return {
+                "scores": [],
+                "best": None,
+                "runner_up": None,
+                "margin": 0.0,
+                "candidate_holes": 0,
+                "verdict": "no_templates",
+            }
+
+        candidate_holes = self._count_holes(candidate)
+        possible_digits = HOLES_TO_DIGITS.get(candidate_holes)
+        if possible_digits is None:
+            possible_digits = set(self.templates.keys())
+
+        scores: list[tuple[str, float]] = []
+        for digit, samples in self.templates.items():
+            if digit not in possible_digits:
+                continue
+            best_dist = float("inf")
+            for tmpl, _tmpl_holes in samples:
+                xor = cv2.bitwise_xor(candidate, tmpl)
+                dist = float(np.sum(xor > 0) / (TEMPLATE_H * TEMPLATE_W))
+                if dist < best_dist:
+                    best_dist = dist
+            scores.append((digit, best_dist))
+
+        if not scores:
+            return {
+                "scores": [],
+                "best": None,
+                "runner_up": None,
+                "margin": 0.0,
+                "candidate_holes": candidate_holes,
+                "verdict": "no_candidates",
+            }
+
+        scores.sort(key=lambda x: x[1])
+        best = scores[0]
+        runner_up = scores[1] if len(scores) > 1 else None
+        margin = (runner_up[1] - best[1]) if runner_up else 0.0
+
+        if best[1] > MAX_MATCH_DISTANCE:
+            verdict = "rejected_distance"
+        elif runner_up is not None and margin < MIN_MATCH_MARGIN:
+            verdict = "rejected_margin"
+        else:
+            verdict = "accepted"
+
+        return {
+            "scores": scores,
+            "best": best,
+            "runner_up": runner_up,
+            "margin": margin,
+            "candidate_holes": candidate_holes,
+            "verdict": verdict,
+        }
+
     def add_template(self, digit: str, binary_crop: np.ndarray) -> bool:
         """Add a confirmed digit crop as a new template.
 

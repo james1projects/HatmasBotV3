@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Hatmas Market — Dividend Notification</title>
+<title>Hatmas Market: Dividend Notification</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Inter:wght@400;500;600;700&display=swap');
 
@@ -192,7 +192,7 @@
 
   <div class="popup-content">
     <div class="coin-icon">
-      🎩
+      <!-- TODO: swap in a hat icon asset; emoji removed per style policy -->
       <div class="sparkle"></div>
       <div class="sparkle"></div>
       <div class="sparkle"></div>
@@ -204,7 +204,7 @@
         <span class="god-name">Ymir</span> shareholders earned <strong>5% dividend</strong>
       </div>
       <div class="dividend-detail">
-        <strong>47 shareholders</strong> paid out — <strong>2,340 hats</strong> distributed
+        <strong>47 shareholders</strong> paid out, <strong>2,340 hats</strong> distributed
       </div>
     </div>
   </div>
@@ -213,7 +213,9 @@
 <script>
   // Hat rain effect
   const rain = document.getElementById('hatRain');
-  const hats = ['🎩', '👒', '🧢', '⛑️', '🪖'];
+  // Hat-rain emojis removed per style policy. Replace with a sprite or
+  // image asset if you want to revive this visual effect.
+  const hats = [''];
 
   for (let i = 0; i < 12; i++) {
     const hat = document.createElement('div');

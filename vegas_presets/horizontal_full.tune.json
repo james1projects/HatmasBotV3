@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "name": "horizontal_full",
+  "kind": "full_gameplay",
+  "captured_at": "2026-04-24T16:06:11",
+  "project": {
+    "width": 1920,
+    "height": 1080,
+    "framerate": 59.9401
+  },
+  "video_tracks": [
+    {
+      "name": "",
+      "composite": "SrcAlpha",
+      "top_left":     {"x": 0, "y": 0},
+      "top_right":    {"x": 1920, "y": 0},
+      "bottom_right": {"x": 1920, "y": 1080},
+      "bottom_left":  {"x": 0, "y": 1080},
+      "center":       {"x": 960, "y": 540},
+      "rotation_rad": 0,
+      "smoothness":   0,
+      "keyframe_type": "Linear",
+      "scale_to_fill": true,
+      "effects": [
+      ]
+    }
+  ],
+  "audio_tracks": [
+    {
+      "name": "",
+      "volume_db": 0.7,
+      "muted": false
+    },
+    {
+      "name": "",
+      "volume_db": -1.7,
+      "muted": false
+    },
+    {
+      "name": "",
+      "volume_db": 0,
+      "muted": true
+    },
+    {
+      "name": "",
+      "volume_db": 0,
+      "muted": true
+    }
+  ]
+}

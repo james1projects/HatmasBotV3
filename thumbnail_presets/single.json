@@ -1,0 +1,193 @@
+{
+  "schema_version": 1,
+  "name": "single",
+  "description": "Single hero god. Card art dominant on the right, gradient ramp into headline + KDA on the left.",
+  "size": [
+    1280,
+    720
+  ],
+  "layers": [
+    {
+      "type": "solid",
+      "name": "Background",
+      "color": "#0a0e14"
+    },
+    {
+      "type": "image",
+      "name": "Hero god card",
+      "src": "{my_god_card}",
+      "pos": [
+        560,
+        0
+      ],
+      "size": [
+        720,
+        720
+      ],
+      "fit": "cover",
+      "anchor": "topleft",
+      "fallback_text": "{my_god}"
+    },
+    {
+      "type": "gradient",
+      "name": "Left text ramp",
+      "pos": [
+        0,
+        0
+      ],
+      "size": [
+        820,
+        720
+      ],
+      "direction": "horizontal",
+      "stops": [
+        {
+          "at": 0.0,
+          "color": "#0a0e14",
+          "opacity": 1.0
+        },
+        {
+          "at": 0.6,
+          "color": "#0a0e14",
+          "opacity": 0.85
+        },
+        {
+          "at": 1.0,
+          "color": "#0a0e14",
+          "opacity": 0.0
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "name": "God name",
+      "value": "{my_god}",
+      "pos": [
+        60,
+        80
+      ],
+      "anchor": "topleft",
+      "font": "Big Noodle Titling",
+      "size": 130,
+      "fill": "#ffd24d",
+      "stroke": {
+        "color": "#000000",
+        "width": 8
+      },
+      "shadow": {
+        "color": "#000000",
+        "offset": [
+          4,
+          4
+        ],
+        "blur": 10,
+        "opacity": 0.9
+      },
+      "max_width": 720
+    },
+    {
+      "type": "text",
+      "name": "Headline",
+      "value": "{text}",
+      "pos": [
+        60,
+        240
+      ],
+      "anchor": "topleft",
+      "font": "Big Noodle Titling",
+      "size": 70,
+      "fill": "#ffffff",
+      "stroke": {
+        "color": "#000000",
+        "width": 6
+      },
+      "shadow": {
+        "color": "#000000",
+        "offset": [
+          3,
+          3
+        ],
+        "blur": 6,
+        "opacity": 0.85
+      },
+      "max_width": 720
+    },
+    {
+      "type": "text",
+      "name": "KDA",
+      "value": "KDA {kda}",
+      "pos": [
+        60,
+        600
+      ],
+      "anchor": "topleft",
+      "font": "Big Noodle Titling",
+      "size": 68,
+      "fill": "#39ff8c",
+      "stroke": {
+        "color": "#000000",
+        "width": 6
+      },
+      "shadow": {
+        "color": "#000000",
+        "offset": [
+          3,
+          3
+        ],
+        "blur": 6,
+        "opacity": 0.85
+      },
+      "skip_if_empty": true
+    },
+    {
+      "type": "icon",
+      "name": "God icon",
+      "god": "{my_god}",
+      "pos": [
+        40,
+        40
+      ],
+      "size": 110,
+      "border": {
+        "color": "#ffd24d",
+        "width": 5
+      },
+      "shadow": {
+        "color": "#000000",
+        "offset": [
+          3,
+          3
+        ],
+        "blur": 8,
+        "opacity": 0.8
+      }
+    },
+    {
+      "type": "text",
+      "name": "Result badge",
+      "value": "{result}",
+      "pos": [
+        1240,
+        40
+      ],
+      "anchor": "right_top",
+      "font": "Big Noodle Titling",
+      "size": 80,
+      "fill": "#39ff8c",
+      "stroke": {
+        "color": "#000000",
+        "width": 8
+      },
+      "shadow": {
+        "color": "#000000",
+        "offset": [
+          4,
+          4
+        ],
+        "blur": 8,
+        "opacity": 0.85
+      },
+      "skip_if_empty": true
+    }
+  ]
+}

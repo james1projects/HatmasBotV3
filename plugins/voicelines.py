@@ -147,24 +147,172 @@ class VoiceLinePlugin:
         return self._current_god_slug or self._last_god_slug
 
     # -----------------------------------------------------------------
+    # Public playback API — callable from other plugins
+    # -----------------------------------------------------------------
+    #
+    # The Twitch-redemption path through `handle_redemption()` is tied
+    # to the EventSub data model (reward_id, user_name, etc). For
+    # internal triggers (e.g. !spin announces the chosen god), we want
+    # a thin wrapper that just plays the right file for a given god
+    # without faking a redemption.
+
+    def play_god_select(self, god_name: str,
+                         triggered_by: str = "system") -> bool:
+        """Push the god-selection voice line for `god_name` to the
+        overlay. Returns True if a file was queued, False if no audio
+        file exists for this god (or the web server isn't ready yet).
+
+        Used by !spin to play the chosen god's "select" line when the
+        spin lands. Falls into the same /api/voiceline_audio URL space
+        the overlay already polls, so we don't need any new endpoint.
+        """
+        if not god_name:
+            return False
+        if not self._web_server:
+            print("[VoiceLine] play_god_select: web server not ready")
+            return False
+
+        # Slug normalization matches the rest of the plugin:
+        # "Ah Muzen Cab" -> "ah_muzen_cab", "Chang'e" -> "change".
+        slug = god_name.lower().replace(" ", "_").replace("'", "")
+        folder = "god_selection"
+        vl_dir = VOICELINE_DIR / slug / folder
+        if not vl_dir.exists():
+            print(f"[VoiceLine] No {folder} folder for {slug}")
+            return False
+
+        ogg_files = list(vl_dir.glob("*.ogg"))
+        if not ogg_files:
+            print(f"[VoiceLine] No .ogg files in {vl_dir}")
+            return False
+
+        # Each god typically has exactly one *_Select.ogg, but if
+        # multiple exist (e.g. alt skins), pick one at random.
+        chosen = random.choice(ogg_files)
+        audio_url = f"/api/voiceline_audio/{slug}/{folder}/{chosen.name}"
+
+        # Optional animation: god_selection.mp4 in the god's anim dir.
+        anim_path = ANIMATION_DIR / slug / "god_selection.mp4"
+        video_url = None
+        if anim_path.exists():
+            video_url = f"/api/voiceline_video/{slug}/{anim_path.name}"
+
+        god_display = god_name
+        self._web_server.trigger_voiceline_event({
+            "type":      "god_select",
+            "god":       god_display,
+            "user":      triggered_by,
+            "audio_url": audio_url,
+            "video_url": video_url,
+            "timestamp": time.time(),
+        })
+        print(f"[VoiceLine] god_select for {god_display}: {chosen.name} "
+              f"(via {triggered_by})")
+        return True
+
+    # -----------------------------------------------------------------
+    # Helix: cancel/refund a channel-point redemption
+    # -----------------------------------------------------------------
+
+    async def _refund_redemption(self, reward_id: str,
+                                 redemption_id: str | None) -> bool:
+        """
+        Cancel a channel-point redemption via the Helix API. This refunds
+        the viewer's points and removes the redemption from the
+        broadcaster's queue.
+
+        Returns True on success, False on any failure (missing IDs,
+        missing token manager, non-2xx response, exception).
+
+        Endpoint:
+            PATCH https://api.twitch.tv/helix/channel_points/custom_rewards/redemptions
+                ?broadcaster_id=<owner>&reward_id=<reward>&id=<redemption>
+            Body: {"status": "CANCELED"}
+        Requires the `channel:manage:redemptions` broadcaster scope.
+        """
+        if not redemption_id:
+            print("[VoiceLine] Cannot refund: no redemption_id "
+                  "(payload missing .id?).")
+            return False
+        if self._token_manager is None:
+            print("[VoiceLine] Cannot refund: no token_manager wired up.")
+            return False
+        if not TWITCH_OWNER_ID or TWITCH_OWNER_ID == "YOUR_OWNER_ID":
+            print("[VoiceLine] Cannot refund: TWITCH_OWNER_ID not configured.")
+            return False
+
+        url = (
+            "https://api.twitch.tv/helix/channel_points/custom_rewards/redemptions"
+            f"?broadcaster_id={TWITCH_OWNER_ID}"
+            f"&reward_id={reward_id}"
+            f"&id={redemption_id}"
+        )
+        body = {"status": "CANCELED"}
+
+        async def _do_patch(headers):
+            async with aiohttp.ClientSession() as session:
+                async with session.patch(url, headers=headers, json=body) as resp:
+                    return resp.status, await resp.text()
+
+        try:
+            headers = await self._token_manager.get_broadcaster_headers()
+            status, text = await _do_patch(headers)
+
+            # Token expired? Refresh and try once more.
+            if status == 401:
+                refreshed = await self._token_manager.handle_401("broadcaster")
+                if refreshed:
+                    headers = await self._token_manager.get_broadcaster_headers()
+                    status, text = await _do_patch(headers)
+
+            if 200 <= status < 300:
+                print(f"[VoiceLine] Refunded redemption {redemption_id} "
+                      f"(reward {reward_id}).")
+                return True
+
+            print(f"[VoiceLine] Refund failed: HTTP {status} {text}")
+            return False
+        except Exception as exc:
+            print(f"[VoiceLine] Refund exception: {exc}")
+            return False
+
+    # -----------------------------------------------------------------
     # EventSub handler — called by bot when a redemption fires
     # -----------------------------------------------------------------
 
-    async def handle_redemption(self, reward_id: str, user_name: str):
+    async def handle_redemption(self, reward_id: str, user_name: str,
+                                redemption_id: str | None = None):
         """
         Process a channel point redemption for one of our voice line rewards.
         Returns True if handled, False if not ours.
+
+        `redemption_id` is the unique ID of THIS redemption event (distinct
+        from `reward_id`, which is the same for every redemption of the
+        same custom reward). It's used by the Helix refund API when we
+        can't fulfill the redemption (e.g. no god selected).
         """
         key = self._reward_map.get(reward_id)
         if not key:
             return False
 
+        # Honor the dashboard voicelines feature toggle. Returning True
+        # tells the bot we recognized the reward (so it doesn't keep
+        # dispatching it elsewhere) — we just don't play anything.
+        if self.bot is not None and not self.bot.is_feature_enabled("voicelines"):
+            return True
+
         god_slug = self.get_active_god_slug()
         if not god_slug:
-            await self.bot.send_chat(
-                f"@{user_name} no god selected, points not refunded"
-            )
-            # TODO: auto-refund via Helix API PATCH /helix/channel_points/custom_rewards/redemptions
+            refunded = await self._refund_redemption(reward_id, redemption_id)
+            if refunded:
+                await self.bot.send_chat(
+                    f"@{user_name} no god selected, points refunded."
+                )
+            else:
+                await self.bot.send_chat(
+                    f"@{user_name} no god selected; auto-refund failed, "
+                    f"please ping a mod."
+                )
             return True
 
         reward_def = REWARD_DEFS[key]

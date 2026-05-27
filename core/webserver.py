@@ -71,6 +71,13 @@ class WebServer:
                 "mixitup_connected": False,
             },
         }
+        # VOD processor state — populated by tools/process_recordings.py
+        # via POST endpoints. Read by /api/detector_debug when active
+        # (mode flips from "live" to "vod" while a scan is in progress).
+        # Stays None when no scan is running, so /detector falls back
+        # to live-detector data.
+        self._vod_state: "dict | None" = None
+
         self._setup_routes()
 
     def _setup_routes(self):
@@ -92,11 +99,85 @@ class WebServer:
         self.app.router.add_get("/api/voiceline_audio/{god}/{folder}/{filename}", self.handle_voiceline_audio)
         self.app.router.add_get("/api/voiceline_video/{god}/{filename}", self.handle_voiceline_video)
         self.app.router.add_get("/overlay/voicelines", self.handle_voiceline_overlay)
+        self.app.router.add_get("/overlay/spin", self.handle_spin_overlay)
         self.app.router.add_get("/api/suggestions", self.handle_get_suggestions)
         self.app.router.add_get("/api/state", self.handle_get_state)
         self.app.router.add_post("/api/state", self.handle_update_state)
         self.app.router.add_post("/api/action", self.handle_action)
         self.app.router.add_get("/ws/overlays", self.handle_overlay_ws)
+        # Detector debug viewer — live observability into the KDA + portrait
+        # detector pipeline. See plugins/killdetector.py:_build_debug_state.
+        self.app.router.add_get("/detector", self.handle_detector_page)
+        self.app.router.add_get("/api/detector_debug", self.handle_detector_debug)
+        self.app.router.add_get(
+            "/api/detector_debug/fullframe.jpg",
+            self.handle_detector_fullframe,
+        )
+        # Raw screenshot WITHOUT baked-in region annotations.
+        # Used by the drag-UI work so JS can overlay rectangles on top.
+        self.app.router.add_get(
+            "/api/detector_debug/fullframe_raw.jpg",
+            self.handle_detector_fullframe_raw,
+        )
+        # Persisted detection-region coordinates (kda, portrait,
+        # hud_check, gameplay_check, overlay_check). GET returns
+        # current values; POST saves new ones to detector_regions.json.
+        self.app.router.add_get(
+            "/api/detector_regions",
+            self.handle_detector_regions_get,
+        )
+        self.app.router.add_post(
+            "/api/detector_regions",
+            self.handle_detector_regions_post,
+        )
+        self.app.router.add_post(
+            "/api/detector_debug/save_snapshot",
+            self.handle_detector_save_snapshot,
+        )
+        # Operator pause/resume the live scan loop. Used by /detector's
+        # "Save portrait as reference" workflow to guarantee the frame
+        # being displayed matches the frame written to disk.
+        self.app.router.add_post(
+            "/api/detector_debug/pause",
+            self.handle_detector_pause,
+        )
+        self.app.router.add_post(
+            "/api/detector_debug/resume",
+            self.handle_detector_resume,
+        )
+        # Crop the current frame's portrait region and save it to
+        # Portrait_Source/<God>.png, then reload the matcher so the new
+        # reference takes effect on the next poll. Body: {"god_name":"Ymir"}.
+        self.app.router.add_post(
+            "/api/detector_debug/save_portrait_reference",
+            self.handle_detector_save_portrait_reference,
+        )
+
+        # Stream Deck / external-trigger entry point for !spin. Both
+        # GET and POST accepted so a Stream Deck "System: Open URL"
+        # button works alongside HTTP-plugin POSTs. Returns the spin
+        # result JSON so power users can chain it (toast, sound, etc.).
+        self.app.router.add_get("/api/spin", self.handle_spin_trigger)
+        self.app.router.add_post("/api/spin", self.handle_spin_trigger)
+
+        # VOD processor → /detector dashboard bridge. The processor
+        # (tools/process_recordings.py) POSTs its progress here while
+        # running so the /detector page can render a batch-progress
+        # view alongside the live detector. See bottom of this file
+        # for handlers.
+        self.app.router.add_post(
+            "/api/vod_processor/start", self.handle_vod_start)
+        self.app.router.add_post(
+            "/api/vod_processor/update", self.handle_vod_update)
+        self.app.router.add_post(
+            "/api/vod_processor/file_done", self.handle_vod_file_done)
+        self.app.router.add_post(
+            "/api/vod_processor/event", self.handle_vod_event)
+        self.app.router.add_post(
+            "/api/vod_processor/kda_failure",
+            self.handle_vod_kda_failure)
+        self.app.router.add_post(
+            "/api/vod_processor/stop", self.handle_vod_stop)
         self.app.router.add_static("/overlays/", OVERLAY_DIR)
         # Serve god icon directories for overlays
         from core.config import CUSTOM_GOD_ICONS_DIR, GOD_ICONS_DIR
@@ -104,6 +185,17 @@ class WebServer:
             self.app.router.add_static("/icons/custom/", CUSTOM_GOD_ICONS_DIR)
         if GOD_ICONS_DIR.exists():
             self.app.router.add_static("/icons/gods/", GOD_ICONS_DIR)
+
+    # === ROOT HANDLER ===
+
+    async def handle_control_panel(self, request):
+        """Serve the bot's control panel HTML at /. Restored after an
+        earlier truncation dropped this method even though the route
+        for it stayed registered."""
+        html_path = OVERLAY_DIR / "control_panel.html"
+        if html_path.exists():
+            return self._no_cache_file_response(html_path)
+        return web.Response(text="Control panel not found", status=404)
 
     # === API HANDLERS ===
 
@@ -743,6 +835,13 @@ class WebServer:
             return self._no_cache_file_response(html_path)
         return web.Response(text="God overlay not found", status=404)
 
+    async def handle_spin_overlay(self, request):
+        """Browser source for the !spin slot-machine animation."""
+        html_path = OVERLAY_DIR / "god_pool_spin.html"
+        if html_path.exists():
+            return self._no_cache_file_response(html_path)
+        return web.Response(text="Spin overlay not found", status=404)
+
     async def handle_sound_alerts_overlay(self, request):
         html_path = OVERLAY_DIR / "sound_alerts.html"
         if html_path.exists():
@@ -755,15 +854,643 @@ class WebServer:
             return self._no_cache_file_response(html_path)
         return web.Response(text="TTS overlay not found", status=404)
 
-    # === CONTROL PANEL ===
+    # === DETECTOR DEBUG VIEWER ===
+    # See /detector for the rendered page. The KillDeathDetector plugin
+    # populates its `debug_state` dict on every scan; these endpoints just
+    # surface that state to the browser. Live detection path is never
+    # touched by anything reachable from here.
 
-    async def handle_control_panel(self, request):
-        html_path = OVERLAY_DIR / "control_panel.html"
+    def _kd_plugin(self):
+        """Convenience: return the killdetector plugin or None."""
+        if self.bot and "killdetector" in self.bot.plugins:
+            return self.bot.plugins["killdetector"]
+        return None
+
+    @staticmethod
+    def _pil_to_b64_png(img) -> str | None:
+        """PIL.Image -> base64 PNG string for inline JSON delivery.
+        Returns None on failure or for None input."""
+        if img is None:
+            return None
+        try:
+            import base64
+            import io
+            buf = io.BytesIO()
+            img.save(buf, format="PNG", optimize=True)
+            return base64.b64encode(buf.getvalue()).decode("ascii")
+        except Exception:
+            return None
+
+    async def handle_detector_page(self, request):
+        """Serve the detector debug HTML page."""
+        html_path = OVERLAY_DIR / "detector.html"
         if html_path.exists():
             return self._no_cache_file_response(html_path)
-        return web.Response(text="Control panel not found", status=404)
+        return web.Response(text="Detector page not found", status=404)
 
-    # === STATE MANAGEMENT ===
+    async def handle_detector_debug(self, request):
+        """Return the detector's current debug snapshot as JSON.
+
+        When a VOD scan is running (tools/process_recordings.py has
+        POSTed to /api/vod_processor/start), this returns the VOD
+        progress state with mode="vod" instead — the /detector page
+        renders a batch-progress view in that case. When the VOD scan
+        finishes (or never started), falls back to the live detector
+        state with mode="live".
+
+        Crops (portrait, KDA strip, KDA binary, per-digit) are inlined
+        as base64 PNGs so the page can render them with a single fetch.
+        Total payload size is typically 10-30 KB.
+        """
+        # VOD mode takes priority — operator-driven scan in progress.
+        if self._vod_state is not None:
+            return web.json_response(self._vod_state)
+
+        kd = self._kd_plugin()
+        if kd is None:
+            return web.json_response({"error": "killdetector_unavailable"},
+                                     status=503)
+
+        state = kd.debug_state or {}
+
+        # Build a JSON-safe copy. Replace PIL images with base64 strings
+        # so json.dumps doesn't choke. Tuples stay as lists, dicts stay
+        # nested, everything else passes through.
+
+        def _serialize(v):
+            from PIL import Image as _PILImage
+            if isinstance(v, _PILImage.Image):
+                return self._pil_to_b64_png(v)
+            if isinstance(v, dict):
+                return {k: _serialize(vv) for k, vv in v.items()}
+            if isinstance(v, list):
+                return [_serialize(vv) for vv in v]
+            if isinstance(v, tuple):
+                return [_serialize(vv) for vv in v]
+            return v
+
+        payload = _serialize(state)
+        # Tag the payload as live-mode so the /detector page knows to
+        # render the live-detector layout. VOD scans push their own
+        # state with mode="vod" via the bridge endpoints above.
+        payload["mode"] = "live"
+        # Expose the operator pause flag so the UI can toggle between
+        # "Pause" / "Resume" labels and only enable the save-reference
+        # button when scanning is frozen.
+        payload["paused"] = bool(getattr(kd, "is_paused", False))
+        # Mark which fields are PNG-encoded so the JS knows whether to
+        # render via <img src="data:image/png;base64,..."/> or as text.
+        # Pull a snapshot of the most-recent screenshot's portrait crop
+        # for the "PORTRAIT" panel — extracted on demand here rather
+        # than every scan because most callers won't open the page.
+        try:
+            img = getattr(kd, "_last_screenshot", None)
+            if img is not None:
+                from core.god_matcher import PORTRAIT_REGION
+                x1, y1, x2, y2 = PORTRAIT_REGION
+                payload["god"] = payload.get("god") or {}
+                payload["god"]["portrait_crop_b64"] = self._pil_to_b64_png(
+                    img.crop((x1, y1, x2, y2))
+                )
+        except Exception:
+            pass
+
+        return web.json_response(payload)
+
+    async def handle_detector_fullframe(self, request):
+        """Return a fresh full screenshot with the four detection regions
+        drawn on top as colored rectangles. JPEG output, no cache headers.
+        """
+        kd = self._kd_plugin()
+        if kd is None:
+            return web.Response(text="killdetector unavailable", status=503)
+
+        img = getattr(kd, "_last_screenshot", None)
+        if img is None:
+            return web.Response(text="no screenshot yet", status=503)
+
+        try:
+            from PIL import Image, ImageDraw
+            from core.kda_reader import (
+                KDA_REGION, HUD_CHECK_REGION,
+                GAMEPLAY_CHECK_REGION, OVERLAY_CHECK_REGION,
+            )
+            from core.god_matcher import PORTRAIT_REGION
+
+            annotated = img.convert("RGB").copy()
+            d = ImageDraw.Draw(annotated)
+
+            # Two visual tiers so the user can tell at a glance which
+            # boxes are "actively being read from" vs which ones are
+            # "scene classifiers that gate the read."
+            #
+            # Tier 1 (solid, bright, 3px): the regions whose CONTENT
+            # gets parsed every frame — KDA digits, portrait histogram.
+            # These are the ones that matter if they drift.
+            #
+            # Tier 2 (dashed, faint, 1px): the regions whose VARIANCE
+            # is sampled to decide is_gameplay / overlay_open. They
+            # don't need pixel-perfect alignment; the heuristics are
+            # tolerant. Dashed reads as "context box" instead of
+            # competing with the read regions for attention.
+            primary = [
+                (KDA_REGION,      "red",  "KDA"),
+                (PORTRAIT_REGION, "blue", "PORTRAIT"),
+            ]
+            secondary = [
+                (HUD_CHECK_REGION,      "lime",   "HUD"),
+                (GAMEPLAY_CHECK_REGION, "cyan",   "GAMEPLAY"),
+                (OVERLAY_CHECK_REGION,  "yellow", "OVERLAY-CHECK"),
+            ]
+
+            def _dashed_rect(draw, box, color, dash=12, gap=8, width=1):
+                x1, y1, x2, y2 = box
+                # Top + bottom edges
+                for y in (y1, y2):
+                    x = x1
+                    while x < x2:
+                        x_end = min(x + dash, x2)
+                        draw.line([(x, y), (x_end, y)], fill=color, width=width)
+                        x = x_end + gap
+                # Left + right edges
+                for x in (x1, x2):
+                    y = y1
+                    while y < y2:
+                        y_end = min(y + dash, y2)
+                        draw.line([(x, y), (x, y_end)], fill=color, width=width)
+                        y = y_end + gap
+
+            for (x1, y1, x2, y2), color, label in secondary:
+                _dashed_rect(d, (x1, y1, x2, y2), color)
+                d.text((x1 + 4, max(0, y1 - 14)), label, fill=color)
+
+            # Primary regions drawn last so their solid strokes sit
+            # on top of the dashed lines.
+            for (x1, y1, x2, y2), color, label in primary:
+                d.rectangle([x1, y1, x2, y2], outline=color, width=3)
+                d.text((x1 + 4, max(0, y1 - 14)), label, fill=color)
+
+            import io
+            buf = io.BytesIO()
+            # Scale down a touch — full 1920x1080 JPEG at q=80 is ~200 KB
+            # which is fine, but the page only needs to display in a
+            # browser at <600px wide. Save bandwidth + render time.
+            annotated.save(buf, format="JPEG", quality=80, optimize=True)
+            return web.Response(
+                body=buf.getvalue(),
+                content_type="image/jpeg",
+                headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+            )
+        except Exception as e:
+            return web.Response(text=f"fullframe error: {e}", status=500)
+
+    async def handle_detector_fullframe_raw(self, request):
+        """Return the latest screenshot as JPEG with NO region
+        annotations baked in. The drag UI overlays HTML rectangles
+        on top of this so the rectangles can be moved without
+        re-rendering the source image."""
+        kd = self._kd_plugin()
+        if kd is None:
+            return web.Response(text="killdetector unavailable", status=503)
+        img = getattr(kd, "_last_screenshot", None)
+        if img is None:
+            return web.Response(text="no screenshot yet", status=503)
+        try:
+            import io
+            buf = io.BytesIO()
+            img.convert("RGB").save(buf, format="JPEG", quality=85)
+            return web.Response(
+                body=buf.getvalue(),
+                content_type="image/jpeg",
+                headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+            )
+        except Exception as e:
+            return web.Response(text=f"fullframe_raw error: {e}", status=500)
+
+    async def handle_detector_regions_get(self, request):
+        """Return the current detection regions as JSON."""
+        from core.detector_regions import load_regions, DEFAULTS
+        regions = load_regions()
+        # Return as plain lists (JSON-friendly) keyed by region name,
+        # plus the defaults so the UI can show "reset to default".
+        return web.json_response({
+            "regions": {k: list(v) for k, v in regions.items()},
+            "defaults": {k: list(v) for k, v in DEFAULTS.items()},
+        })
+
+    async def handle_detector_regions_post(self, request):
+        """Persist updated detection regions to detector_regions.json.
+
+        Body: {"regions": {"kda": [x1,y1,x2,y2], ...}}
+        Unknown keys are silently dropped; missing keys keep the
+        previously-saved value (we merge with current load).
+
+        Note: changes take effect on NEXT bot restart. The modules
+        that consume these constants (kda_reader, god_matcher) load
+        them at import time; we don't hot-swap the running plugin.
+        """
+        from core.detector_regions import load_regions, save_regions
+        try:
+            body = await request.json()
+        except Exception as e:
+            return web.json_response(
+                {"error": f"invalid JSON body: {e}"}, status=400)
+        new_regions = body.get("regions") if isinstance(body, dict) else None
+        if not isinstance(new_regions, dict):
+            return web.json_response(
+                {"error": "expected {regions: {name: [x1,y1,x2,y2], ...}}"},
+                status=400)
+        # Merge: start from current saved values, overlay the new keys.
+        merged = {k: list(v) for k, v in load_regions().items()}
+        merged.update(new_regions)
+        try:
+            saved = save_regions(merged)
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+        except Exception as e:
+            return web.json_response(
+                {"error": f"save failed: {e}"}, status=500)
+        return web.json_response({
+            "saved": saved,
+            "note": "changes take effect on next bot restart",
+        })
+
+    async def handle_detector_save_snapshot(self, request):
+        """Dump the current debug state to data/detector_snapshots/<ts>/.
+
+        Writes:
+          fullframe.png    — annotated screenshot with region overlays
+          portrait.png     — 80x80 portrait crop
+          kda_strip.png    — 92x24 raw KDA strip
+          kda_binary.png   — 8x binarized KDA strip (if available)
+          state.json       — every serializable field from debug_state
+        Returns JSON with the absolute path so the caller can show it
+        in a toast / link.
+        """
+        kd = self._kd_plugin()
+        if kd is None:
+            return web.json_response({"error": "killdetector_unavailable"},
+                                     status=503)
+
+        try:
+            from datetime import datetime as _dt
+            ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+            out_dir = DATA_DIR / "detector_snapshots" / ts
+            out_dir.mkdir(parents=True, exist_ok=True)
+
+            state = kd.debug_state or {}
+
+            # Full annotated frame
+            img = getattr(kd, "_last_screenshot", None)
+            if img is not None:
+                from PIL import ImageDraw
+                from core.kda_reader import (
+                    KDA_REGION, HUD_CHECK_REGION,
+                    GAMEPLAY_CHECK_REGION, OVERLAY_CHECK_REGION,
+                )
+                from core.god_matcher import PORTRAIT_REGION
+                annotated = img.convert("RGB").copy()
+                d = ImageDraw.Draw(annotated)
+                for region, color in [
+                    (KDA_REGION, "red"),
+                    (PORTRAIT_REGION, "blue"),
+                    (HUD_CHECK_REGION, "lime"),
+                    (GAMEPLAY_CHECK_REGION, "cyan"),
+                    (OVERLAY_CHECK_REGION, "yellow"),
+                ]:
+                    d.rectangle(list(region), outline=color, width=3)
+                annotated.save(out_dir / "fullframe.png", optimize=True)
+
+                # Portrait crop
+                try:
+                    from core.god_matcher import PORTRAIT_REGION
+                    px1, py1, px2, py2 = PORTRAIT_REGION
+                    img.crop((px1, py1, px2, py2)).save(
+                        out_dir / "portrait.png")
+                except Exception:
+                    pass
+
+            # KDA crops from the with_details payload
+            kda_details = (state.get("kda") or {}).get("details") or {}
+            crop = kda_details.get("crop")
+            if crop is not None:
+                crop.save(out_dir / "kda_strip.png")
+            binary = kda_details.get("binary_8x")
+            if binary is not None:
+                binary.save(out_dir / "kda_binary.png")
+
+            # State JSON — stripped of any PIL images.
+            def _strip_images(v):
+                from PIL import Image as _PILImage
+                if isinstance(v, _PILImage.Image):
+                    return "<image:omitted>"
+                if isinstance(v, dict):
+                    return {k: _strip_images(vv) for k, vv in v.items()}
+                if isinstance(v, list):
+                    return [_strip_images(vv) for vv in v]
+                if isinstance(v, tuple):
+                    return [_strip_images(vv) for vv in v]
+                return v
+
+            (out_dir / "state.json").write_text(
+                json.dumps(_strip_images(state), indent=2, default=str),
+                encoding="utf-8",
+            )
+
+            return web.json_response({
+                "ok": True,
+                "path": str(out_dir),
+                "timestamp": ts,
+            })
+        except Exception as e:
+            return web.json_response(
+                {"error": f"{type(e).__name__}: {e}"},
+                status=500,
+            )
+
+    async def handle_detector_pause(self, request):
+        """Freeze the live scan loop so the dashboard's displayed frame
+        and any subsequent save_portrait_reference capture come from the
+        exact same screenshot. The bot keeps its OBS connection open and
+        the loop keeps spinning at the same cadence — it just no-ops
+        every iteration until /resume is called.
+        """
+        kd = self._kd_plugin()
+        if kd is None:
+            return web.json_response(
+                {"ok": False, "error": "killdetector_unavailable"},
+                status=503,
+            )
+        try:
+            info = kd.pause_scanning()
+            return web.json_response({"ok": True, **info})
+        except Exception as e:
+            return web.json_response(
+                {"ok": False, "error": f"{type(e).__name__}: {e}"},
+                status=500,
+            )
+
+    async def handle_detector_resume(self, request):
+        """Un-freeze the live scan loop. The next loop iteration grabs
+        a fresh screenshot and resumes normal per-frame processing."""
+        kd = self._kd_plugin()
+        if kd is None:
+            return web.json_response(
+                {"ok": False, "error": "killdetector_unavailable"},
+                status=503,
+            )
+        try:
+            info = kd.resume_scanning()
+            return web.json_response({"ok": True, **info})
+        except Exception as e:
+            return web.json_response(
+                {"ok": False, "error": f"{type(e).__name__}: {e}"},
+                status=500,
+            )
+
+    async def handle_detector_save_portrait_reference(self, request):
+        """Capture the current frame's portrait region and persist it as
+        a Portrait_Source/<God>.png reference. The matcher reloads
+        inline so the next detector poll already benefits from the new
+        fingerprint — the borderline confidence (e.g. Ymir at 0.798)
+        that prompted the save usually jumps to ~1.0 on the next frame.
+
+        Body: {"god_name": "Ymir"}
+        Returns the matcher's new icon_count and a base64 preview of
+        what got written so the dashboard can show a confirmation.
+        """
+        kd = self._kd_plugin()
+        if kd is None:
+            return web.json_response(
+                {"ok": False, "error": "killdetector_unavailable"},
+                status=503,
+            )
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        god_name = (body.get("god_name") or "").strip()
+        if not god_name:
+            return web.json_response(
+                {"ok": False, "error": "god_name is required"},
+                status=400,
+            )
+        try:
+            result = await kd.save_portrait_reference(god_name)
+            status = 200 if result.get("ok") else 400
+            return web.json_response(result, status=status)
+        except Exception as e:
+            return web.json_response(
+                {"ok": False, "error": f"{type(e).__name__}: {e}"},
+                status=500,
+            )
+
+    # === SPIN TRIGGER (Stream Deck friendly) ===
+
+    async def handle_spin_trigger(self, request):
+        """Trigger a !spin without going through Twitch chat.
+
+        Designed for Stream Deck: bind a button to
+            http://localhost:8069/api/spin
+        with the Stream Deck "Website" action (background access on).
+        Or use BarRaider's HTTP Request plugin for a POST.
+
+        Accepts both GET and POST so the simplest Stream Deck setups
+        work without a third-party HTTP plugin. The endpoint is bound
+        to localhost only (the dashboard webserver, not the public
+        webserver), so it's not reachable from the internet.
+
+        Responds with the same dict ``GodPoolPlugin.do_spin`` returns —
+        callers can chain on the result (e.g. fire a toast, sound, etc.)
+        or just ignore it.
+        """
+        pool = (self.bot.plugins.get("god_pool")
+                if self.bot and hasattr(self.bot, "plugins") else None)
+        if pool is None or not hasattr(pool, "do_spin"):
+            return web.json_response(
+                {"ok": False, "reason": "god_pool_unavailable"},
+                status=503,
+            )
+
+        # Optional "triggered_by" override via query string or body
+        # so power users can label different Stream Deck buttons
+        # (e.g. one for "Stream Deck", one for "Mobile Stream Deck").
+        triggered_by = request.query.get("source") or "Stream Deck"
+        if request.method == "POST":
+            try:
+                body = await request.json()
+                if isinstance(body, dict) and body.get("source"):
+                    triggered_by = str(body["source"])
+            except Exception:
+                pass  # body optional, fall back to query / default
+
+        try:
+            result = await pool.do_spin(triggered_by=triggered_by)
+        except Exception as e:
+            return web.json_response(
+                {"ok": False, "reason": f"exception:{type(e).__name__}:{e}"},
+                status=500,
+            )
+
+        status = 200 if result.get("ok") else 409
+        return web.json_response(result, status=status)
+
+    # === VOD PROCESSOR DASHBOARD BRIDGE ===
+    # tools/process_recordings.py POSTs to these endpoints as it runs.
+    # The /detector page polls /api/detector_debug, which returns this
+    # VOD state when a scan is active (mode="vod"). When no scan is
+    # running, /api/detector_debug falls back to the live detector
+    # state and /detector renders its existing live-mode layout.
+    #
+    # All four endpoints are tolerant of missing fields — the
+    # processor pushes its best snapshot each tick; the dashboard
+    # renders whatever's present.
+
+    async def handle_vod_start(self, request):
+        """Processor starting a batch run. Body is the initial state."""
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        import time as _t
+        self._vod_state = {
+            "mode": "vod",
+            "state": "running",
+            "started_at": _t.time(),
+            "total_files": int(body.get("total_files", 0)),
+            "current_file_idx": 0,
+            "current_file_name": None,
+            "current_file_progress": 0.0,
+            "current_scan_t": 0.0,
+            "current_duration": 0.0,
+            "files_completed": [],
+            # Rolling buffer of the most recent VodDetector log lines —
+            # populated by /api/vod_processor/event. Newest-first when
+            # rendered. Cap at VOD_EVENT_BUFFER_MAX so memory stays
+            # bounded across long batches.
+            "events": [],
+            # Rolling buffer of the most recent KDA reader failures —
+            # populated by /api/vod_processor/kda_failure. Each entry
+            # carries the raw KDA strip + binarised diagnostic image as
+            # base64 so the /detector page can render exactly what the
+            # reader saw at the moment of failure. Cap at VOD_KDA_FAIL_MAX.
+            "kda_failures": [],
+            "elapsed_sec": 0.0,
+            "eta_sec": None,
+            "args": body.get("args", {}),
+        }
+        return web.json_response({"ok": True})
+
+    async def handle_vod_update(self, request):
+        """Per-tick progress update from inside detector.detect()."""
+        if self._vod_state is None:
+            await self.handle_vod_start(request)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        import time as _t
+        s = self._vod_state
+        s["current_file_idx"] = int(
+            body.get("current_file_idx", s["current_file_idx"]))
+        s["current_file_name"] = body.get(
+            "current_file_name", s["current_file_name"])
+        s["current_scan_t"] = float(body.get("current_scan_t", 0.0))
+        s["current_duration"] = float(body.get("current_duration", 0.0))
+        if s["current_duration"] > 0:
+            s["current_file_progress"] = min(
+                1.0, s["current_scan_t"] / s["current_duration"])
+        else:
+            s["current_file_progress"] = 0.0
+        s["elapsed_sec"] = _t.time() - s["started_at"]
+        n_done = len(s["files_completed"])
+        if n_done > 0 and s["total_files"] > n_done:
+            per_file = s["elapsed_sec"] / n_done
+            remaining = s["total_files"] - n_done
+            s["eta_sec"] = per_file * remaining
+        return web.json_response({"ok": True})
+
+    async def handle_vod_file_done(self, request):
+        """One file finished. Append its summary to files_completed."""
+        if self._vod_state is None:
+            await self.handle_vod_start(request)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        entry = {
+            "name": body.get("name", "?"),
+            "status": body.get("status", "moved"),
+            "god": body.get("god"),
+            "kills": int(body.get("kills", 0)),
+            "deaths": int(body.get("deaths", 0)),
+            "assists": int(body.get("assists", 0)),
+            "duration_sec": float(body.get("duration_sec", 0.0)),
+            "output_path": body.get("output_path"),
+            "error": body.get("error"),
+        }
+        self._vod_state["files_completed"].append(entry)
+        return web.json_response({"ok": True})
+
+    async def handle_vod_event(self, request):
+        """Append a VodDetector log message to the events buffer."""
+        VOD_EVENT_BUFFER_MAX = 200
+        if self._vod_state is None:
+            await self.handle_vod_start(request)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        import time as _t
+        entry = {
+            "ts": float(body.get("ts", _t.time())),
+            "level": str(body.get("level", "info")),
+            "msg": str(body.get("msg", "")),
+            "file": body.get("file"),
+        }
+        events = self._vod_state.setdefault("events", [])
+        events.append(entry)
+        if len(events) > VOD_EVENT_BUFFER_MAX:
+            del events[: len(events) - VOD_EVENT_BUFFER_MAX]
+        return web.json_response({"ok": True})
+
+    async def handle_vod_kda_failure(self, request):
+        """Store a KDA reader failure (with debug crops) for the dashboard."""
+        VOD_KDA_FAIL_MAX = 20
+        if self._vod_state is None:
+            await self.handle_vod_start(request)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        import time as _t
+        entry = {
+            "ts": float(body.get("ts", _t.time())),
+            "video_t": body.get("video_t"),
+            "source_resolution": body.get("source_resolution"),
+            "kind": body.get("kind", "read_failure"),
+            "failure_reason": body.get("failure_reason"),
+            "prev_kda": body.get("prev_kda"),
+            "read_kda": body.get("read_kda"),
+            "groups": body.get("groups"),
+            "crop_b64": body.get("crop_b64"),
+            "binary_b64": body.get("binary_b64"),
+            "elapsed_ms": float(body.get("elapsed_ms", 0.0)),
+            "file": body.get("file"),
+        }
+        fails = self._vod_state.setdefault("kda_failures", [])
+        fails.append(entry)
+        if len(fails) > VOD_KDA_FAIL_MAX:
+            del fails[: len(fails) - VOD_KDA_FAIL_MAX]
+        return web.json_response({"ok": True})
+
+    async def handle_vod_stop(self, request):
+        """Processor finished a batch run (cleanly or via abort).
+        Clears the VOD-mode override so the /detector page falls back
+        to the live detector view on the next poll. Idempotent."""
+        was = self._vod_state is not None
+        self._vod_state = None
+        return web.json_response({"ok": True, "was_active": was})
 
     def update_now_playing(self, data):
         old = self._state.get("now_playing")

@@ -9,7 +9,7 @@ Queue logic:
   - !godreq <god>       — Mods add a god to the queue (free, no token cost)
   - !godqueue           — Show the current god request queue
   - !godskip            — Mods skip/remove the next god in queue
-  - !godclear           — Mods clear the entire queue
+  - !clear              — Mods clear the entire queue
   - !godtokens          — Check your God Token balance
 
 OBS integration:
@@ -113,7 +113,7 @@ class GodRequestPlugin:
         bot.register_command("godreq", self.cmd_godreq, mod_only=True)
         bot.register_command("godqueue", self.cmd_godqueue)
         bot.register_command("godskip", self.cmd_godskip, mod_only=True)
-        bot.register_command("godclear", self.cmd_godclear, mod_only=True)
+        bot.register_command("clear", self.cmd_godclear, mod_only=True)
         bot.register_command("godtokens", self.cmd_godtokens)
         bot.register_command("remove", self.cmd_remove, mod_only=True)
         bot.register_command("godlist", self.cmd_godlist)
@@ -389,6 +389,27 @@ class GodRequestPlugin:
                 "status": "played",
             })
 
+            # If this entry came from !spin, the spin pool still has
+            # the god in it (we don't remove on roll, only on play).
+            # Drop it from god_pool now that the play is confirmed.
+            # Paid / manual entries leave god_pool alone — the spin
+            # pool is a separate viewer-voting mechanic.
+            if completed.get("source") == "spin":
+                try:
+                    from core import db as _shared_db
+                    if _shared_db.is_available():
+                        conn = await _shared_db.get_db()
+                        if conn is not None:
+                            await conn.execute(
+                                "DELETE FROM god_pool WHERE god_name = ?",
+                                (next_god,))
+                            await conn.commit()
+                            print(f"[GodRequest] Removed {next_god} from "
+                                  f"spin pool (played after !spin).")
+                except Exception as e:
+                    print(f"[GodRequest] Failed to remove {next_god} "
+                          f"from spin pool: {e}")
+
             await self.bot.send_chat(
                 f"God request fulfilled! Playing {next_god} as requested by "
                 f"{completed['requester']}. "
@@ -507,6 +528,68 @@ class GodRequestPlugin:
         await self._update_obs_display()
         self._update_web_state()
 
+    # -----------------------------------------------------------------
+    # Public queue API — callable from other plugins
+    # -----------------------------------------------------------------
+    #
+    # Lets the spin pool plugin (or anything else) append a request
+    # without going through the chat-command path. The `source` field
+    # is preserved on the queue entry and consulted by
+    # `_on_god_detected` to decide whether playing the god should
+    # also reach into other tables (e.g. removing the god from the
+    # spin pool when source == "spin").
+
+    def queue_add(self, god_name: str, requester: str,
+                  source: str = "paid",
+                  token_spent: bool = False,
+                  position: str = "end") -> dict:
+        """Append (or prepend) a god to the request queue.
+
+        Args:
+          god_name:    proper-cased canonical god name. Caller should
+                       have already resolved this — we don't re-validate.
+          requester:   chat username or identifier (e.g. "!spin").
+          source:      "paid"   — viewer spent a god token (default)
+                       "manual" — mod added via !godreq
+                       "spin"   — picked by !spin, will also remove
+                                  from god_pool when played
+          token_spent: True if a viewer token was deducted. !spin and
+                       !godreq pass False; only !godrequest is True.
+          position:    "head" pushes to position 0 (next-up), "end"
+                       appends (default). !spin uses "head" so the
+                       lobby plays the rolled god next, with paid
+                       requests queued behind.
+
+        Returns the inserted entry dict. Caller is free to log it.
+        """
+        entry = {
+            "god":          god_name,
+            "requester":    requester,
+            "requested_at": datetime.now().isoformat(),
+            "token_spent":  bool(token_spent),
+            "source":       source,
+        }
+        if position == "head":
+            self.queue.insert(0, entry)
+        else:
+            self.queue.append(entry)
+        self._save_data()
+        # Fire-and-forget OBS + web-state refresh. Not awaited because
+        # this method is sync to keep the call sites simple.
+        try:
+            asyncio.create_task(self._update_obs_display())
+        except RuntimeError:
+            pass  # no running loop (tests / boot-time)
+        self._update_web_state()
+        return entry
+
+    def queue_contains(self, god_name: str) -> bool:
+        """True if `god_name` is already pending in the queue.
+        Case-insensitive. Used by !spin to skip already-queued gods."""
+        target = self._normalize_god_name(god_name)
+        return any(self._normalize_god_name(e["god"]) == target
+                   for e in self.queue)
+
     async def cmd_godreq(self, message, args, whisper=False):
         """!godreq <god> — Mods add a god to the queue (free)."""
         if not args:
@@ -551,7 +634,12 @@ class GodRequestPlugin:
 
         items = []
         for i, entry in enumerate(self.queue[:5]):
-            items.append(f"{i+1}. {entry['god']} ({entry['requester']})")
+            # Spin entries store an empty requester so they display
+            # as just the god name. Paid / manual entries keep the
+            # "(requester)" suffix.
+            req = entry.get("requester") or ""
+            suffix = f" ({req})" if req else ""
+            items.append(f"{i+1}. {entry['god']}{suffix}")
 
         text = " | ".join(items)
         remaining = len(self.queue) - 5
@@ -584,7 +672,7 @@ class GodRequestPlugin:
         self._update_web_state()
 
     async def cmd_godclear(self, message, args, whisper=False):
-        """!godclear — Mods clear the entire queue."""
+        """!clear — Mods clear the entire queue."""
         count = len(self.queue)
         if count == 0:
             await self.bot.send_reply(message, "The queue is already empty.", whisper)
@@ -676,7 +764,12 @@ class GodRequestPlugin:
 
         items = []
         for i, entry in enumerate(self.queue):
-            items.append(f"{i+1}. {entry['god']} ({entry['requester']})")
+            # Spin entries have an empty requester and display as
+            # just the god name. Paid / manual entries keep the
+            # "(requester)" suffix.
+            req = entry.get("requester") or ""
+            suffix = f" ({req})" if req else ""
+            items.append(f"{i+1}. {entry['god']}{suffix}")
 
         await self.bot.send_reply(message, "God queue: " + " | ".join(items), whisper)
 

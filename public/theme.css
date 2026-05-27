@@ -1,0 +1,462 @@
+/*
+ * Hatmas Market — shared theme
+ * Stock-terminal aesthetic. Near-black backgrounds, amber primary,
+ * vivid green/red ticks, monospace numbers with tabular figures.
+ */
+
+/* Inter + JetBrains Mono.
+ *
+ * Inter — designed by Rasmus Andersson specifically for screen UI.
+ * The default sans for Vercel, Linear, Stripe, GitHub-y dashboards.
+ * Reads as "serious data product" without leaning generic; ships
+ * 400/500/600/700 so we get real weights instead of synthesized.
+ *
+ * JetBrains Mono — designed for code editors with optimized
+ * vertical metrics, tabular figures, and clear digit-vs-letter
+ * discrimination. Perfect for price numbers / portfolio values
+ * where 0/O and 1/l/I must not blur.
+ */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+:root {
+  /* ─── Hatmas brand palette (May 2026) ───────────────────────
+     Five-color brand system, with white added for body legibility:
+       #202C39  Jet Black      — backgrounds, deepest surface
+       #7D98A1  Cool Steel     — secondary text, borders, muted UI
+       #DF2935  Scarlet Rush   — loss / down / danger
+       #F5F3BB  Lemon Chiffon  — highlight flashes (price tick,
+                                 preview banner) only
+       #DFA06E  Light Bronze   — primary accent / call-to-action
+       #FFFFFF  White          — primary body text (added separately
+                                 from the brand palette for the bulk
+                                 of long-form reading)
+     The palette deliberately has no green; "up" indicators reuse
+     Light Bronze so positive movement shares the accent treatment. */
+  --bg:        #202C39;     /* Jet Black — page background */
+  --bg-2:      #28344A;
+  --panel:     #2A3645;     /* lifted panel surface */
+  --panel-hi:  #344252;
+  --border:    rgba(125, 152, 161, 0.22);   /* Cool Steel @ low alpha */
+  --border-hi: #7D98A1;     /* Cool Steel — hover/active border */
+  --grid:      #2B3845;
+  --text:      #FFFFFF;     /* White — primary body text */
+  --text-dim:  #7D98A1;     /* Cool Steel — secondary text */
+  --text-fade: rgba(125, 152, 161, 0.55);   /* Cool Steel @ faded alpha */
+  --accent:    #DFA06E;     /* Light Bronze — primary accent */
+  --accent-hi: #E8B583;
+  --green:     #DFA06E;     /* gain — strict palette reuses Bronze */
+  --green-bg:  rgba(223, 160, 110, 0.10);
+  --red:       #DF2935;     /* Scarlet Rush — loss */
+  --red-bg:    rgba(223, 41, 53, 0.10);
+  --tick-flash:#F5F3BB;     /* Lemon Chiffon flash on price update */
+
+  /* ─── Typography ───────────────────────────────────────────── */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont,
+               'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'IBM Plex Mono', 'SF Mono',
+               Consolas, 'Courier New', monospace;
+
+  /* ─── Surface metrics ─────────────────────────────────────── */
+  --radius-sm: 3px;
+  --radius:    4px;
+  --radius-lg: 6px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+}
+
+body {
+  /* very subtle vertical gradient — not flat, gives terminal depth.
+     Bottom stop is a slightly deeper tint of Jet Black so the page
+     still has gradient lift on big screens. */
+  background-image:
+    linear-gradient(180deg, var(--bg) 0%, #151E28 100%);
+  background-attachment: fixed;
+}
+
+/* ─── Numbers always monospace + tabular ──────────────────────── */
+.num,
+.mono {
+  font-family: var(--font-mono);
+  font-feature-settings: 'tnum' 1, 'zero' 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Headers — slightly tracked-out, terminal feel */
+h1, h2, h3 {
+  font-family: var(--font-sans);
+  letter-spacing: -0.01em;
+  font-weight: 600;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-hi); }
+
+/* Selection color */
+::selection {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+/* Scrollbar — subtle dark, doesn't fight the aesthetic */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: var(--radius);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--border-hi); }
+
+/* ─── Shared utility classes ──────────────────────────────────── */
+.tag {
+  display: inline-block;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+}
+.tag.green  { color: var(--green); border-color: var(--green); }
+.tag.red    { color: var(--red);   border-color: var(--red); }
+.tag.accent { color: var(--accent); border-color: var(--accent); }
+
+.up    { color: var(--green) !important; }
+.down  { color: var(--red)   !important; }
+.muted { color: var(--text-dim) !important; }
+
+/* "SECTION TITLE" — the all-caps tracked label that goes above panels */
+.section-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--text-dim);
+  margin: 0 0 10px;
+}
+
+/* ─── Tab row (small mono pills, terminal-style) ─────────────── */
+.tab-row {
+  display: flex;
+  gap: 4px;
+  margin: 0 0 10px;
+  flex-wrap: wrap;
+}
+.tab {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: border-color 0.1s, color 0.1s, background 0.1s;
+}
+.tab:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.tab.active {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+
+/* ─── Icon-style toggle (custom vs official) ───────────────── */
+.icon-toggle {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color 0.1s, color 0.1s, background 0.1s;
+  margin-right: 12px;
+  white-space: nowrap;
+}
+.icon-toggle:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  /* Light Bronze @ low alpha — matches --accent (#DFA06E). */
+  background: rgba(223, 160, 110, 0.06);
+}
+
+/* Right-side cluster in the brand-band */
+.brand-band .right-cluster {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+/* ─── Twitch stream embed (shared landing + god pages) ───────── */
+.stream-section {
+  margin: 16px 0 24px;
+}
+.stream-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.stream-header .title {
+  flex: 1;
+  min-width: 200px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: var(--font-sans);
+  font-size: 13px;
+}
+.live-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--red);
+  font-weight: 700;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.live-indicator .dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--red);
+  animation: livepulse 1.6s infinite;
+}
+@keyframes livepulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.45; transform: scale(0.9); }
+}
+.stream-meta-right {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.stream-meta-right .viewers { color: var(--accent); font-weight: 600; }
+
+.now-playing-line {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  margin: 0 0 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+.now-playing-line .god {
+  color: var(--accent);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.stream-grid {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+}
+.stream-player, .stream-chat {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  position: relative;
+}
+.stream-player { flex: 2; height: 480px; }
+.stream-chat   { flex: 1; height: 480px; min-width: 280px; }
+.stream-player iframe, .stream-chat iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%; height: 100%;
+  border: 0;
+}
+@media (max-width: 880px) {
+  .stream-grid { flex-direction: column; }
+  .stream-player {
+    flex: none;
+    width: 100%;
+    height: 0;
+    padding-bottom: 56.25%;  /* 16:9 */
+  }
+  .stream-chat {
+    flex: none;
+    width: 100%;
+    height: 360px;
+  }
+}
+
+/* Preview mode banner */
+.preview-banner {
+  /* Lemon Chiffon @ alpha — matches --tick-flash (#F5F3BB). */
+  background: rgba(245, 243, 187, 0.10);
+  border: 1px solid rgba(245, 243, 187, 0.45);
+  color: var(--tick-flash);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  margin: 0 0 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  text-align: center;
+}
+
+/* ─── Brand footer ─────────────────────────────────────────── */
+.footer-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+  padding: 32px 0 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--text-fade);
+  text-transform: uppercase;
+}
+.footer-brand a {
+  color: var(--text-dim);
+  border-bottom: 1px dotted var(--text-fade);
+}
+.footer-brand a:hover {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* ─── Shared "ambient" polish (every page) ─────────────────────
+ *
+ * These rules were originally inline in landing.html. Hoisted up
+ * so portfolio / god / community pages get the same chart-grid
+ * background, brand-band offline state, and footer build tag
+ * without duplicating CSS per page.
+ */
+
+/* Subtle bronze chart-grid pattern fixed to the viewport. Sells the
+ * terminal-depth feel without competing with content (~3% opacity).
+ * Stacked over the existing dark gradient by re-declaring the body
+ * background-image as a layer list — the grid sits on top of the
+ * gradient. The two rgba values are Light Bronze (#DFA06E) at ~3%
+ * alpha; keep them in sync with --accent if the palette ever changes. */
+html body {
+  background-image:
+    linear-gradient(rgba(223, 160, 110, 0.030) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(223, 160, 110, 0.030) 1px, transparent 1px),
+    linear-gradient(180deg, var(--bg) 0%, #151E28 100%);
+  background-size: 48px 48px, 48px 48px, 100% 100%;
+  background-attachment: fixed;
+}
+
+/* Brand band: shared offline/live treatment. Pages that have a
+ * .brand-band .status pill (community, landing) get OFFLINE state
+ * styling for free via the .offline modifier toggled by JS. */
+.brand-band .status .dot {
+  display: inline-block;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.brand-band .status.offline .dot {
+  background: var(--text-fade);
+  box-shadow: none;
+}
+.brand-band .status.offline {
+  color: var(--text-fade);
+}
+
+/* Footer build tag: Bloomberg-style "data freshness" line. Pages
+ * that include the markup get the styling for free. Pages that
+ * want it should put this above the attribution line:
+ *
+ *   <div class="footer-build">
+ *     <span class="dot"></span><span data-last-ping>DATA · <1s</span>
+ *     &nbsp;·&nbsp; HATMASBOT v2.5
+ *   </div>
+ *
+ * The optional data-last-ping element is updated client-side by
+ * each page's poll loop. If the page doesn't poll, drop the
+ * element and just show the static build tag. */
+.footer-build {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-fade);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.footer-build .dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 5px var(--green);
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+.footer-controls {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* Hero kicker — the small tracked-out mono label that goes above
+ * a page title. Used on landing, available on any page that wants
+ * to introduce itself visually. */
+.kicker {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+/* ─── Reduced-motion ───────────────────────────────────────────
+ * Respect the user's OS / browser preference for less motion.
+ * Pauses the scrolling ticker tape and the LIVE-pulse dot so
+ * vestibular-sensitive viewers (or anyone who set the OS toggle)
+ * don't get a constantly-animating page. Static state still
+ * conveys all the same info — the data is in the text, not the
+ * motion. */
+@media (prefers-reduced-motion: reduce) {
+  .ticker-track            { animation: none !important; }
+  .live-indicator .dot     { animation: none !important; }
+  .platform-pill .pip      { animation: none !important; }
+  .brand-band .status .dot,
+  .footer-build .dot       { box-shadow: none !important; }
+}

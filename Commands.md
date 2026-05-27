@@ -53,6 +53,17 @@ Every command starts with `!`. Commands marked **(mods)** need mod or broadcaste
 - **!gamble <amount, all, half, or quarter>** - Wagers Hats. 10 minimum, 10 second cooldown.
 - **!jackpot** - Shows the current jackpot pool.
 
+## Hatmas Market (Economy)
+
+Stock-market-style economy where viewers invest Hats in Smite 2 gods. Prices move based on Hatmaster's match performance.
+
+- **!buy [god] [amount or all]** - Buy shares of a god with hats. Defaults to current god if omitted.
+- **!sell [god] [amount or all]** - Sell shares for hats. Defaults to current god if omitted.
+- **!portfolio** - Shows your holdings with current value, P&L, and total net worth.
+- **!price [god]** - Shows current price, recent trend, and volatility tier.
+- **!market** / **!stocks** - Shows the top movers — gainers and losers.
+- **!dividend** - Shows the most recent dividend payout info.
+
 ## Channel Point Rewards
 
 - **God Joke** (500 points) - Plays a random joke voice line from the current god.

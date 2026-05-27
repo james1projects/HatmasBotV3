@@ -1,0 +1,575 @@
+{
+  "schema_version": 1,
+  "name": "2matches",
+  "description": "One video, two separate 1v1 matches stacked top-to-bottom. Top row is Match 1 ({my_god} vs {vs_god}), bottom row is Match 2 ({my_god2} vs {vs2_god}). Each row gets its own VS marker and corner icon badges (cyan glow on Hatmaster's gods, red on opponents). Optional joust map background loaded from thumbnail_presets/_assets/joust_map.png — falls back to the brand gradient if the file isn't present yet. Optional WIN/LOSS badges per match via --result and --result2.",
+  "size": [
+    1280,
+    720
+  ],
+  "layers": [
+    {
+      "type": "gradient",
+      "name": "Background fallback gradient",
+      "direction": "horizontal",
+      "stops": [
+        {
+          "at": 0.0,
+          "color": "#0a1530"
+        },
+        {
+          "at": 0.5,
+          "color": "#1a1f2c"
+        },
+        {
+          "at": 1.0,
+          "color": "#3a0a14"
+        }
+      ]
+    },
+    {
+      "type": "image",
+      "name": "Joust map background (optional)",
+      "src": "thumbnail_presets/_assets/joust_map.png",
+      "pos": [
+        0,
+        0
+      ],
+      "size": [
+        1280,
+        720
+      ],
+      "fit": "cover",
+      "fit_anchor": "center",
+      "anchor": "topleft",
+      "opacity": 0.7,
+      "fallback_text": ""
+    },
+    {
+      "type": "gradient",
+      "name": "Background darkening overlay",
+      "pos": [
+        0,
+        0
+      ],
+      "size": [
+        1280,
+        720
+      ],
+      "direction": "vertical",
+      "stops": [
+        {
+          "at": 0.0,
+          "color": "#000000",
+          "opacity": 0.35
+        },
+        {
+          "at": 1.0,
+          "color": "#000000",
+          "opacity": 0.55
+        }
+      ]
+    },
+    {
+      "type": "image",
+      "name": "Match 1 — left god card (my_god)",
+      "src": "{my_god_card}",
+      "pos": [
+        0,
+        0
+      ],
+      "size": [
+        680,
+        390
+      ],
+      "fit": "cover",
+      "fit_anchor": [
+        0.5,
+        0.18
+      ],
+      "anchor": "topleft",
+      "feather_edges": {
+        "right": 70,
+        "bottom": 50
+      },
+      "fallback_text": "{my_god}"
+    },
+    {
+      "type": "image",
+      "name": "Match 1 — right god card (vs_god)",
+      "src": "{vs_god_card}",
+      "pos": [
+        600,
+        0
+      ],
+      "size": [
+        680,
+        390
+      ],
+      "fit": "cover",
+      "fit_anchor": [
+        0.5,
+        0.18
+      ],
+      "anchor": "topleft",
+      "flip_h": true,
+      "feather_edges": {
+        "left": 70,
+        "bottom": 50
+      },
+      "fallback_text": "{vs_god}"
+    },
+    {
+      "type": "image",
+      "name": "Match 2 — left god card (my_god2)",
+      "src": "{my_god2_card}",
+      "pos": [
+        0,
+        330
+      ],
+      "size": [
+        680,
+        390
+      ],
+      "fit": "cover",
+      "fit_anchor": [
+        0.5,
+        0.18
+      ],
+      "anchor": "topleft",
+      "feather_edges": {
+        "right": 70,
+        "top": 50
+      },
+      "fallback_text": "{my_god2}"
+    },
+    {
+      "type": "image",
+      "name": "Match 2 — right god card (vs2_god)",
+      "src": "{vs2_god_card}",
+      "pos": [
+        600,
+        330
+      ],
+      "size": [
+        680,
+        390
+      ],
+      "fit": "cover",
+      "fit_anchor": [
+        0.5,
+        0.15
+      ],
+      "anchor": "topleft",
+      "flip_h": true,
+      "feather_edges": {
+        "left": 70,
+        "top": 50
+      },
+      "fallback_text": "{vs2_god}"
+    },
+    {
+      "type": "gradient",
+      "name": "Vertical seam darkening (left vs right, top row)",
+      "pos": [
+        500,
+        0
+      ],
+      "size": [
+        280,
+        390
+      ],
+      "direction": "horizontal",
+      "stops": [
+        {
+          "at": 0.0,
+          "color": "#000000",
+          "opacity": 0.0
+        },
+        {
+          "at": 0.5,
+          "color": "#000000",
+          "opacity": 0.55
+        },
+        {
+          "at": 1.0,
+          "color": "#000000",
+          "opacity": 0.0
+        }
+      ]
+    },
+    {
+      "type": "gradient",
+      "name": "Vertical seam darkening (left vs right, bottom row)",
+      "pos": [
+        500,
+        330
+      ],
+      "size": [
+        280,
+        390
+      ],
+      "direction": "horizontal",
+      "stops": [
+        {
+          "at": 0.0,
+          "color": "#000000",
+          "opacity": 0.0
+        },
+        {
+          "at": 0.5,
+          "color": "#000000",
+          "opacity": 0.55
+        },
+        {
+          "at": 1.0,
+          "color": "#000000",
+          "opacity": 0.0
+        }
+      ]
+    },
+    {
+      "type": "gradient",
+      "name": "Horizontal seam darkening (between match 1 and match 2)",
+      "pos": [
+        0,
+        290
+      ],
+      "size": [
+        1280,
+        140
+      ],
+      "direction": "vertical",
+      "stops": [
+        {
+          "at": 0.0,
+          "color": "#000000",
+          "opacity": 0.0
+        },
+        {
+          "at": 0.5,
+          "color": "#000000",
+          "opacity": 0.5
+        },
+        {
+          "at": 1.0,
+          "color": "#000000",
+          "opacity": 0.0
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "name": "Match 1 VS",
+      "value": "VS",
+      "pos": [
+        640,
+        180
+      ],
+      "anchor": "center",
+      "font": "Big Noodle Titling",
+      "size": 130,
+      "fill": "#ffd24d",
+      "stroke": {
+        "color": "#000000",
+        "width": 8
+      },
+      "shadow": {
+        "color": "#000000",
+        "offset": [
+          5,
+          5
+        ],
+        "blur": 10,
+        "opacity": 0.85
+      }
+    },
+    {
+      "type": "text",
+      "name": "Match 2 VS",
+      "value": "VS",
+      "pos": [
+        640,
+        540
+      ],
+      "anchor": "center",
+      "font": "Big Noodle Titling",
+      "size": 130,
+      "fill": "#ffd24d",
+      "stroke": {
+        "color": "#000000",
+        "width": 8
+      },
+      "shadow": {
+        "color": "#000000",
+        "offset": [
+          5,
+          5
+        ],
+        "blur": 10,
+        "opacity": 0.85
+      }
+    },
+    {
+      "type": "icon",
+      "name": "Match 1 — my god icon (top-left)",
+      "god": "{my_god}",
+      "pos": [
+        30,
+        30
+      ],
+      "size": 110,
+      "anchor": "topleft",
+      "border": {
+        "color": "#4dc3ff",
+        "width": 5
+      },
+      "shadow": {
+        "color": "#4dc3ff",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 22,
+        "opacity": 0.85
+      }
+    },
+    {
+      "type": "icon",
+      "name": "Match 1 — vs god icon (top-right)",
+      "god": "{vs_god}",
+      "pos": [
+        1250,
+        30
+      ],
+      "size": 110,
+      "anchor": "topright",
+      "border": {
+        "color": "#ff4d6d",
+        "width": 5
+      },
+      "shadow": {
+        "color": "#ff4d6d",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 22,
+        "opacity": 0.85
+      }
+    },
+    {
+      "type": "icon",
+      "name": "Match 2 — my god2 icon (bottom-left)",
+      "god": "{my_god2}",
+      "pos": [
+        30,
+        690
+      ],
+      "size": 110,
+      "anchor": "bottomleft",
+      "border": {
+        "color": "#4dc3ff",
+        "width": 5
+      },
+      "shadow": {
+        "color": "#4dc3ff",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 22,
+        "opacity": 0.85
+      }
+    },
+    {
+      "type": "icon",
+      "name": "Match 2 — vs2 god icon (bottom-right)",
+      "god": "{vs2_god}",
+      "pos": [
+        1250,
+        690
+      ],
+      "size": 110,
+      "anchor": "bottomright",
+      "border": {
+        "color": "#ff4d6d",
+        "width": 5
+      },
+      "shadow": {
+        "color": "#ff4d6d",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 22,
+        "opacity": 0.85
+      }
+    },
+    {
+      "type": "text",
+      "name": "Match 1 — my god name",
+      "value": "{my_god}",
+      "pos": [
+        160,
+        85
+      ],
+      "anchor": "left_center",
+      "font": "Big Noodle Titling",
+      "size": 50,
+      "fill": "#ffffff",
+      "stroke": {
+        "color": "#000000",
+        "width": 6
+      },
+      "shadow": {
+        "color": "#4dc3ff",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 18,
+        "opacity": 0.7
+      },
+      "max_width": 360,
+      "skip_if_empty": true
+    },
+    {
+      "type": "text",
+      "name": "Match 1 — vs god name",
+      "value": "{vs_god}",
+      "pos": [
+        1120,
+        85
+      ],
+      "anchor": "right_center",
+      "font": "Big Noodle Titling",
+      "size": 50,
+      "fill": "#ffffff",
+      "stroke": {
+        "color": "#000000",
+        "width": 6
+      },
+      "shadow": {
+        "color": "#ff4d6d",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 18,
+        "opacity": 0.7
+      },
+      "max_width": 360,
+      "skip_if_empty": true
+    },
+    {
+      "type": "text",
+      "name": "Match 2 — my god2 name",
+      "value": "{my_god2}",
+      "pos": [
+        160,
+        635
+      ],
+      "anchor": "left_center",
+      "font": "Big Noodle Titling",
+      "size": 50,
+      "fill": "#ffffff",
+      "stroke": {
+        "color": "#000000",
+        "width": 6
+      },
+      "shadow": {
+        "color": "#4dc3ff",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 18,
+        "opacity": 0.7
+      },
+      "max_width": 360,
+      "skip_if_empty": true
+    },
+    {
+      "type": "text",
+      "name": "Match 2 — vs2 god name",
+      "value": "{vs2_god}",
+      "pos": [
+        1120,
+        635
+      ],
+      "anchor": "right_center",
+      "font": "Big Noodle Titling",
+      "size": 50,
+      "fill": "#ffffff",
+      "stroke": {
+        "color": "#000000",
+        "width": 6
+      },
+      "shadow": {
+        "color": "#ff4d6d",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 18,
+        "opacity": 0.7
+      },
+      "max_width": 360,
+      "skip_if_empty": true
+    },
+    {
+      "type": "text",
+      "name": "Match 1 result badge",
+      "value": "{result}",
+      "pos": [
+        640,
+        260
+      ],
+      "anchor": "center",
+      "font": "Big Noodle Titling",
+      "size": 56,
+      "fill": "#39ff8c",
+      "stroke": {
+        "color": "#000000",
+        "width": 7
+      },
+      "shadow": {
+        "color": "#000000",
+        "offset": [
+          3,
+          3
+        ],
+        "blur": 8,
+        "opacity": 0.85
+      },
+      "skip_if_empty": true
+    },
+    {
+      "type": "text",
+      "name": "Match 2 result badge",
+      "value": "{result2}",
+      "pos": [
+        640,
+        460
+      ],
+      "anchor": "center",
+      "font": "Big Noodle Titling",
+      "size": 56,
+      "fill": "#39ff8c",
+      "stroke": {
+        "color": "#000000",
+        "width": 7
+      },
+      "shadow": {
+        "color": "#000000",
+        "offset": [
+          3,
+          3
+        ],
+        "blur": 8,
+        "opacity": 0.85
+      },
+      "skip_if_empty": true
+    }
+  ]
+}

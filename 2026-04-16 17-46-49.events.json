@@ -1,0 +1,12 @@
+{
+  "source_video": "C:\\Users\\james\\Videos\\2026-04-16 17-46-49.mp4",
+  "events": [
+    {"timestamp_sec": 143.2,  "type": "kill",   "note": "first blood",        "pre_sec": 5.0, "post_sec": 4.0},
+    {"timestamp_sec": 287.5,  "type": "death",  "note": "",                   "pre_sec": 5.0, "post_sec": 4.0},
+    {"timestamp_sec": 412.8,  "type": "kill",   "note": "",                   "pre_sec": 5.0, "post_sec": 4.0},
+    {"timestamp_sec": 601.0,  "type": "assist", "note": "",                   "pre_sec": 5.0, "post_sec": 4.0},
+    {"timestamp_sec": 745.3,  "type": "kill",   "note": "triple kill setup",  "pre_sec": 5.0, "post_sec": 6.0},
+    {"timestamp_sec": 921.4,  "type": "death",  "note": "",                   "pre_sec": 5.0, "post_sec": 4.0},
+    {"timestamp_sec": 1088.6, "type": "kill",   "note": "",                   "pre_sec": 5.0, "post_sec": 4.0}
+  ]
+}

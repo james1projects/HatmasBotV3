@@ -1,0 +1,70 @@
+TuneFrame — captured preset summary
+───────────────────────────────────
+Kind        : full_gameplay
+Project     : 1920 x 1080 @ 59.9401 fps
+Captured    : 1 video track(s), 4 audio track(s)
+
+Video tracks:
+  [0] (unnamed)  (composite: SrcAlpha)
+      crop: TL(0,0)  TR(1920,0)  BR(1920,1080)  BL(0,1080)
+      center: (960,540)  rotation: 0 rad (0 deg)  scale_to_fill: true
+
+Audio tracks:
+  [0] (unnamed)  volume: 0.7 dB
+  [1] (unnamed)  volume: -1.7 dB
+  [2] (unnamed)  volume: 0 dB  [MUTED]
+  [3] (unnamed)  volume: 0 dB  [MUTED]
+
+
+── JSON (would-be preset contents) ──
+
+{
+  "schema_version": 1,
+  "name": "PREVIEW",
+  "kind": "full_gameplay",
+  "captured_at": "2026-04-24T16:06:08",
+  "project": {
+    "width": 1920,
+    "height": 1080,
+    "framerate": 59.9401
+  },
+  "video_tracks": [
+    {
+      "name": "",
+      "composite": "SrcAlpha",
+      "top_left":     {"x": 0, "y": 0},
+      "top_right":    {"x": 1920, "y": 0},
+      "bottom_right": {"x": 1920, "y": 1080},
+      "bottom_left":  {"x": 0, "y": 1080},
+      "center":       {"x": 960, "y": 540},
+      "rotation_rad": 0,
+      "smoothness":   0,
+      "keyframe_type": "Linear",
+      "scale_to_fill": true,
+      "effects": [
+      ]
+    }
+  ],
+  "audio_tracks": [
+    {
+      "name": "",
+      "volume_db": 0.7,
+      "muted": false
+    },
+    {
+      "name": "",
+      "volume_db": -1.7,
+      "muted": false
+    },
+    {
+      "name": "",
+      "volume_db": 0,
+      "muted": true
+    },
+    {
+      "name": "",
+      "volume_db": 0,
+      "muted": true
+    }
+  ]
+}

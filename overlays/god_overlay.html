@@ -103,18 +103,22 @@
   .kda {
     font-size: 18px;
     font-weight: 700;
-    color: #e8e0ff;
+    color: #FFFFFF;
     letter-spacing: 1px;
   }
 
-  .kda .kills { color: #5dff5d; }
-  .kda .deaths { color: #ff5d5d; }
-  .kda .assists { color: #ffcc5d; }
-  .kda .slash { color: rgba(255, 255, 255, 0.35); margin: 0 1px; }
+  /* KDA colors aligned to the Hatmas palette:
+       kills = Light Bronze (positive accent),
+       deaths = Scarlet Rush,
+       assists = Cool Steel. */
+  .kda .kills { color: #DFA06E; }
+  .kda .deaths { color: #DF2935; }
+  .kda .assists { color: #7D98A1; }
+  .kda .slash { color: rgba(245, 243, 187, 0.35); margin: 0 1px; }
 
   .gold {
     font-size: 13px;
-    color: #ffd700;
+    color: #FFFFFF;
     font-weight: 600;
     opacity: 0.85;
   }
@@ -123,11 +127,12 @@
     display: inline-block;
     width: 10px;
     height: 10px;
-    background: #ffd700;
+    /* Light Bronze coin — matches the Hatmas accent. */
+    background: #DFA06E;
     border-radius: 50%;
     margin-right: 3px;
     vertical-align: middle;
-    box-shadow: 0 0 4px rgba(255, 215, 0, 0.5);
+    box-shadow: 0 0 4px rgba(223, 160, 110, 0.5);
   }
 
   @keyframes statPulse {

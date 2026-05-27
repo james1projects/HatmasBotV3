@@ -295,7 +295,7 @@ h1 {
     <div class="card-title">stream control</div>
     <button class="big-btn go-live" onclick="action('go_live')">GO LIVE</button>
     <button class="big-btn stop" onclick="action('stop_stream')">STOP STREAM</button>
-    <button class="big-btn snap-btn" onclick="action('snap')">⚡ SNAP</button>
+    <button class="big-btn snap-btn" onclick="action('snap')">SNAP</button>
   </div>
 
   <!-- Now Playing -->
@@ -378,7 +378,7 @@ h1 {
     <div id="sessionStats">
       <div class="stat-item">
         <span class="stat-label">Uptime</span>
-        <span class="stat-value" id="statUptime">—</span>
+        <span class="stat-value" id="statUptime">--</span>
       </div>
       <div class="stat-item">
         <span class="stat-label">Commands</span>
@@ -386,7 +386,7 @@ h1 {
       </div>
       <div class="stat-item">
         <span class="stat-label">Plugins</span>
-        <span class="stat-value" id="statPlugins">—</span>
+        <span class="stat-value" id="statPlugins">--</span>
       </div>
     </div>
   </div>
@@ -472,22 +472,30 @@ h1 {
 
       <!-- Kill Detector -->
       <div>
-        <div class="card-title" style="margin-top:0">kill detector</div>
+        <div class="card-title" style="margin-top:0">
+          kill detector
+          <a href="/detector" target="_blank"
+             style="float:right;font-size:11px;font-weight:400;
+                    color:rgba(196,168,130,0.7);text-decoration:none;
+                    text-transform:none;letter-spacing:0;">
+            open live monitor →
+          </a>
+        </div>
         <div class="stat-item">
           <span class="stat-label">Status</span>
-          <span class="stat-value" id="kdStatus">—</span>
+          <span class="stat-value" id="kdStatus">--</span>
         </div>
         <div class="stat-item">
           <span class="stat-label">K / D / A</span>
-          <span class="stat-value" id="kdKDA">—</span>
+          <span class="stat-value" id="kdKDA">--</span>
         </div>
         <div class="stat-item">
           <span class="stat-label">OCR Fails</span>
-          <span class="stat-value" id="kdOcrFails">—</span>
+          <span class="stat-value" id="kdOcrFails">--</span>
         </div>
         <div class="stat-item">
           <span class="stat-label">Last Read</span>
-          <span class="stat-value" id="kdLastRead">—</span>
+          <span class="stat-value" id="kdLastRead">--</span>
         </div>
         <div style="display:flex;gap:8px;margin-top:10px">
           <button class="big-btn go-live" id="kdStartBtn" onclick="kdStart()" style="margin:0;flex:1;padding:10px;font-size:12px">START</button>
@@ -607,8 +615,8 @@ function renderNowPlaying(np) {
     <div class="now-playing-display">
       ${np.album_art ? `<img class="np-art" src="${np.album_art}">` : ''}
       <div class="np-info">
-        <div class="np-title">${np.title || '—'}</div>
-        <div class="np-artist">${np.artist || '—'}</div>
+        <div class="np-title">${np.title || '--'}</div>
+        <div class="np-artist">${np.artist || '--'}</div>
         <div class="np-requester">${np.requester ? `by ${np.requester} | ♡ ${np.likes || 0}` : 'playlist'}</div>
       </div>
     </div>
@@ -633,14 +641,21 @@ function renderGodQueue(godReqs) {
   const el = document.getElementById('godQueue');
   const statusEl = document.getElementById('godMiuStatus');
   if (!godReqs || !godReqs.queue || godReqs.queue.length === 0) {
-    el.innerHTML = '<div class="queue-empty">Queue empty — !godrequest &lt;god&gt;</div>';
+    el.innerHTML = '<div class="queue-empty">Queue empty. Use !godrequest &lt;god&gt; to add one.</div>';
   } else {
-    el.innerHTML = godReqs.queue.map((g, i) => `
+    el.innerHTML = godReqs.queue.map((g, i) => {
+      // Spin entries store an empty requester, render as just the
+      // god name. Paid / manual entries keep the "by <requester>"
+      // line.
+      const userLine = g.requester
+        ? `<span class="queue-user">${g.requester}${g.token_spent ? '' : ' (mod)'}</span>`
+        : '';
+      return `
       <div class="queue-item">
         <span class="queue-song">${i+1}. ${g.god}</span>
-        <span class="queue-user">${g.requester}${g.token_spent ? '' : ' (mod)'}</span>
-      </div>
-    `).join('');
+        ${userLine}
+      </div>`;
+    }).join('');
   }
   if (statusEl) {
     statusEl.textContent = godReqs.mixitup_connected ? 'MixItUp connected' : 'MixItUp not connected';
@@ -688,7 +703,7 @@ async function pollKillStats() {
     if (s.last_kda) {
       kdaEl.textContent = `${s.last_kda[0]} / ${s.last_kda[1]} / ${s.last_kda[2]}`;
     } else {
-      kdaEl.textContent = s.kills !== undefined ? `${s.kills} / ${s.deaths} / ?` : '—';
+      kdaEl.textContent = s.kills !== undefined ? `${s.kills} / ${s.deaths} / ?` : '--';
     }
 
     // OCR failures
@@ -699,7 +714,7 @@ async function pollKillStats() {
     if (s.last_read_ago !== undefined && s.last_read_ago !== null) {
       lastEl.textContent = s.last_read_ago < 2 ? 'just now' : `${Math.round(s.last_read_ago)}s ago`;
     } else {
-      lastEl.textContent = '—';
+      lastEl.textContent = '--';
     }
 
     // Sync toggles (only on first load)
@@ -727,7 +742,7 @@ async function poll() {
     renderGodQueue(data.god_requests || {});
 
     if (data.stats) {
-      document.getElementById('statUptime').textContent = data.stats.uptime || '—';
+      document.getElementById('statUptime').textContent = data.stats.uptime || '--';
       document.getElementById('statCommands').textContent = data.stats.commands || 0;
       document.getElementById('statPlugins').textContent = (data.stats.plugins || []).join(', ');
     }

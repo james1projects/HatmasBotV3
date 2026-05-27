@@ -13,12 +13,12 @@
         .header-top { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
         .pfp { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; flex-shrink: 0; border: 2px solid var(--hm-border); background: var(--hm-icon-bg); }
         .header-info { flex: 1; min-width: 0; }
-        .username { font-family: 'BigNoodleTitling', 'Poppins', sans-serif; font-size: 22px; color: var(--hm-text); letter-spacing: 1px; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .portfolio-label { font-family: 'Poppins', sans-serif; font-size: 9px; font-weight: 500; color: var(--hm-text-muted); letter-spacing: 2px; text-transform: uppercase; }
+        .username { font-family: 'BigNoodleTitling', 'Inter', sans-serif; font-size: 22px; color: var(--hm-text); letter-spacing: 1px; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .portfolio-label { font-family: 'Inter', sans-serif; font-size: 9px; font-weight: 500; color: var(--hm-text-muted); letter-spacing: 2px; text-transform: uppercase; }
         .header-values { display: flex; gap: 0; }
         .value-block { flex: 1; padding: 6px 0; }
         .value-block + .value-block { border-left: 1px solid var(--hm-icon-bg); padding-left: 16px; }
-        .value-label { font-family: 'Poppins', sans-serif; font-size: 9px; font-weight: 500; color: var(--hm-text-muted); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 2px; }
+        .value-label { font-family: 'Inter', sans-serif; font-size: 9px; font-weight: 500; color: var(--hm-text-muted); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 2px; }
         .value-amount { font-family: 'JetBrains Mono', monospace; font-size: 18px; font-weight: 500; color: var(--hm-text); line-height: 1.1; }
         .value-amount .hat-suffix { font-size: 11px; color: var(--hm-text-secondary); font-weight: 400; margin-left: 2px; }
         .value-pnl { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 400; margin-top: 1px; }
@@ -26,7 +26,7 @@
         .value-pnl.negative { color: var(--hm-red); }
         .hat-balance { font-family: 'JetBrains Mono', monospace; font-size: 18px; font-weight: 500; color: var(--hm-gold); line-height: 1.1; }
         .hat-balance .hat-suffix { font-size: 11px; color: var(--hm-text-muted); font-weight: 400; margin-left: 2px; }
-        .balance-sub { font-family: 'Poppins', sans-serif; font-size: 9px; color: var(--hm-text-muted); margin-top: 1px; }
+        .balance-sub { font-family: 'Inter', sans-serif; font-size: 9px; color: var(--hm-text-muted); margin-top: 1px; }
         .holdings { padding: 6px 0; max-height: 360px; overflow-y: auto; }
         .holdings::-webkit-scrollbar { width: 3px; }
         .holdings::-webkit-scrollbar-track { background: transparent; }
@@ -35,7 +35,7 @@
         .holding-row:hover { background: var(--hm-bg-subtle); }
         .god-icon { width: 36px; height: 36px; border-radius: 6px; object-fit: cover; flex-shrink: 0; background: var(--hm-icon-bg); border: 1px solid var(--hm-border-subtle); }
         .holding-info { flex: 1; min-width: 0; }
-        .god-name { font-family: 'Poppins', sans-serif; font-size: 13px; font-weight: 500; color: var(--hm-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2; }
+        .god-name { font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 500; color: var(--hm-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2; }
         .shares-count { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--hm-text-secondary); }
         .holding-value { text-align: right; flex-shrink: 0; }
         .holding-current { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 500; color: var(--hm-text); line-height: 1.2; }
@@ -46,12 +46,12 @@
         .sparkline { width: 50px; height: 24px; flex-shrink: 0; }
         .footer { padding: 8px 18px 10px; border-top: 1px solid var(--hm-icon-bg); display: flex; justify-content: space-between; align-items: center; }
         .footer-stat { display: flex; flex-direction: column; align-items: center; }
-        .footer-stat-label { font-family: 'Poppins', sans-serif; font-size: 8px; font-weight: 500; color: var(--hm-text-muted); letter-spacing: 1.5px; text-transform: uppercase; }
+        .footer-stat-label { font-family: 'Inter', sans-serif; font-size: 8px; font-weight: 500; color: var(--hm-text-muted); letter-spacing: 1.5px; text-transform: uppercase; }
         .footer-stat-value { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--hm-text-secondary); }
         .footer-stat-value.rank { color: var(--hm-gold); font-weight: 500; }
         .empty-state { padding: 30px 18px; text-align: center; }
         .empty-state .empty-icon { font-size: 28px; margin-bottom: 8px; opacity: 0.3; }
-        .empty-state p { font-family: 'Poppins', sans-serif; font-size: 12px; color: var(--hm-text-muted); line-height: 1.5; }
+        .empty-state p { font-family: 'Inter', sans-serif; font-size: 12px; color: var(--hm-text-muted); line-height: 1.5; }
         @keyframes fadeInRow { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: translateX(0); } }
         .holding-row { animation: fadeInRow 0.3s ease forwards; opacity: 0; }
     </style>
@@ -62,7 +62,7 @@
             <div class="header-top">
                 <img class="pfp" id="pfp" alt="" onerror="this.style.display='none'">
                 <div class="header-info">
-                    <div class="username" id="username">—</div>
+                    <div class="username" id="username">--</div>
                     <div class="portfolio-label">Portfolio</div>
                 </div>
             </div>
@@ -86,7 +86,6 @@
 
         <div class="holdings" id="holdings">
             <div class="empty-state">
-                <div class="empty-icon">📊</div>
                 <p>No holdings yet</p>
             </div>
         </div>
@@ -106,7 +105,7 @@
             </div>
             <div class="footer-stat">
                 <div class="footer-stat-label">Best God</div>
-                <div class="footer-stat-value" id="bestGod">—</div>
+                <div class="footer-stat-value" id="bestGod">--</div>
             </div>
         </div>
     </div>
@@ -197,7 +196,7 @@
             // Render holdings
             const holdingsContainer = document.getElementById('holdings');
             if (!data.holdings || data.holdings.length === 0) {
-                holdingsContainer.innerHTML = '<div class="empty-state"><div class="empty-icon">📊</div><p>No holdings yet</p></div>';
+                holdingsContainer.innerHTML = '<div class="empty-state"><p>No holdings yet</p></div>';
             } else {
                 holdingsContainer.innerHTML = '';
                 data.holdings.forEach((holding, index) => {
@@ -268,7 +267,7 @@
                 );
                 document.getElementById('bestGod').textContent = bestGod.god_name;
             } else {
-                document.getElementById('bestGod').textContent = '—';
+                document.getElementById('bestGod').textContent = '--';
             }
         }
 

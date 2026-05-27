@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Hatmas Market — Trade Feed</title>
+<title>Hatmas Market: Trade Feed</title>
 <link rel="stylesheet" href="hatmas_theme.css">
 <style>
   body {
@@ -204,10 +204,10 @@ function renderTrade(t) {
     text = `<span class="user">${t.user}</span> <span class="action-sell">sold</span> <span class="amount">${formatAmount(t.amount)}</span> of <span class="god">${t.god}</span>`;
   } else if (t.type === 'dividend') {
     cls += ' dividend';
-    text = `<span class="dividend-label">Dividend</span> — <span class="god">${t.god}</span> paid <span class="amount">${formatAmount(t.amount)}</span> to <span class="amount">${t.holders}</span> holders`;
+    text = `<span class="dividend-label">Dividend:</span> <span class="god">${t.god}</span> paid <span class="amount">${formatAmount(t.amount)}</span> to <span class="amount">${t.holders}</span> holders`;
   } else if (t.type === 'free') {
     cls += ' free-share';
-    text = `<span class="free-label">Free share</span> — <span class="god">${t.god}</span> distributed to <span class="amount">${t.viewers}</span> viewers`;
+    text = `<span class="free-label">Free share:</span> <span class="god">${t.god}</span> distributed to <span class="amount">${t.viewers}</span> viewers`;
   }
 
   return `<div class="${cls}">${icon}<div class="trade-text">${text}</div><span class="trade-time">${t.time}</span></div>`;

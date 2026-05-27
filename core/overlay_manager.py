@@ -26,7 +26,29 @@ class OverlayManager:
         self._send_lock = asyncio.Lock()  # Serialize all WebSocket sends
         self.rules: Dict[str, Any] = {}
 
+        # Generic event listeners — receive every emit() call regardless
+        # of overlay_rules.json. Used by the public webserver (port 8070)
+        # to forward god_stock_update / dividend_paid events to YouTube
+        # portfolio page WebSocket clients.
+        self._event_listeners: list = []
+
         self.reload_rules()
+
+    def add_event_listener(self, callback) -> None:
+        """Register a callback that fires for every emit(event, data).
+
+        Callback signature: `async def callback(event_name: str, data)`.
+        Listeners are called sequentially after the rules engine runs.
+        Exceptions inside listeners are caught and logged so one bad
+        listener can't break others.
+        """
+        if callback not in self._event_listeners:
+            self._event_listeners.append(callback)
+
+    def remove_event_listener(self, callback) -> None:
+        """Unregister a listener. No-op if not registered."""
+        if callback in self._event_listeners:
+            self._event_listeners.remove(callback)
 
     def reload_rules(self) -> None:
         """Reload rules from the JSON config file."""
@@ -205,6 +227,14 @@ class OverlayManager:
             event_name: Name of the event
             data: Optional data associated with the event
         """
+        # Fan out to generic listeners first (public webserver, etc.).
+        # Errors in one listener don't affect the rules engine or others.
+        for listener in list(self._event_listeners):
+            try:
+                await listener(event_name, data)
+            except Exception as e:
+                print(f"[Overlay] event listener error on {event_name}: {e}")
+
         for overlay_name, overlay_config in self.rules.items():
             # Check show_on triggers
             show_on = overlay_config.get("show_on", [])

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Hatmas Market — Ticker v2</title>
+<title>Hatmas Market: Ticker v2</title>
 <link rel="stylesheet" href="hatmas_theme.css">
 <style>
   body {
@@ -207,7 +207,7 @@ function render() {
     gods.forEach(g => {
       const cls = g.change > 0 ? 'up' : g.change < 0 ? 'down' : 'flat';
       const arrow = g.change > 0 ? '+' : '';
-      const changeStr = g.change === 0 ? '—' : `${arrow}${g.change.toFixed(1)}%`;
+      const changeStr = g.change === 0 ? '0.0%' : `${arrow}${g.change.toFixed(1)}%`;
       const spark = sparkline(g.trend, g.change >= 0);
       html += `
         <div class="item ${g.active ? 'active' : ''}">

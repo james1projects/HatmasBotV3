@@ -99,8 +99,13 @@ async def run_tests():
     mock_miu.set_balance("viewer2", 5000)
     mock_miu.set_balance("viewer3", 8000)
 
-    # Initialize database (skip MixItUp connection)
-    await economy._init_db()
+    # Initialize database. setup() registered _init_schema as a
+    # callback on core.db; init_db() will run it and create the
+    # tables. After that economy._db is populated by the callback.
+    from core import db as shared_db
+    await shared_db.init_db()
+    if economy._db is None:
+        economy._db = await shared_db.get_db()
     await economy._load_prices()
     await economy._build_god_name_index()
     economy._connected = True  # Pretend MixItUp is connected
@@ -115,6 +120,11 @@ async def run_tests():
 
     economy._get_balance = mock_get_balance
     economy._adjust_balance = mock_adjust_balance
+
+    # Airtight-economy gate: side-effects (dividend, free shares, etc.)
+    # check `_is_broadcaster_live()`. Force True for this offline test
+    # harness so the simulated matches exercise the full pipeline.
+    economy._sim_force_live = True
 
     print("✅ Database initialized")
     print()
@@ -188,10 +198,18 @@ async def run_tests():
     ymir_price_before = economy._prices["Ymir"]
     print(f"  Price before match: {ymir_price_before:.0f}")
 
-    await economy.on_god_detected({"name": "Ymir"})
+    # Authoritative match-start signal (replaces the old on_god_detected
+    # path). Pays the 5% dividend since _sim_force_live is True above.
+    await economy.on_match_confirmed({
+        "match_id": "test_001",
+        "god": "Ymir",
+        "team": "Order",
+    })
     print(f"  Dividend paid ✓")
 
-    # Simulate live KDA events
+    # Simulate live KDA events. NOTE: post airtight-economy pass these
+    # are COSMETIC only — they animate overlays but do not mutate
+    # economy._prices. So `live_price` below will equal the start price.
     for i in range(8):
         await economy.on_kill("player_kill")
     for i in range(2):
@@ -200,18 +218,26 @@ async def run_tests():
         await economy.on_assist()
 
     live_price = economy._prices["Ymir"]
-    print(f"  Price after live ticks (8K/2D/6A): {live_price:.1f}")
+    print(f"  Persisted price after cosmetic ticks (8K/2D/6A): "
+          f"{live_price:.1f}  (expected: equal to pre-match price)")
 
-    # Match ends
+    # Match ends — clears cosmetic state
     await economy.on_match_end({"match_id": "test_001", "god": {"name": "Ymir"}})
 
-    # Result: WIN
-    await economy.on_match_result({
-        "outcome": "win",
-        "god": "Ymir",
-        "stats": {"kills": 8, "deaths": 2, "assists": 6},
-        "record": "1-0",
-    })
+    # Result: WIN. The live bot's on_match_result triggers a tracker.gg
+    # backfill cycle, but this harness has no smite plugin, so we drive
+    # settle_match() directly with the simulated outcome (same code path
+    # the real backfill uses).
+    await economy.settle_match(
+        match_id="test_001",
+        god_name="Ymir",
+        outcome="win",
+        kills=8,
+        deaths=2,
+        assists=6,
+        source="test",
+        match_start_price=ymir_price_before,
+    )
 
     final_price = economy._prices["Ymir"]
     change_pct = ((final_price - ymir_price_before) / ymir_price_before) * 100
@@ -227,24 +253,33 @@ async def run_tests():
     loki_price_before = economy._prices["Loki"]
     print(f"  Price before match: {loki_price_before:.0f}")
 
-    await economy.on_god_detected({"name": "Loki"})
+    await economy.on_match_confirmed({
+        "match_id": "test_002",
+        "god": "Loki",
+        "team": "Chaos",
+    })
 
-    # Simulate live KDA
+    # Cosmetic ticks (no persisted price change)
     await economy.on_kill("player_kill")  # 1 kill
     for i in range(10):
         await economy.on_death()
     await economy.on_assist()  # 1 assist
 
     live_price = economy._prices["Loki"]
-    print(f"  Price after live ticks (1K/10D/1A): {live_price:.1f}")
+    print(f"  Persisted price after cosmetic ticks (1K/10D/1A): "
+          f"{live_price:.1f}  (expected: equal to pre-match price)")
 
     await economy.on_match_end({"match_id": "test_002", "god": {"name": "Loki"}})
-    await economy.on_match_result({
-        "outcome": "loss",
-        "god": "Loki",
-        "stats": {"kills": 1, "deaths": 10, "assists": 1},
-        "record": "1-1",
-    })
+    await economy.settle_match(
+        match_id="test_002",
+        god_name="Loki",
+        outcome="loss",
+        kills=1,
+        deaths=10,
+        assists=1,
+        source="test",
+        match_start_price=loki_price_before,
+    )
 
     final_price = economy._prices["Loki"]
     change_pct = ((final_price - loki_price_before) / loki_price_before) * 100

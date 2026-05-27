@@ -1,0 +1,72 @@
+{
+  "fixture_version": 1,
+  "image": "atlas_2_0_2_vod_end_of_clip.png",
+  "source": "recordings/Atlas/Atlas-58.mp4 last frame @ 044.4s",
+  "captured": "2026-05-27",
+  "context": {
+    "god": "Atlas",
+    "mode": "VOD end-of-clip frame (AV1, 1080p60)",
+    "resolution": [
+      1920,
+      1080
+    ],
+    "notes": "Last frame of recordings/Atlas/Atlas-58.mp4. KDA=2/0/2 \u2014 single-digit mix that exercises the reader's per-component template matching across non-zero K, zero D, non-zero A. Same end-of-clip blind-spot family as atlas_1_1_0_vod_end_of_clip."
+  },
+  "expected": {
+    "kda": [
+      2,
+      0,
+      2
+    ],
+    "failure_reason": null,
+    "groups": [
+      {
+        "label": "K",
+        "concatenated": "2",
+        "digit_count": 1,
+        "digits": [
+          {
+            "best": "2",
+            "verdict": "accepted",
+            "method": "template",
+            "max_distance": 0.13,
+            "min_margin": 0.11
+          }
+        ]
+      },
+      {
+        "label": "D",
+        "concatenated": "0",
+        "digit_count": 1,
+        "digits": [
+          {
+            "best": "0",
+            "verdict": "accepted",
+            "method": "template",
+            "max_distance": 0.13,
+            "min_margin": 0.24
+          }
+        ]
+      },
+      {
+        "label": "A",
+        "concatenated": "2",
+        "digit_count": 1,
+        "digits": [
+          {
+            "best": "2",
+            "verdict": "accepted",
+            "method": "template",
+            "max_distance": 0.15,
+            "min_margin": 0.08
+          }
+        ]
+      }
+    ]
+  },
+  "tolerance": {
+    "max_distance_slack": 0.05,
+    "min_margin_slack": 0.05,
+    "notes": "Same slack budget as other fixtures - kda tuple must be exact, distance/margin numbers within slack."
+  }
+}

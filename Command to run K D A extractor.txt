@@ -1,0 +1,5 @@
+python tools/extract_events.py "C:\Users\james\Videos\test" --include deaths --hwaccel cuda
+
+
+For processing videos:
+python tools\process_recordings.py --hwaccel none -v

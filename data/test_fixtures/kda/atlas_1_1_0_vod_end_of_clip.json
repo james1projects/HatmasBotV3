@@ -1,0 +1,72 @@
+{
+  "fixture_version": 1,
+  "image": "atlas_1_1_0_vod_end_of_clip.png",
+  "source": "recordings/Atlas/Atlas-6.mp4 last frame @ 042.9s",
+  "captured": "2026-05-27",
+  "context": {
+    "god": "Atlas",
+    "mode": "VOD end-of-clip frame (AV1, 1080p60)",
+    "resolution": [
+      1920,
+      1080
+    ],
+    "notes": "Last frame of recordings/Atlas/Atlas-6.mp4 (43.4s clip). KDA=1/1/0 here, but the detector's coarse scan stops at t=40 \u2014 so the 1-kill event that happens in (40, 42.9] was never sampled before the end-of-clip fix. This fixture is the canary for the 'short-clip end-blind-spot' regression: the reader has always read it correctly, but the detector path was the bug. Keeping it in the suite locks in reader behavior on a post-event end-frame at minimal KDA values."
+  },
+  "expected": {
+    "kda": [
+      1,
+      1,
+      0
+    ],
+    "failure_reason": null,
+    "groups": [
+      {
+        "label": "K",
+        "concatenated": "1",
+        "digit_count": 1,
+        "digits": [
+          {
+            "best": "1",
+            "verdict": "accepted",
+            "method": "template",
+            "max_distance": 0.13,
+            "min_margin": 0.09
+          }
+        ]
+      },
+      {
+        "label": "D",
+        "concatenated": "1",
+        "digit_count": 1,
+        "digits": [
+          {
+            "best": "1",
+            "verdict": "accepted",
+            "method": "template",
+            "max_distance": 0.2,
+            "min_margin": 0.02
+          }
+        ]
+      },
+      {
+        "label": "A",
+        "concatenated": "0",
+        "digit_count": 1,
+        "digits": [
+          {
+            "best": "0",
+            "verdict": "accepted",
+            "method": "template",
+            "max_distance": 0.11,
+            "min_margin": 0.25
+          }
+        ]
+      }
+    ]
+  },
+  "tolerance": {
+    "max_distance_slack": 0.05,
+    "min_margin_slack": 0.05,
+    "notes": "Same slack budget as other fixtures - kda tuple must be exact, distance/margin numbers within slack."
+  }
+}

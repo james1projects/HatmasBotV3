@@ -18,7 +18,9 @@ sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
 
 from core.bot import HatmasBot
 from core.webserver import WebServer
+from core.public_webserver import PublicWebServer
 from core.token_manager import TokenManager
+from core import db as shared_db
 from core.config import (
     TWITCH_BOT_TOKEN, TWITCH_BOT_REFRESH_TOKEN,
     TWITCH_BROADCASTER_TOKEN, TWITCH_BROADCASTER_REFRESH_TOKEN,
@@ -36,13 +38,18 @@ from plugins.killdetector import KillDeathDetector
 from plugins.voicelines import VoiceLinePlugin
 from plugins.deathcounter import DeathCounterPlugin
 from plugins.economy import EconomyPlugin
+from plugins.youtube_rewards import YouTubeRewardsPlugin
+from plugins.stream_status import StreamStatusPlugin
+from plugins.youtube_live_badge import YouTubeLiveBadgePlugin
+from plugins.backup_manager import BackupManagerPlugin
+from plugins.god_pool import GodPoolPlugin
 
 
 async def main():
     print("=" * 50)
-    print("  HatmasBot v2.0")
+    print("  HatmasBot v2.5")
     print("  Built by Hatmaster & Claude")
-    print("  April 2026")
+    print("  May 2026")
     print("=" * 50)
     print()
 
@@ -76,22 +83,25 @@ async def main():
     death_counter = DeathCounterPlugin()
     bot.register_plugin("deathcounter", death_counter)
 
-    # Kill/death detector — hooks into smite match state
+    # Kill/death detector — uses listener registration (add_*_listener).
+    # Multiple plugins can subscribe to the same event without
+    # monkey-patching each other's callbacks.
     kd = KillDeathDetector(debug=False)
 
-    async def on_kill(kill_type):
+    # Webserver/death-counter listeners — overlay events + daily death tally
+    async def _overlay_on_kill(kill_type, count=1):
         web.trigger_kill_event("kill", kill_type)
 
-    async def on_multikill(kill_type):
+    async def _overlay_on_multikill(kill_type):
         web.trigger_kill_event("kill", kill_type)
 
-    async def on_death():
+    async def _overlay_on_death(count=1):
         web.trigger_kill_event("death")
         death_counter.increment()
 
-    kd.on_kill = on_kill
-    kd.on_multikill = on_multikill
-    kd.on_death = on_death
+    kd.add_kill_listener(_overlay_on_kill)
+    kd.add_multikill_listener(_overlay_on_multikill)
+    kd.add_death_listener(_overlay_on_death)
     bot.register_plugin("killdetector", kd)
 
     # Voice line plugin — channel point redemptions for god voice lines
@@ -118,14 +128,14 @@ async def main():
             await smite_plugin.set_god_from_portrait(god_name)
             vl.set_current_god(god_name)
 
-        kd.on_god_identified = _on_god_identified
+        kd.add_god_identified_listener(_on_god_identified)
 
         # Hook kill detector gameplay-end detection — clears god portrait
         # immediately instead of waiting for tracker.gg API to catch up.
         async def _kd_gameplay_ended():
             await smite_plugin.force_end_match()
 
-        kd.on_gameplay_ended = _kd_gameplay_ended
+        kd.add_gameplay_ended_listener(_kd_gameplay_ended)
 
         # Also hook into god detection from tracker.gg (backup path)
         async def _on_god_detected_vl(god_info):
@@ -145,38 +155,90 @@ async def main():
     bot.register_plugin("economy", economy)
 
     if smite_plugin:
-        # Dividend payout on god detection
-        smite_plugin.on_god_detected(economy.on_god_detected)
+        # Visual god-detection signal (portrait matcher OR tracker.gg).
+        # Arms the economy's cosmetic state so the live match overlay
+        # appears and KDA ticks animate even in jungle practice /
+        # custom games. Does NOT pay dividends or settle anything -
+        # that's gated separately on tracker.gg confirmation.
+        smite_plugin.on_god_detected(economy.on_god_detected_visual)
 
-        # Stop live ticking on match end
+        # Authoritative match-start signal (tracker.gg-verified, real
+        # match_id). The economy fires its 5% start dividend and
+        # promotes visual state to authoritative from here. Portrait-only
+        # detections never reach this callback.
+        smite_plugin.on_match_confirmed(economy.on_match_confirmed)
+
+        # Stop cosmetic ticking on match end
         smite_plugin.on_match_end(economy.on_match_end)
 
-        # Final price settlement on win/loss determination
+        # Broadcaster resolved the Twitch prediction → economy kicks an
+        # immediate backfill cycle to settle the match using tracker.gg's
+        # canonical KDA. If tracker.gg already has the listing, settlement
+        # fires now; otherwise the 5-min scheduled backfill catches it.
         smite_plugin.on_match_result(economy.on_match_result)
 
-    # Hook economy into kill detector for live price ticks
-    _original_on_kill = kd.on_kill
-    _original_on_death = kd.on_death
-
-    async def _economy_on_kill(kill_type, count=1):
-        if _original_on_kill:
-            await _original_on_kill(kill_type, count)
-        await economy.on_kill(kill_type, count)
-
-    async def _economy_on_death(count=1):
-        if _original_on_death:
-            await _original_on_death(count)
-        await economy.on_death(count)
-
-    async def _economy_on_assist(count=1):
-        await economy.on_assist(count)
-
-    kd.on_kill = _economy_on_kill
-    kd.on_death = _economy_on_death
-    kd.on_assist = _economy_on_assist
+    # Hook economy into kill detector for COSMETIC price ticks. The
+    # ticking handlers in plugins/economy/ticking.py never mutate the
+    # persisted price — they only animate the overlays. They DO fire
+    # in jungle practice (gated on _match_god, set by visual detection),
+    # but every tick stays in memory only. The DB never moves until
+    # tracker.gg-verified settlement.
+    kd.add_kill_listener(economy.on_kill)
+    kd.add_death_listener(economy.on_death)
+    kd.add_assist_listener(economy.on_assist)
 
     # Register economy API routes on webserver
     economy.register_api_routes(web.app)
+
+    # ── YouTube Rewards (commenter portfolios) ──
+    # Periodic scanner that awards shares to YouTube commenters on the
+    # most recent uploads. No-op until YOUTUBE_API_KEY and
+    # YOUTUBE_CHANNEL_ID are filled in config_local.py. Registered after
+    # economy so the YouTube plugin can rely on the youtube_* tables
+    # being created (economy._init_db owns the schema).
+    bot.register_plugin("youtube_rewards", YouTubeRewardsPlugin())
+
+    # ── Twitch live-status poller ──
+    # Polls /helix/streams every 60s; emits stream_live / stream_offline
+    # events that the public webserver caches and serves via
+    # /api/stream-status. Drives the Twitch embed on hatmaster.tv —
+    # the player iframe shows up only while the stream is actually live.
+    stream_status = StreamStatusPlugin(token_manager=token_mgr,
+                                        web_server=web)
+    bot.register_plugin("stream_status", stream_status)
+
+    # ── YouTube LIVE thumbnail badge automation ──
+    # Listens for stream_live / stream_offline events from StreamStatusPlugin.
+    # On live: shells out to tools/youtube_live_badge.py apply, which slaps
+    # a "LIVE" badge on the last 8 YouTube thumbnails. On offline: revert.
+    # Cached originals at data/youtube_thumbnails/<id>.png. State at
+    # data/live_badge_state.json. Toggle via dashboard feature: youtube_live_badge.
+    bot.register_plugin("youtube_live_badge", YouTubeLiveBadgePlugin())
+
+    # ── Daily economy.db backup ──
+    # Periodic gzipped snapshots of economy.db to data/backups/.
+    # Auto-rotates so storage stays bounded. Configurable via
+    # BACKUP_INTERVAL_HOURS / BACKUP_RETENTION_DAYS in config.
+    bot.register_plugin("backup_manager", BackupManagerPlugin())
+
+    # ── Viewer-driven god voting ──
+    # Adds !nominate / !pool / !spin / !poolclear chat commands and
+    # exposes the current pool via /api/community for the website.
+    bot.register_plugin("god_pool", GodPoolPlugin())
+
+    # ── Open the shared aiosqlite connection ──
+    # Plugin setup() calls (above) queued their schema callbacks via
+    # core.db.register_schema(). init_db() now opens the connection
+    # to data/economy.db, sets PRAGMAs (WAL, foreign_keys), and runs
+    # those callbacks in registration order. After this returns,
+    # every consumer (economy, god_pool, youtube_rewards, public
+    # webserver, dashboard webserver) shares one aiosqlite.Connection
+    # — no more per-plugin connection management.
+    #
+    # Returns None if aiosqlite isn't installed; in that case
+    # economy/god_pool/etc. on_ready will print "DB unavailable" and
+    # gracefully degrade.
+    await shared_db.init_db()
 
     # Start kill detector immediately — it scans always and uses
     # _is_gameplay_screen() to filter, so it works in jungle practice
@@ -186,6 +248,16 @@ async def main():
     # Start web server
     await web.start()
 
+    # ── Public read-only web server (port 8070) ──
+    # Serves the YouTube portfolio page at hatmaster.tv via a Cloudflare
+    # Tunnel. Bound to 127.0.0.1 only — Cloudflare reaches it through
+    # cloudflared running locally; nothing on this port is exposed
+    # directly to the internet. Subscribes to web.overlay so live
+    # price ticks reach portfolio page WebSocket clients.
+    public_web = PublicWebServer(overlay_manager=web.overlay,
+                                  stream_status=stream_status)
+    await public_web.start()
+
     print("[HatmasBot] Starting...")
     print()
 
@@ -193,7 +265,15 @@ async def main():
     _shutdown_event = asyncio.Event()
 
     async def _shutdown():
-        """Run full cleanup: plugins → token manager → web server → logs."""
+        """Run full cleanup: plugins → token manager → web server →
+        shared DB → logs.
+
+        Order matters: every plugin.cleanup() must run BEFORE we close
+        the shared aiosqlite connection. Plugins clear their self._db
+        references during cleanup but don't close the connection
+        themselves (that's our job here). Likewise the public webserver
+        stops accepting requests before we close its DB handle.
+        """
         print("\n[HatmasBot] Shutting down...")
         for name, plugin in bot.plugins.items():
             if hasattr(plugin, "cleanup"):
@@ -203,7 +283,11 @@ async def main():
                 except Exception as e:
                     print(f"  - {name} cleanup error: {e}")
         await token_mgr.close()
+        await public_web.stop()
         await web.stop()
+        # Close the shared DB last — every plugin and the webserver
+        # have now released their references to it.
+        await shared_db.close_db()
 
         # Flush all log handlers so nothing is truncated
         import logging

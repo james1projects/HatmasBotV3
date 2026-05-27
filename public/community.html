@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#202C39">
+<title>Community: Hatmas Market</title>
+<meta name="description" content="God request queue and spin pool, voted live by Hatmaster's Twitch chat. Hatmas Market: a Smite 2 stock exchange.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Hatmas Market">
+<meta property="og:url" content="https://hatmaster.tv/community">
+<meta property="og:title" content="Community: Hatmas Market">
+<meta property="og:description" content="Vote on which gods Hatmaster plays next. Live from chat.">
+<meta property="og:image" content="https://hatmaster.tv/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Community: Hatmas Market">
+<meta name="twitter:description" content="Vote on which gods Hatmaster plays next. Live from chat.">
+<meta name="twitter:image" content="https://hatmaster.tv/og-image.png">
+<link rel="stylesheet" href="/theme.css">
+<style>
+  .wrap {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 24px 16px 60px;
+  }
+
+  .brand-band {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 1px solid var(--border);
+    padding: 8px 0 12px;
+    margin-bottom: 16px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--text-dim);
+  }
+  .brand-band a.left {
+    color: var(--accent);
+    font-weight: 700;
+  }
+
+  header {
+    text-align: center;
+    padding: 16px 0 24px;
+  }
+  header .kicker {
+    /* Inherits base from theme.css .kicker */
+    display: block;
+    margin-bottom: 12px;
+  }
+  header h1 {
+    margin: 0 0 8px;
+    font-size: 40px;
+    letter-spacing: -0.025em;
+    font-weight: 700;
+    line-height: 1.0;
+  }
+  header p {
+    margin: 0;
+    color: var(--text-dim);
+    font-size: 14px;
+    line-height: 1.55;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  @media (max-width: 760px) {
+    .grid { grid-template-columns: 1fr; }
+  }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+  }
+  .card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 8px;
+    margin-bottom: 10px;
+  }
+  .card-head .count {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.14em;
+  }
+
+  .queue-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    margin-bottom: 4px;
+  }
+  .queue-row .pos {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-fade);
+    width: 28px;
+  }
+  .queue-row .icon {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    flex-shrink: 0;
+  }
+  .queue-row .info { flex: 1; min-width: 0; }
+  .queue-row .god {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.2;
+  }
+  .queue-row .requester {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-top: 1px;
+  }
+  .queue-row .token {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    padding: 2px 5px;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    border-radius: 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    flex-shrink: 0;
+  }
+
+  /* ─── God pool ────────────────────────────────────────────────── */
+  .pool-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    margin-bottom: 4px;
+  }
+  .pool-row .icon {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    flex-shrink: 0;
+  }
+  .pool-row .info { flex: 1; min-width: 0; }
+  .pool-row .god {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.2;
+  }
+  .pool-row .added {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-top: 1px;
+  }
+  .pool-row .added .by { color: var(--accent); font-weight: 600; }
+  .pool-row .votes {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--accent);
+    font-weight: 700;
+    flex-shrink: 0;
+    background: rgba(255, 166, 87, 0.10);
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    border: 1px solid rgba(255, 166, 87, 0.35);
+  }
+  .pool-row .votes.heat-high {
+    background: rgba(255, 166, 87, 0.20);
+    border-color: var(--accent);
+  }
+
+  .empty {
+    text-align: center;
+    color: var(--text-fade);
+    padding: 24px 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+  }
+
+  .info-box {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 18px;
+    margin-bottom: 18px;
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
+  .info-box code {
+    background: var(--bg-2);
+    padding: 1px 6px;
+    border-radius: 3px;
+    color: var(--accent);
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+
+  /* ─── Pending YT nominations (mod-only) ─────────────────────── */
+  /* Hidden by default. The admin-detect JS unhides this only when
+     the localStorage admin token is present. */
+  .mod-card { display: none; margin-bottom: 18px; }
+  .mod-card.is-admin { display: block; }
+  .mod-card .card-head .mod-tag {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    padding: 2px 6px;
+    border: 1px solid var(--red);
+    color: var(--red);
+    border-radius: 2px;
+    letter-spacing: 0.12em;
+    margin-left: 8px;
+  }
+  .nom-row {
+    display: grid;
+    grid-template-columns: 28px 1fr auto;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    margin-bottom: 6px;
+  }
+  .nom-row .icon {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1px solid var(--border);
+    background: var(--bg);
+  }
+  .nom-row .info { min-width: 0; }
+  .nom-row .head-line {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .nom-row .god {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.2;
+  }
+  .nom-row .by {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .nom-row .by .name { color: var(--accent); font-weight: 600; }
+  .nom-row .snippet {
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.45;
+    margin-top: 4px;
+    overflow-wrap: anywhere;
+  }
+  .nom-row .video-link {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-fade);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-top: 4px;
+    display: inline-block;
+  }
+  .nom-row .video-link:hover { color: var(--accent); }
+  .nom-row .actions {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+  .nom-row button {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    padding: 6px 10px;
+    border-radius: var(--radius-sm);
+    border: 1px solid;
+    background: transparent;
+    cursor: pointer;
+    transition: background 0.1s, color 0.1s;
+    text-transform: uppercase;
+  }
+  .nom-row button.approve {
+    color: var(--green);
+    border-color: var(--green);
+  }
+  .nom-row button.approve:hover {
+    background: var(--green-bg);
+  }
+  .nom-row button.reject {
+    color: var(--red);
+    border-color: var(--red);
+  }
+  .nom-row button.reject:hover {
+    background: var(--red-bg);
+  }
+  .nom-row button[disabled] {
+    opacity: 0.4;
+    cursor: wait;
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand-band">
+      <a class="left" href="/">// HATMASTER.TV</a>
+      <div>COMMUNITY</div>
+    </div>
+
+    <header>
+      <div class="kicker">// COMMUNITY</div>
+      <h1>Voted by chat</h1>
+      <p>God requests, the spin pool, and your daily nominations. All live from chat.</p>
+    </header>
+
+    <div class="info-box">
+      Both pulled live from chat.
+      <code>!godrequest &lt;god&gt;</code> on Twitch (costs 1 God Token)
+      adds to the priority queue.
+      <code>!nominate &lt;god&gt;</code> adds to the spin pool, once per
+      viewer per day. Hatmaster runs <code>!spin</code> to randomly pick
+      one (weighted by votes).
+    </div>
+
+    <div class="card mod-card" id="mod-card">
+      <div class="card-head">
+        <div class="section-title">
+          YouTube nomination queue
+          <span class="mod-tag">MOD</span>
+        </div>
+        <div class="count" id="nom-count">--</div>
+      </div>
+      <div id="nominations"></div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <div class="card-head">
+          <div class="section-title">God request queue</div>
+          <div class="count" id="queue-count">--</div>
+        </div>
+        <div id="queue"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div class="section-title">Spin pool</div>
+          <div class="count" id="pool-count">--</div>
+        </div>
+        <div id="pool"></div>
+      </div>
+    </div>
+
+    <div class="footer-brand">
+      <div class="footer-build">
+        <span class="dot"></span><span id="last-ping">DATA · &lt;1s</span> &nbsp;·&nbsp; HATMASBOT v2.5
+      </div>
+      <div>Made by <a href="https://twitch.tv/hatmaster" target="_blank">Hatmaster</a> &amp; Claude</div>
+    </div>
+  </div>
+
+<script>
+  const $queue = document.getElementById('queue');
+  const $queueCount = document.getElementById('queue-count');
+  const $pool = document.getElementById('pool');
+  const $poolCount = document.getElementById('pool-count');
+
+  // Same icon-style toggle the other pages support, applied to the
+  // small portraits next to each god-queue row.
+  const ICON_PREF_KEY = 'hatmas:icon-style';
+  function getIconStyle() {
+    return localStorage.getItem(ICON_PREF_KEY) || 'custom';
+  }
+  function iconUrl(name) {
+    const slug = String(name || '').toLowerCase()
+                                    .replace(/\s+/g, '-')
+                                    .replace(/'/g, '');
+    const route = getIconStyle() === 'custom'
+                    ? '/custom-god-icon/' : '/god-icon/';
+    return route + encodeURIComponent(slug);
+  }
+
+  // Footer "last data" tick. Bumped from any successful poll so the
+  // user sees fresh-data signal in the footer build tag.
+  let _lastPingMs = Date.now();
+  function bumpPing() { _lastPingMs = Date.now(); updatePingLabel(); }
+  function updatePingLabel() {
+    const el = document.getElementById('last-ping');
+    if (!el) return;
+    const ago = Math.floor((Date.now() - _lastPingMs) / 1000);
+    if (ago < 2)       el.textContent = 'DATA · <1s';
+    else if (ago < 60) el.textContent = 'DATA · ' + ago + 's';
+    else               el.textContent = 'DATA · ' + Math.floor(ago / 60) + 'm';
+  }
+  setInterval(updatePingLabel, 1000);
+
+  async function refresh() {
+    try {
+      const r = await fetch('/api/community');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      bumpPing();
+      renderQueue(data.god_queue || []);
+      renderPool(data.god_pool || []);
+    } catch (err) {
+      $queue.innerHTML = '<div class="empty">Couldn\'t load queue</div>';
+      $pool.innerHTML = '<div class="empty">Couldn\'t load pool</div>';
+    }
+  }
+  function renderQueue(items) {
+    $queueCount.textContent = items.length + (items.length === 1 ? ' GOD' : ' GODS');
+    if (!items.length) {
+      $queue.innerHTML = '<div class="empty">Queue empty · spend a god token in chat with !godrequest &lt;god&gt;</div>';
+      return;
+    }
+    $queue.innerHTML = '';
+    for (const it of items) {
+      const row = document.createElement('div');
+      row.className = 'queue-row';
+      const tokenBadge = it.token_spent ? '<div class="token">TOKEN</div>' : '';
+      // Spin entries store an empty requester so they render as just
+      // the god name. Paid / manual entries show "<requester>".
+      const reqLine = it.requester
+        ? `  <div class="requester">${escapeHtml(it.requester)}</div>`
+        : '';
+      row.innerHTML =
+        `<div class="pos">#${String(it.position).padStart(2, '0')}</div>` +
+        `<img class="icon" src="${iconUrl(it.god)}" alt="" loading="lazy" ` +
+        `     onerror="this.style.opacity=0.3">` +
+        `<div class="info">` +
+        `  <div class="god">${escapeHtml(it.god || '?')}</div>` +
+        reqLine +
+        `</div>` + tokenBadge;
+      $queue.appendChild(row);
+    }
+  }
+  function renderPool(items) {
+    $poolCount.textContent = items.length +
+      (items.length === 1 ? ' GOD' : ' GODS');
+    if (!items.length) {
+      $pool.innerHTML =
+        '<div class="empty">Pool empty · nominate a god with !nominate &lt;god&gt;</div>';
+      return;
+    }
+    // Highest vote in the list lights up the heat color treatment.
+    const maxVotes = items.reduce(
+      (m, it) => Math.max(m, it.vote_count || 0), 0);
+    $pool.innerHTML = '';
+    for (const it of items) {
+      const row = document.createElement('div');
+      row.className = 'pool-row';
+      const heatCls = (it.vote_count >= 3 || it.vote_count === maxVotes && maxVotes >= 2)
+                        ? 'heat-high' : '';
+      row.innerHTML =
+        `<img class="icon" src="${iconUrl(it.god)}" alt="" loading="lazy" ` +
+        `     onerror="this.style.opacity=0.3">` +
+        `<div class="info">` +
+        `  <div class="god">${escapeHtml(it.god || '?')}</div>` +
+        `  <div class="added">first by ` +
+        `    <span class="by">${escapeHtml(it.added_by || '?')}</span></div>` +
+        `</div>` +
+        `<div class="votes ${heatCls}">${it.vote_count || 1}` +
+        `${it.vote_count === 1 ? ' vote' : ' votes'}</div>`;
+      $pool.appendChild(row);
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[c]);
+  }
+  function relativeTime(iso) {
+    if (!iso) return '--';
+    const t = Date.parse(iso);
+    if (isNaN(t)) return iso;
+    const diff = Date.now() - t;
+    const sec = Math.floor(diff / 1000);
+    if (sec < 60) return 'just now';
+    if (sec < 3600) return Math.floor(sec / 60) + 'm ago';
+    if (sec < 86400) return Math.floor(sec / 3600) + 'h ago';
+    return Math.floor(sec / 86400) + 'd ago';
+  }
+
+  refresh();
+  setInterval(refresh, 30 * 1000);
+
+  // ─── admin / mod nomination queue ────────────────────────────────
+  // Gated to direct loopback only — the mod card appears (and the
+  // approve/reject endpoints respond) only when the page is loaded
+  // from http://localhost:8070 on the host machine. Tunneled
+  // requests via Cloudflare are rejected server-side regardless,
+  // but we also skip the polling entirely here so the page doesn't
+  // hammer 401s when accessed publicly.
+
+  function isLocalHost() {
+    return location.hostname === 'localhost' ||
+           location.hostname === '127.0.0.1' ||
+           location.hostname === '::1';
+  }
+
+  const $modCard = document.getElementById('mod-card');
+  const $nominations = document.getElementById('nominations');
+  const $nomCount = document.getElementById('nom-count');
+
+  async function refreshNominations() {
+    if (!isLocalHost()) {
+      $modCard.classList.remove('is-admin');
+      return;
+    }
+    try {
+      const r = await fetch('/api/community/pending-nominations');
+      if (r.status === 401) {
+        // Server-side gate disagrees — likely a tunneled connection
+        // we somehow didn't catch client-side. Hide the card.
+        $modCard.classList.remove('is-admin');
+        return;
+      }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      $modCard.classList.add('is-admin');
+      renderNominations(data.pending || []);
+    } catch (err) {
+      $nominations.innerHTML =
+        '<div class="empty">Couldn\'t load nominations</div>';
+    }
+  }
+
+  function renderNominations(items) {
+    $nomCount.textContent = items.length +
+      (items.length === 1 ? ' PENDING' : ' PENDING');
+    if (!items.length) {
+      $nominations.innerHTML =
+        '<div class="empty">Queue empty. Comments are clean.</div>';
+      return;
+    }
+    $nominations.innerHTML = '';
+    for (const it of items) {
+      const row = document.createElement('div');
+      row.className = 'nom-row';
+      const ytUrl = 'https://www.youtube.com/watch?v=' +
+                    encodeURIComponent(it.video_id) +
+                    '&lc=' + encodeURIComponent(it.comment_id);
+      row.innerHTML =
+        `<img class="icon" src="${iconUrl(it.god)}" alt="" loading="lazy" ` +
+        `     onerror="this.style.opacity=0.3">` +
+        `<div class="info">` +
+        `  <div class="head-line">` +
+        `    <span class="god">${escapeHtml(it.god)}</span>` +
+        `    <span class="by">by ` +
+        `      <span class="name">${escapeHtml(it.display_name)}</span></span>` +
+        `  </div>` +
+        `  <div class="snippet">"${escapeHtml(it.snippet || '')}"</div>` +
+        `  <a class="video-link" href="${ytUrl}" target="_blank" ` +
+        `     rel="noopener noreferrer">View comment ↗</a>` +
+        `</div>` +
+        `<div class="actions">` +
+        `  <button class="approve" data-id="${it.id}" data-action="approve">Approve</button>` +
+        `  <button class="reject"  data-id="${it.id}" data-action="reject">Reject</button>` +
+        `</div>`;
+      $nominations.appendChild(row);
+    }
+  }
+
+  $nominations.addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-action]');
+    if (!btn) return;
+    const id = btn.dataset.id;
+    const action = btn.dataset.action;
+    if (!isLocalHost()) return;
+
+    // Disable both buttons in this row while the request is in flight
+    // so a double-click can't double-approve.
+    const row = btn.closest('.nom-row');
+    row.querySelectorAll('button').forEach(b => b.disabled = true);
+
+    try {
+      const r = await fetch(
+        `/api/community/nominations/${encodeURIComponent(id)}/${action}`,
+        { method: 'POST' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      // Optimistic remove from the DOM; a full refresh below will
+      // re-render anyway, but this feels snappier.
+      row.remove();
+      // Re-fetch the pool too, since approve mutates god_pool.
+      refresh();
+      refreshNominations();
+    } catch (err) {
+      row.querySelectorAll('button').forEach(b => b.disabled = false);
+      alert('Action failed. Try again.');
+    }
+  });
+
+  refreshNominations();
+  setInterval(refreshNominations, 30 * 1000);
+</script>
+</body>
+</html>

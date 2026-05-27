@@ -1,0 +1,1874 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>HatmasBot: KDA + Portrait Detector</title>
+<style>
+  :root {
+    /* Hatmas brand palette (May 2026):
+       #202C39 Jet Black, #7D98A1 Cool Steel, #DF2935 Scarlet Rush,
+       #F5F3BB Lemon Chiffon, #DFA06E Light Bronze. Detector page
+       uses these directly so it stays visually consistent with
+       the rest of Hatmas Market. */
+    --bg: #202C39;                                /* Jet Black */
+    --bg-panel: #28344A;
+    --bg-panel-2: #2A3645;
+    --border: rgba(125, 152, 161, 0.22);          /* Cool Steel @ alpha */
+    --text: #FFFFFF;                              /* White — primary text */
+    --text-dim: rgba(125, 152, 161, 0.85);        /* Cool Steel */
+    --text-faint: rgba(125, 152, 161, 0.5);
+    --accent: #DFA06E;                            /* Light Bronze */
+    --green: #DFA06E;     /* "up" / accept — strict palette reuses Bronze */
+    --red: #DF2935;       /* Scarlet Rush */
+    --yellow: #F5F3BB;    /* warn — Lemon Chiffon */
+    --blue: #7D98A1;      /* info — Cool Steel */
+    --mono: 'Cascadia Code', 'Consolas', 'Menlo', monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI",
+      Roboto, sans-serif;
+    min-height: 100vh;
+  }
+  .wrap { max-width: 1400px; margin: 0 auto; padding: 14px 18px 40px; }
+
+  /* Header strip */
+  header {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+    padding: 10px 14px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 14px;
+  }
+  header h1 {
+    margin: 0; font-size: 14px; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--accent);
+  }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 10px;
+    background: var(--bg-panel-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-family: var(--mono); font-size: 11px;
+    color: var(--text-dim);
+  }
+  .pill.ok    { color: var(--green); border-color: rgba(86,211,100,0.4); }
+  .pill.warn  { color: var(--yellow); border-color: rgba(227,179,65,0.4); }
+  .pill.bad   { color: var(--red); border-color: rgba(244,112,103,0.4); }
+  .pill .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: currentColor;
+  }
+  .spacer { flex: 1; }
+  button {
+    background: var(--bg-panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 12px;
+    border-radius: 4px;
+    font: inherit; font-size: 12px;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button:active { transform: translateY(1px); }
+
+  /* Alert banner — surfaces serious detector problems above the fold
+     so the operator notices even if the second-monitor page is being
+     glanced at peripherally. */
+  .alert-banner {
+    padding: 10px 14px;
+    margin-bottom: 14px;
+    border-radius: 6px;
+    font-size: 13px; line-height: 1.4;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .alert-banner.warn {
+    /* Lemon Chiffon @ alpha for the "warn" variant */
+    background: rgba(245, 243, 187, 0.10);
+    border: 1px solid rgba(245, 243, 187, 0.45);
+    color: var(--yellow);
+  }
+  .alert-banner.bad {
+    /* Scarlet Rush @ alpha for the "bad" variant */
+    background: rgba(223, 41, 53, 0.12);
+    border: 1px solid rgba(223, 41, 53, 0.5);
+    color: var(--red);
+  }
+  .alert-banner strong { font-weight: 600; }
+
+  /* Panels */
+  .panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 14px;
+    margin-bottom: 14px;
+  }
+  .panel h2 {
+    margin: 0 0 10px;
+    font-size: 11px; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--text-dim);
+    font-weight: 600;
+  }
+
+  /* Full-frame viewer */
+  .frame-wrap {
+    position: relative;
+    background: #000;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .frame-wrap img { display: block; width: 100%; height: auto; }
+  .frame-empty {
+    padding: 60px; text-align: center; color: var(--text-faint);
+    font-family: var(--mono);
+  }
+  .legend {
+    display: flex; gap: 14px; flex-wrap: wrap;
+    margin-top: 8px; font-size: 11px;
+    color: var(--text-dim);
+    font-family: var(--mono);
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .legend i {
+    display: inline-block; width: 10px; height: 10px;
+    border: 2px solid; border-radius: 1px;
+  }
+  /* Match the box stroke style to the on-frame rendering:
+     primary regions (KDA, Portrait) draw with solid 3px lines,
+     secondary regions (HUD/Gameplay/Overlay checks) draw dashed 1px. */
+  .legend .lg-sec i { border-style: dashed; border-width: 1px; }
+  .legend .lg-sec   { color: var(--text-faint); }
+
+  /* Two-column detection panels */
+  .columns {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+    margin-bottom: 14px;
+  }
+  @media (max-width: 900px) { .columns { grid-template-columns: 1fr; } }
+
+  .crop-row {
+    display: flex; gap: 12px; align-items: flex-start;
+    margin-bottom: 12px;
+  }
+  .crop-img {
+    background: #000;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    image-rendering: pixelated;
+  }
+  .crop-img.portrait { width: 200px; height: 200px; }
+  .crop-img.kda { width: 280px; height: auto; }
+  .crop-empty {
+    width: 200px; height: 200px;
+    background: var(--bg-panel-2);
+    border: 1px dashed var(--border);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-faint); font-family: var(--mono); font-size: 10px;
+    border-radius: 3px;
+  }
+  .crop-info { flex: 1; min-width: 0; }
+  .crop-info dl {
+    margin: 0; display: grid;
+    grid-template-columns: max-content 1fr; gap: 4px 12px;
+    font-family: var(--mono); font-size: 12px;
+  }
+  .crop-info dt { color: var(--text-dim); white-space: nowrap; }
+  .crop-info dd {
+    margin: 0; color: var(--text);
+    /* Keep values like "0 / 0 / 0" on one line even when the panel
+       is narrow — the wrapping was the original "vertical zeros" bug. */
+    white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .crop-info dd.ok { color: var(--green); }
+  .crop-info dd.bad { color: var(--red); }
+  .crop-info dd.warn { color: var(--yellow); }
+
+  /* Top-N candidate list */
+  .topn {
+    margin-top: 10px;
+    font-family: var(--mono); font-size: 11px;
+    border-top: 1px solid var(--border); padding-top: 8px;
+  }
+  .topn-title {
+    color: var(--text-dim); margin-bottom: 4px;
+    text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px;
+  }
+  .topn-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 2px 0; gap: 8px;
+  }
+  .topn-row.win { color: var(--green); }
+  .topn-row.runner-up { color: var(--text-dim); }
+  .topn-row .topn-name { flex: 1; min-width: 0;
+                         overflow: hidden; text-overflow: ellipsis;
+                         white-space: nowrap; }
+  .topn-row .topn-score { font-variant-numeric: tabular-nums; }
+  /* Source badge — tiny pill showing which library produced the
+     winning score for this god. base = wiki/CDN art, overlay = your
+     Custom God Icons, reference = Portrait_Source captures. */
+  .source-tag {
+    display: inline-block;
+    padding: 0 5px; margin-right: 6px;
+    font-size: 9px; letter-spacing: 0.05em;
+    text-transform: uppercase;
+    border: 1px solid; border-radius: 2px;
+    opacity: 0.75;
+    font-variant-numeric: normal;
+    vertical-align: 1px;
+  }
+  .source-tag.base      { color: var(--text-dim); }
+  .source-tag.overlay   { color: var(--accent); }
+  .source-tag.reference { color: var(--blue); }
+
+  /* KDA per-digit table */
+  .digit-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--mono); font-size: 11px;
+    margin-top: 8px;
+  }
+  .digit-table th, .digit-table td {
+    padding: 4px 8px; text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  .digit-table th {
+    color: var(--text-dim); font-weight: 400;
+    text-transform: uppercase; font-size: 10px; letter-spacing: 0.08em;
+  }
+  .digit-table td.verdict.accepted { color: var(--green); }
+  .digit-table td.verdict.rejected_distance,
+  .digit-table td.verdict.rejected_margin,
+  .digit-table td.verdict.failed { color: var(--red); }
+  .digit-table td.verdict.tesseract_fallback { color: var(--yellow); }
+  /* Per-digit timing column — colors mirror perf bands:
+     ok=<5ms (template match), warn=5-30ms, bad=>30ms (Tesseract). */
+  .digit-table td.ok   { color: var(--green); }
+  .digit-table td.warn { color: var(--yellow); }
+  .digit-table td.bad  { color: var(--red); }
+
+  /* Binarization diagnostic — collapsed by default; click summary to
+     open. Shows per-method component tables side by side. */
+  .binarize-diag { margin-top: 10px; }
+  .binarize-diag summary {
+    cursor: pointer; padding: 6px 0;
+    font-family: var(--mono); font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: 0.08em;
+  }
+  .binarize-diag summary:hover { color: var(--accent); }
+  .binarize-diag .method-block {
+    margin-top: 8px;
+    padding: 8px 10px;
+    background: var(--bg-panel-2);
+    border-radius: 4px;
+  }
+  .binarize-diag .method-block .method-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-family: var(--mono); font-size: 11px;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+  }
+  .binarize-diag .method-block.chosen .method-head {
+    color: var(--accent);
+  }
+  .binarize-diag table {
+    width: 100%; border-collapse: collapse;
+    font-family: var(--mono); font-size: 10.5px;
+  }
+  .binarize-diag th, .binarize-diag td {
+    padding: 2px 6px; text-align: left;
+  }
+  .binarize-diag th {
+    color: var(--text-dim); font-weight: 400; font-size: 9.5px;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    border-bottom: 1px solid var(--border);
+  }
+  .binarize-diag td.cls-digit { color: var(--green); }
+  .binarize-diag td.cls-icon  { color: var(--text-dim); }
+  .binarize-diag td.cls-noise { color: var(--red); opacity: 0.7; }
+
+  /* K/D/A split visualisation. The binarised 8x strip gets wrapped in
+     a positioned container so colored bbox overlays can be drawn on
+     top showing where the gap-detector partitioned components into
+     K/D/A. Below it, three per-group crops are rendered (canvas-cut
+     client-side from the same binary image) so each digit's source
+     pixels are isolated for inspection. */
+  .kda-binary-wrap {
+    position: relative;
+    display: inline-block;
+    margin-top: 6px;
+  }
+  .kda-group-overlay {
+    position: absolute;
+    border: 2px solid;
+    border-radius: 2px;
+    pointer-events: none;
+    box-sizing: border-box;
+  }
+  .kda-group-overlay.K { border-color: #4dc3ff; }
+  .kda-group-overlay.D { border-color: #ff4d6d; }
+  .kda-group-overlay.A { border-color: #ffd24d; }
+  .kda-group-overlay::after {
+    content: attr(data-label);
+    position: absolute;
+    top: -15px; left: 0;
+    font: 700 10px var(--mono);
+    color: inherit;
+    text-shadow: 0 0 2px #000;
+  }
+
+  .kda-split-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 14px;
+  }
+  .kda-split-cell {
+    flex: 1;
+    background: var(--bg-panel-2);
+    border-radius: 4px;
+    padding: 6px;
+    text-align: center;
+    border-top: 2px solid transparent;
+  }
+  .kda-split-cell.K { border-top-color: #4dc3ff; }
+  .kda-split-cell.D { border-top-color: #ff4d6d; }
+  .kda-split-cell.A { border-top-color: #ffd24d; }
+  .kda-split-cell .label {
+    font: 700 10px var(--mono);
+    letter-spacing: 0.12em;
+    margin-bottom: 4px;
+    color: var(--text-dim);
+  }
+  .kda-split-cell.K .label { color: #4dc3ff; }
+  .kda-split-cell.D .label { color: #ff4d6d; }
+  .kda-split-cell.A .label { color: #ffd24d; }
+  .kda-split-cell .crop-box {
+    width: 100%;
+    height: 64px;
+    background: #000 no-repeat center / contain;
+    border-radius: 2px;
+    image-rendering: pixelated; /* binarised 8x — nearest-neighbour reads cleanest */
+  }
+  .kda-split-cell .crop-box img {
+    width: 100%; height: 100%;
+    object-fit: contain;
+    display: block;
+    image-rendering: pixelated;
+  }
+  .kda-split-cell .value {
+    margin-top: 4px;
+    font: 700 14px var(--mono);
+    color: var(--text);
+  }
+  .kda-split-cell.empty .value { color: var(--text-faint); }
+
+  /* Save-as-reference form on the portrait panel. Hidden when the
+     scanner is running (would race with the next screenshot) and only
+     enabled once the operator pauses scanning from the header. */
+  .save-ref-row {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+  }
+  .save-ref-hint {
+    font-family: var(--mono); font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .save-ref-form {
+    display: none;          /* shown by JS when paused */
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .save-ref-row.paused .save-ref-hint { display: none; }
+  .save-ref-row.paused .save-ref-form { display: flex; }
+  .save-ref-form label {
+    font-family: var(--mono); font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .save-ref-form input {
+    flex: 1;
+    min-width: 140px;
+    background: var(--bg-panel-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font: 13px var(--mono);
+    padding: 6px 8px;
+  }
+  .save-ref-form input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .save-ref-form button {
+    background: var(--accent);
+    color: #0e1420;
+    border: none;
+    border-radius: 4px;
+    font: 700 11px var(--mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 6px 12px;
+    cursor: pointer;
+  }
+  .save-ref-form button:hover { filter: brightness(1.1); }
+  .save-ref-form button:disabled {
+    opacity: 0.5; cursor: wait;
+  }
+
+  /* VOD-mode panels — progress bars + completed-files table. */
+  .vod-progress-bar {
+    width: 100%; height: 18px;
+    background: var(--bg-panel-2);
+    border: 1px solid var(--border);
+    border-radius: 9px; overflow: hidden;
+  }
+  .vod-progress-fill {
+    height: 100%;
+    background: var(--accent);
+    width: 0%;
+    transition: width 0.3s ease-out;
+  }
+  .vod-table {
+    width: 100%; border-collapse: collapse;
+    font-family: var(--mono); font-size: 12px;
+    margin-top: 4px;
+  }
+  .vod-table th, .vod-table td {
+    padding: 5px 8px; text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  .vod-table th {
+    color: var(--text-dim); font-weight: 400;
+    text-transform: uppercase; font-size: 10px; letter-spacing: 0.08em;
+  }
+  .vod-table td.status-moved { color: var(--green); }
+  .vod-table td.status-error { color: var(--red); }
+  .vod-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* Scene/match stats */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 8px 14px;
+    font-family: var(--mono); font-size: 12px;
+  }
+  .stats .stat { display: flex; justify-content: space-between; gap: 8px;
+                 padding: 2px 0; }
+  .stats .label { color: var(--text-dim); }
+  .stats .value { color: var(--text); }
+  .stats .value.ok { color: var(--green); }
+  .stats .value.bad { color: var(--red); }
+  .stats .value.warn { color: var(--yellow); }
+
+  /* Event log */
+  .events {
+    max-height: 420px; overflow-y: auto;
+    font-family: var(--mono); font-size: 11px;
+    background: var(--bg-panel-2);
+    border-radius: 4px;
+    padding: 8px 12px;
+  }
+  .ev {
+    display: grid;
+    grid-template-columns: 80px 80px 1fr;
+    gap: 10px;
+    padding: 2px 0;
+    border-bottom: 1px solid rgba(120, 140, 170, 0.08);
+  }
+  .ev:last-child { border-bottom: 0; }
+  .ev .ev-time { color: var(--text-faint); }
+  .ev .ev-level { color: var(--text-dim); text-transform: uppercase;
+                  font-size: 10px; letter-spacing: 0.06em; }
+  .ev.accept .ev-level { color: var(--green); }
+  .ev.reject .ev-level { color: var(--red); }
+  .ev.state  .ev-level { color: var(--blue); }
+  .ev.info   .ev-level { color: var(--text-dim); }
+  .ev .ev-msg { color: var(--text); }
+
+  /* KDA reader failure crops */
+  .vod-kda-failures {
+    max-height: 540px; overflow-y: auto;
+    background: var(--bg-panel-2);
+    border-radius: 4px;
+    padding: 8px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .kda-fail {
+    background: var(--bg-panel);
+    border: 1px solid rgba(120, 140, 170, 0.12);
+    border-radius: 4px;
+    padding: 8px 10px;
+  }
+  .kda-fail-head {
+    display: flex; gap: 12px; align-items: baseline;
+    font-family: var(--mono); font-size: 11px;
+    margin-bottom: 4px;
+  }
+  .kda-fail-time   { color: var(--text-faint); }
+  .kda-fail-reason { color: var(--red); font-weight: 600;
+                     text-transform: uppercase; letter-spacing: 0.04em; }
+  .kda-fail-ms     { color: var(--text-dim); margin-left: auto; }
+  .kda-fail-file   { color: var(--text-faint); font-size: 11px;
+                     font-family: var(--mono); margin-bottom: 6px;
+                     overflow: hidden; text-overflow: ellipsis;
+                     white-space: nowrap; }
+  .kda-fail-vt     { color: var(--accent); margin-left: 8px; }
+  .kda-fail-res    { color: var(--text-dim); margin-left: 8px;
+                     font-variant-numeric: tabular-nums; }
+  .kda-fail-row {
+    display: flex; gap: 12px; align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .kda-fail-col {
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .kda-fail-label {
+    font-size: 10px; color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .kda-fail-img {
+    background: #000;
+    border: 1px solid rgba(120, 140, 170, 0.18);
+    image-rendering: pixelated;
+    /* Raw crop is ~87x24 — scale up so it's actually readable. */
+    height: 56px;
+    width: auto;
+  }
+  .kda-fail-img-bin {
+    /* Binarised view is already 8x upscaled — cap height so it
+       doesn't dwarf the panel. */
+    height: 88px;
+  }
+  .kda-fail-empty {
+    color: var(--text-faint); font-size: 11px;
+    font-style: italic;
+    padding: 8px 12px;
+    border: 1px dashed rgba(120, 140, 170, 0.2);
+    border-radius: 3px;
+  }
+  /* Rejections look distinct from outright failures so the user can
+     scan-spot them — orange/yellow vs the red used for failures. */
+  .kda-fail-rej {
+    border-color: rgba(223, 160, 110, 0.4);
+  }
+  .kda-fail-reason-reject {
+    color: var(--accent) !important;
+  }
+  .kda-fail-delta {
+    display: flex; gap: 10px; align-items: baseline;
+    font-family: var(--mono); font-size: 12px;
+    margin-bottom: 6px;
+    padding: 4px 8px;
+    background: rgba(223, 160, 110, 0.08);
+    border-radius: 3px;
+  }
+  .kda-fail-prev   { color: var(--text-dim); }
+  .kda-fail-arrow  { color: var(--text-faint); }
+  .kda-fail-read   { color: var(--red); font-weight: 600; }
+  /* Per-digit OCR breakdown */
+  .kda-fail-groups {
+    width: 100%; margin-top: 8px;
+    border-collapse: collapse;
+    font-family: var(--mono); font-size: 11px;
+  }
+  .kda-fail-groups th, .kda-fail-groups td {
+    padding: 3px 8px;
+    border-bottom: 1px solid rgba(120, 140, 170, 0.08);
+    text-align: left;
+  }
+  .kda-fail-groups th {
+    color: var(--text-dim); font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    font-weight: normal;
+  }
+  .kda-fail-groups td.num {
+    text-align: right; font-variant-numeric: tabular-nums;
+  }
+  .kda-fail-groups .kda-fail-group {
+    background: rgba(120, 140, 170, 0.05);
+    vertical-align: top;
+  }
+  .kda-fail-groups .kda-fail-topn {
+    color: var(--text-dim);
+  }
+  .kda-fail-verdict-ok  { color: var(--green); }
+  .kda-fail-verdict-bad { color: var(--red); }
+
+  .toast {
+    position: fixed; bottom: 16px; right: 16px;
+    background: var(--bg-panel);
+    border: 1px solid var(--accent);
+    color: var(--text);
+    padding: 10px 14px;
+    border-radius: 4px;
+    font-family: var(--mono); font-size: 12px;
+    opacity: 0; transition: opacity 0.2s;
+    pointer-events: none;
+    max-width: 480px;
+  }
+  .toast.shown { opacity: 1; }
+
+  .verdict-tag {
+    display: inline-block;
+    padding: 1px 8px;
+    font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    border-radius: 999px;
+    border: 1px solid;
+  }
+  .verdict-tag.above_threshold,
+  .verdict-tag.accepted { color: var(--green); border-color: var(--green); }
+  .verdict-tag.below_threshold { color: var(--yellow); border-color: var(--yellow); }
+  .verdict-tag.confirming { color: var(--blue); border-color: var(--blue); }
+  .verdict-tag.not_run,
+  .verdict-tag.gated { color: var(--text-faint); border-color: var(--border); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>KDA + Portrait Detector</h1>
+    <span class="pill" id="obs-pill"><span class="dot"></span>OBS: ?</span>
+    <span class="pill" id="frame-pill">frame 0</span>
+    <span class="pill" id="age-pill">--</span>
+    <span class="pill" id="scan-pill">scan --</span>
+    <span class="pill" id="kda-age-pill">KDA --</span>
+    <span class="spacer"></span>
+    <button id="btn-pause">Pause</button>
+    <button id="btn-snapshot-now">Snapshot Now</button>
+    <button id="btn-save-snapshot">Save Snapshot</button>
+  </header>
+
+  <div id="alert-banner" class="alert-banner" style="display:none;"></div>
+
+  <!-- VOD-MODE PANELS — hidden in live mode, shown when the processor
+       is pushing state to /api/vod_processor/*. The live-mode panels
+       below get hidden via JS in VOD mode so the same /detector URL
+       morphs cleanly between the two roles. -->
+  <div id="vod-panels" style="display:none;">
+    <div class="panel">
+      <h2>VOD Processing — Batch Progress</h2>
+      <div class="stats" id="vod-overall"></div>
+      <div style="margin-top: 12px;">
+        <div style="font-family: var(--mono); font-size: 11px;
+                    color: var(--text-dim); margin-bottom: 4px;
+                    text-transform: uppercase; letter-spacing: 0.08em;">
+          Overall progress
+        </div>
+        <div class="vod-progress-bar"><div class="vod-progress-fill"
+             id="vod-progress-overall"></div></div>
+      </div>
+      <div style="margin-top: 14px;">
+        <div style="font-family: var(--mono); font-size: 11px;
+                    color: var(--text-dim); margin-bottom: 4px;
+                    text-transform: uppercase; letter-spacing: 0.08em;">
+          Current file
+        </div>
+        <div id="vod-current" style="font-family: var(--mono);
+             font-size: 12px; margin-bottom: 6px;">--</div>
+        <div class="vod-progress-bar"><div class="vod-progress-fill"
+             id="vod-progress-current"></div></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Completed Files</h2>
+      <table class="vod-table" id="vod-completed-table">
+        <thead><tr>
+          <th>#</th><th>File</th><th>God</th>
+          <th>K</th><th>D</th><th>A</th>
+          <th>Output</th><th>Status</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <!-- Live VodDetector log — captures every per-frame diagnostic
+         (partial-decrease rejections, jump-too-large rejections,
+         god match warnings, etc.). Rolling buffer, newest first. -->
+    <div class="panel">
+      <h2>VodDetector Events (live)</h2>
+      <div class="events" id="vod-events"></div>
+    </div>
+
+    <!-- KDA reader failure crops — populated by the detector's
+         failure_event_callback. Shows the raw KDA strip + binarised
+         debug image at the moment the reader gave up, plus the reason
+         it gave up. Rate-limited at the source so we don't drown the
+         page when a long stretch of overlay/cinematic frames slips
+         through. Newest first. -->
+    <div class="panel">
+      <h2>KDA Read Failures (live)</h2>
+      <div id="vod-kda-failures" class="vod-kda-failures">
+        <div style="color: var(--text-faint);
+                    font-size: 12px; padding: 6px 2px;">
+          no failures yet
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LIVE-MODE PANELS — wrapped so we can hide the whole section
+       in one CSS toggle when VOD is active. -->
+  <div id="live-panels">
+
+  <div class="panel">
+    <h2>Full Frame (regions drawn on top)</h2>
+    <div class="frame-wrap" id="frame-wrap">
+      <div class="frame-empty">no screenshot yet</div>
+    </div>
+    <div class="legend">
+      <span class="lg-pri"><i style="border-color: red;"></i>KDA strip</span>
+      <span class="lg-pri"><i style="border-color: blue;"></i>Portrait</span>
+      <span class="lg-sec"><i style="border-color: lime;"></i>HUD check (ability bar)</span>
+      <span class="lg-sec"><i style="border-color: cyan;"></i>Gameplay check (portrait area)</span>
+      <span class="lg-sec"><i style="border-color: yellow;"></i>Overlay check (upper-left)</span>
+      <span style="color: var(--text-faint); margin-left: auto;">
+        solid = read every frame &nbsp;&nbsp;|&nbsp;&nbsp;
+        dashed = scene classifier
+      </span>
+    </div>
+  </div>
+
+  <div class="columns">
+
+    <!-- PORTRAIT panel -->
+    <div class="panel">
+      <h2>Portrait</h2>
+      <div class="crop-row">
+        <div id="portrait-crop" class="crop-empty">portrait</div>
+        <div class="crop-info">
+          <dl>
+            <dt>Best</dt>      <dd id="god-best">--</dd>
+            <dt>Confidence</dt><dd id="god-score">--<svg id="god-sparkline"
+                width="120" height="20" style="vertical-align:middle;
+                margin-left:8px;opacity:0.85;"></svg></dd>
+            <dt>Threshold</dt> <dd id="god-threshold">--</dd>
+            <dt>Verdict</dt>   <dd id="god-verdict"><span class="verdict-tag not_run">--</span></dd>
+            <dt>Identified</dt><dd id="god-identified">--</dd>
+            <dt>Confirming</dt><dd id="god-confirming">--</dd>
+          </dl>
+          <div class="topn">
+            <div class="topn-title">Top candidates</div>
+            <div id="god-topn"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Save current portrait as a Portrait_Source reference. Only
+           enabled while the scanner is paused — guarantees the frozen
+           displayed frame is the one written to disk. On save the
+           matcher reloads inline so the next poll already benefits.
+           Pre-fills the god name with whatever the matcher's current
+           top candidate is so the common case is one click + Enter. -->
+      <div class="save-ref-row" id="save-ref-row">
+        <div class="save-ref-hint" id="save-ref-hint">
+          Pause to save the current portrait as a reference fingerprint.
+        </div>
+        <div class="save-ref-form" id="save-ref-form">
+          <label for="save-ref-god">Save as:</label>
+          <input id="save-ref-god" type="text" autocomplete="off"
+                 placeholder="god name (e.g. Ymir)" />
+          <button id="btn-save-ref">Save Reference</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- KDA panel -->
+    <div class="panel">
+      <h2>K / D / A</h2>
+      <div class="crop-row">
+        <div>
+          <div id="kda-crop" class="crop-empty" style="width:280px;height:60px;">strip</div>
+          <div class="kda-binary-wrap" id="kda-binary-wrap">
+            <div id="kda-binary" class="crop-empty" style="width:280px;height:60px;">binarized</div>
+            <!-- .kda-group-overlay divs (K/D/A) get appended here at poll time -->
+          </div>
+          <!-- Per-group split visualisation. Filled in by paintKdaSplit()
+               using bbox_binary_8x from each group; falls back to empty
+               state when the pipeline didn't produce a bbox this frame. -->
+          <div class="kda-split-row" id="kda-split-row">
+            <div class="kda-split-cell empty K" id="kda-split-cell-K">
+              <div class="label">KILLS</div>
+              <div class="crop-box" id="kda-split-K"></div>
+              <div class="value" id="kda-split-K-value">--</div>
+            </div>
+            <div class="kda-split-cell empty D" id="kda-split-cell-D">
+              <div class="label">DEATHS</div>
+              <div class="crop-box" id="kda-split-D"></div>
+              <div class="value" id="kda-split-D-value">--</div>
+            </div>
+            <div class="kda-split-cell empty A" id="kda-split-cell-A">
+              <div class="label">ASSISTS</div>
+              <div class="crop-box" id="kda-split-A"></div>
+              <div class="value" id="kda-split-A-value">--</div>
+            </div>
+          </div>
+        </div>
+        <div class="crop-info">
+          <dl>
+            <dt>Result</dt>      <dd id="kda-result">--</dd>
+            <dt>Gated by</dt>    <dd id="kda-gate">--</dd>
+            <dt>Read time</dt>   <dd id="kda-elapsed">--</dd>
+            <dt>Failure</dt>     <dd id="kda-failure">--</dd>
+          </dl>
+        </div>
+      </div>
+      <table class="digit-table" id="kda-digits">
+        <thead><tr>
+          <th>Group</th><th>Idx</th><th>Best</th><th>Dist</th>
+          <th>Margin</th><th>Method</th><th>ms</th><th>Verdict</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+
+      <!-- Binarization diagnostic — shows EVERY connected component
+           Otsu/adaptive produced, with classification reason. Lets the
+           operator see exactly why digits got dropped when the pipeline
+           fails. Updated every poll. -->
+      <details class="binarize-diag" id="kda-binarize-diag">
+        <summary>Binarization pipeline diagnostic</summary>
+        <div id="kda-binarize-body"></div>
+      </details>
+    </div>
+
+  </div>
+
+  <div class="columns">
+
+    <!-- SCENE classification panel -->
+    <div class="panel">
+      <h2>Scene Classification</h2>
+      <div class="stats" id="scene-stats"></div>
+    </div>
+
+    <!-- MATCH state panel -->
+    <div class="panel">
+      <h2>Match State</h2>
+      <div class="stats" id="match-stats"></div>
+    </div>
+
+  </div>
+
+  <div class="panel">
+    <h2>Recent Events</h2>
+    <div class="events" id="events"></div>
+  </div>
+
+  </div><!-- /#live-panels -->
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const STATE_POLL_MS = 2000;
+const FRAME_REFRESH_MS = 5000;
+
+const els = {
+  obsPill:        document.getElementById('obs-pill'),
+  framePill:      document.getElementById('frame-pill'),
+  agePill:        document.getElementById('age-pill'),
+  scanPill:       document.getElementById('scan-pill'),
+  kdaAgePill:     document.getElementById('kda-age-pill'),
+  alertBanner:    document.getElementById('alert-banner'),
+  frameWrap:      document.getElementById('frame-wrap'),
+  portraitCrop:   document.getElementById('portrait-crop'),
+  godBest:        document.getElementById('god-best'),
+  godScore:       document.getElementById('god-score'),
+  godThreshold:   document.getElementById('god-threshold'),
+  godVerdict:     document.getElementById('god-verdict'),
+  godIdentified:  document.getElementById('god-identified'),
+  godConfirming:  document.getElementById('god-confirming'),
+  godTopn:        document.getElementById('god-topn'),
+  kdaCrop:        document.getElementById('kda-crop'),
+  kdaBinary:      document.getElementById('kda-binary'),
+  kdaResult:      document.getElementById('kda-result'),
+  kdaGate:        document.getElementById('kda-gate'),
+  kdaElapsed:     document.getElementById('kda-elapsed'),
+  kdaFailure:     document.getElementById('kda-failure'),
+  kdaDigits:      document.getElementById('kda-digits').querySelector('tbody'),
+  kdaBinarizeBody: document.getElementById('kda-binarize-body'),
+  sceneStats:     document.getElementById('scene-stats'),
+  matchStats:     document.getElementById('match-stats'),
+  events:         document.getElementById('events'),
+  toast:          document.getElementById('toast'),
+  btnPause:       document.getElementById('btn-pause'),
+  btnSnapNow:     document.getElementById('btn-snapshot-now'),
+  btnSaveSnap:    document.getElementById('btn-save-snapshot'),
+  // Save-as-reference workflow on the portrait panel.
+  saveRefRow:     document.getElementById('save-ref-row'),
+  saveRefGod:     document.getElementById('save-ref-god'),
+  btnSaveRef:     document.getElementById('btn-save-ref'),
+};
+
+let lastState = null;
+let stateOk = false;
+// Paused: when true, neither the state poll nor the full-frame refresh
+// touch the page. Lets the user freeze on an interesting frame and
+// read everything before the next tick wipes it.
+let paused = false;
+// Rolling history of the top-god confidence score, used to draw the
+// inline sparkline. ~60 samples at 2s polling = ~2 minutes of recent
+// history, which is enough to spot drift mid-stream without growing
+// unbounded. Stored as numbers (0..1); null entries are gaps from
+// frames where no candidates were available.
+const SPARK_HISTORY_LEN = 60;
+const godScoreHistory = [];
+
+// How many consecutive frames the top portrait score must sit below
+// the threshold before we surface a banner alert. Tuned so a single
+// noisy frame can't flash the warning, but a real drift (3+ frames
+// at 2s polling = 6+ seconds) gets called out.
+const BELOW_THRESHOLD_BANNER_AFTER = 3;
+let consecutiveBelowThreshold = 0;
+
+function toast(msg, ms=3000) {
+  els.toast.textContent = msg;
+  els.toast.classList.add('shown');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => els.toast.classList.remove('shown'), ms);
+}
+
+function setPill(el, text, cls) {
+  el.innerHTML = `<span class="dot"></span>${text}`;
+  el.className = 'pill ' + (cls || '');
+}
+
+function pngDataURL(b64) {
+  if (!b64) return null;
+  return 'data:image/png;base64,' + b64;
+}
+
+// --- K/D/A split visualisation -------------------------------------------
+//
+// paintKdaSplit() draws two things off a single source image (the
+// binarised 8x KDA strip):
+//
+//   1. Colored rectangle overlays on top of the binary image showing
+//      which connected components got grouped into K, D, and A by the
+//      gap-detector. Coords come from each group's bbox_binary_8x field
+//      (in the binary image's natural pixel space), scaled to the
+//      image's displayed dimensions.
+//
+//   2. Three per-group preview crops in the .kda-split-row cells below
+//      the binary. Each crop is canvas-cut from the binary at the same
+//      bbox with a small padding so context is visible. These are
+//      independent <img> elements so the operator can eyeball each
+//      digit's source pixels in isolation without zooming in on the
+//      shared strip.
+//
+// The binary <img> may not have decoded when this is first called
+// (browser hasn't laid it out yet), so when naturalWidth is still 0 we
+// defer the paint to the image's load event and run once. Groups are
+// captured at call time to avoid racing the next poll.
+
+function paintKdaSplit(imgEl, groups) {
+  if (!(imgEl instanceof HTMLImageElement)) {
+    clearKdaSplit();
+    return;
+  }
+  if (!imgEl.complete || !imgEl.naturalWidth) {
+    imgEl.addEventListener('load',
+      () => paintKdaSplit(imgEl, groups), { once: true });
+    return;
+  }
+  _paintKdaSplitNow(imgEl, groups || []);
+}
+
+function _paintKdaSplitNow(imgEl, groups) {
+  const wrap = document.getElementById('kda-binary-wrap');
+  if (!wrap) return;
+
+  // Clear any overlays from the previous poll.
+  wrap.querySelectorAll('.kda-group-overlay').forEach(o => o.remove());
+
+  const naturalW = imgEl.naturalWidth;
+  const naturalH = imgEl.naturalHeight;
+  const displayW = imgEl.offsetWidth || imgEl.getBoundingClientRect().width;
+  const displayH = imgEl.offsetHeight || imgEl.getBoundingClientRect().height;
+  const sX = naturalW > 0 ? (displayW / naturalW) : 1;
+  const sY = naturalH > 0 ? (displayH / naturalH) : 1;
+
+  // Reset every split cell to its empty state first — groups missing
+  // bbox data shouldn't carry over a stale crop.
+  for (const lbl of ['K', 'D', 'A']) {
+    _resetSplitCell(lbl);
+  }
+
+  for (const g of groups) {
+    const bb = g.bbox_binary_8x;
+    if (!bb || bb.length !== 4 || !['K', 'D', 'A'].includes(g.label)) continue;
+    const [bx, by, bw, bh] = bb;
+
+    // Overlay rectangle on the binary image. The 2px border subtracts
+    // 1px on each side so the box visually frames the components
+    // rather than clipping into them.
+    const o = document.createElement('div');
+    o.className = `kda-group-overlay ${g.label}`;
+    o.dataset.label = g.label;
+    o.style.left   = `${bx * sX - 1}px`;
+    o.style.top    = `${by * sY - 1}px`;
+    o.style.width  = `${bw * sX + 2}px`;
+    o.style.height = `${bh * sY + 2}px`;
+    wrap.appendChild(o);
+
+    // Per-group crop into the .kda-split-row cell. Pad a few binary-px
+    // around the bbox so the digit isn't clipped tight at its glyph
+    // bounds — useful for spotting near-the-edge artifacts.
+    const pad = 12;
+    const sx = Math.max(0, bx - pad);
+    const sy = Math.max(0, by - pad);
+    const sw = Math.min(naturalW - sx, bw + 2 * pad);
+    const sh = Math.min(naturalH - sy, bh + 2 * pad);
+    let dataUrl = null;
+    if (sw > 0 && sh > 0) {
+      try {
+        const c = document.createElement('canvas');
+        c.width = sw; c.height = sh;
+        c.getContext('2d').drawImage(imgEl, sx, sy, sw, sh, 0, 0, sw, sh);
+        dataUrl = c.toDataURL('image/png');
+      } catch (err) {
+        // Canvas can throw if the image source taints the canvas
+        // (shouldn't happen for inlined base64 data: URLs, but be
+        // defensive). Fall through to leaving the cell empty.
+        dataUrl = null;
+      }
+    }
+
+    const cellHost = document.getElementById('kda-split-' + g.label);
+    const cellRoot = document.getElementById('kda-split-cell-' + g.label);
+    const valueEl  = document.getElementById('kda-split-' + g.label + '-value');
+    if (cellHost) {
+      cellHost.innerHTML = dataUrl
+        ? `<img src="${dataUrl}" alt="${g.label} crop">`
+        : '';
+    }
+    if (valueEl) {
+      valueEl.textContent = (g.concatenated != null && g.concatenated !== '')
+        ? g.concatenated
+        : '--';
+    }
+    if (cellRoot) {
+      cellRoot.classList.toggle('empty',
+        !(g.concatenated != null && g.concatenated !== ''));
+    }
+  }
+}
+
+function _resetSplitCell(label) {
+  const cellHost = document.getElementById('kda-split-' + label);
+  const cellRoot = document.getElementById('kda-split-cell-' + label);
+  const valueEl  = document.getElementById('kda-split-' + label + '-value');
+  if (cellHost) cellHost.innerHTML = '';
+  if (valueEl)  valueEl.textContent = '--';
+  if (cellRoot) cellRoot.classList.add('empty');
+}
+
+function clearKdaSplit() {
+  const wrap = document.getElementById('kda-binary-wrap');
+  if (wrap) wrap.querySelectorAll('.kda-group-overlay').forEach(o => o.remove());
+  for (const lbl of ['K', 'D', 'A']) _resetSplitCell(lbl);
+}
+
+function fmtNum(n, digits=2) {
+  if (n === null || n === undefined) return '--';
+  if (typeof n !== 'number') return String(n);
+  return n.toFixed(digits);
+}
+
+function fmtTime(ts) {
+  if (!ts) return '--';
+  const d = new Date(ts * 1000);
+  return d.toTimeString().slice(0, 8);
+}
+
+function drawSparkline(svgEl, history, threshold) {
+  // Skip drawing entirely if there's nothing meaningful yet — keeps
+  // the SVG element empty rather than rendering a flat line at 0.
+  const valid = history.filter(v => v != null);
+  if (valid.length < 2) {
+    svgEl.innerHTML = '';
+    return;
+  }
+  const w = svgEl.clientWidth || parseFloat(svgEl.getAttribute('width')) || 120;
+  const h = svgEl.clientHeight || parseFloat(svgEl.getAttribute('height')) || 20;
+  const pad = 1;
+  // Fixed Y range 0..1 (god confidence is always in this range) so
+  // visual height = actual score, not auto-scaled. The threshold line
+  // lands at the same relative position every frame.
+  const yOf = v => h - pad - v * (h - 2 * pad);
+  const stepX = (w - 2 * pad) / Math.max(1, history.length - 1);
+
+  // Build polyline d-attribute, leaving gaps where history is null.
+  let path = '';
+  let pen = false;
+  history.forEach((v, i) => {
+    const x = pad + i * stepX;
+    if (v == null) { pen = false; return; }
+    path += (pen ? ' L ' : ' M ') + x.toFixed(1) + ',' + yOf(v).toFixed(1);
+    pen = true;
+  });
+
+  // Current value drives line color: bronze when comfortably above
+  // threshold, chiffon when within striking distance, scarlet when
+  // below — matches the palette pills in the rest of the page.
+  const last = valid[valid.length - 1];
+  let color = '#DFA06E';   /* Light Bronze — "ok" */
+  if (threshold != null) {
+    if (last < threshold) color = '#DF2935';        /* Scarlet Rush — bad */
+    else if (last < threshold + 0.05) color = '#F5F3BB';  /* Lemon Chiffon — warn */
+  }
+
+  // Threshold guideline (faint dashed).
+  let threshLine = '';
+  if (threshold != null) {
+    const y = yOf(threshold).toFixed(1);
+    threshLine =
+      `<line x1="0" x2="${w}" y1="${y}" y2="${y}" ` +
+      `stroke="rgba(217,222,229,0.25)" stroke-dasharray="2,3" stroke-width="1"/>`;
+  }
+
+  svgEl.innerHTML =
+    threshLine +
+    `<path d="${path}" stroke="${color}" stroke-width="1.5" ` +
+    `fill="none" stroke-linecap="round" stroke-linejoin="round"/>`;
+}
+
+function refreshFullFrame() {
+  if (paused) return;
+  // Cache-bust with timestamp so the browser doesn't show a stale image.
+  els.frameWrap.innerHTML =
+    `<img alt="fullframe" src="/api/detector_debug/fullframe.jpg?t=${Date.now()}"
+         onerror="this.parentElement.innerHTML='<div class=&quot;frame-empty&quot;>fullframe unavailable (OBS not connected?)</div>'">`;
+}
+
+async function pollState() {
+  if (paused) return;
+  try {
+    const r = await fetch('/api/detector_debug', {cache: 'no-cache'});
+    if (!r.ok) throw new Error('status ' + r.status);
+    const data = await r.json();
+    stateOk = true;
+    lastState = data;
+    renderState(data);
+  } catch (e) {
+    stateOk = false;
+    setPill(els.obsPill, 'API: error', 'bad');
+    setPill(els.agePill, '--', '');
+  }
+}
+
+const vodPanels   = document.getElementById('vod-panels');
+const livePanels  = document.getElementById('live-panels');
+const vodOverall  = document.getElementById('vod-overall');
+const vodCurrent  = document.getElementById('vod-current');
+const vodProgressOverall = document.getElementById('vod-progress-overall');
+const vodProgressCurrent = document.getElementById('vod-progress-current');
+const vodCompletedTbody  = document
+  .getElementById('vod-completed-table').querySelector('tbody');
+const vodEvents          = document.getElementById('vod-events');
+const vodKdaFailures     = document.getElementById('vod-kda-failures');
+
+function fmtDuration(sec) {
+  if (sec == null || !isFinite(sec)) return '--';
+  sec = Math.max(0, Math.round(sec));
+  if (sec < 60)   return `${sec}s`;
+  if (sec < 3600) return `${Math.floor(sec/60)}m ${sec%60}s`;
+  const h = Math.floor(sec/3600);
+  const m = Math.floor((sec%3600)/60);
+  return `${h}h ${m}m`;
+}
+
+function renderVodState(s) {
+  // Header pills morph to show VOD context instead of OBS/frame info.
+  const state = s.state || 'running';
+  if (state === 'done') setPill(els.obsPill, 'VOD: complete', 'ok');
+  else if (state === 'errored') setPill(els.obsPill, 'VOD: errored', 'bad');
+  else setPill(els.obsPill, 'VOD: scanning', 'ok');
+  const done = (s.files_completed || []).length;
+  const total = s.total_files || 0;
+  els.framePill.innerHTML =
+    `<span class="dot"></span>file ${done + (state === 'running' ? 1 : 0)}/${total}`;
+  setPill(els.agePill,
+          `elapsed ${fmtDuration(s.elapsed_sec)}`, '');
+  setPill(els.scanPill,
+          `eta ${fmtDuration(s.eta_sec)}`, '');
+  setPill(els.kdaAgePill,
+          `${done} done`, done > 0 ? 'ok' : '');
+
+  // Overall stats table
+  const rows = [
+    ['Status', state, state === 'done' ? 'ok' :
+                       state === 'errored' ? 'bad' : ''],
+    ['Files completed', `${done} / ${total}`, ''],
+    ['Elapsed', fmtDuration(s.elapsed_sec), ''],
+    ['ETA', fmtDuration(s.eta_sec), ''],
+  ];
+  vodOverall.innerHTML = rows.map(([l, v, cls]) =>
+    `<div class="stat"><span class="label">${l}</span>
+       <span class="value ${cls}">${v}</span></div>`).join('');
+
+  // Progress bars
+  const overallPct = total > 0
+    ? Math.min(100, 100 * (done + (s.current_file_progress || 0)) / total)
+    : 0;
+  vodProgressOverall.style.width = overallPct.toFixed(1) + '%';
+  const curPct = (s.current_file_progress || 0) * 100;
+  vodProgressCurrent.style.width = curPct.toFixed(1) + '%';
+
+  vodCurrent.textContent = s.current_file_name
+    ? `${s.current_file_name}  —  ` +
+      `${(s.current_scan_t || 0).toFixed(0)}s / ` +
+      `${(s.current_duration || 0).toFixed(0)}s  ` +
+      `(${curPct.toFixed(0)}%)`
+    : (state === 'done' ? 'all files complete' : 'waiting...');
+
+  // Completed-files table (most recent at top so the user doesn't
+  // have to scroll as more rows are added).
+  const completed = (s.files_completed || []).slice().reverse();
+  vodCompletedTbody.innerHTML = completed.map((f, i) => {
+    const num = completed.length - i;
+    if (f.status === 'error') {
+      return `<tr>
+        <td>${num}</td>
+        <td>${f.name}</td>
+        <td colspan="5" style="color:var(--red)">${f.error || 'error'}</td>
+        <td class="status-error">error</td>
+      </tr>`;
+    }
+    return `<tr>
+      <td>${num}</td>
+      <td>${f.name}</td>
+      <td>${f.god || '--'}</td>
+      <td class="num">${f.kills}</td>
+      <td class="num">${f.deaths}</td>
+      <td class="num">${f.assists}</td>
+      <td>${f.output_path || ''}</td>
+      <td class="status-moved">${f.status}</td>
+    </tr>`;
+  }).join('') ||
+    `<tr><td colspan="8" style="color:var(--text-faint);
+      text-align:center;padding:14px;">
+      no files completed yet</td></tr>`;
+
+  // VodDetector log buffer — newest at top so the latest rejection /
+  // accept is always visible without scrolling. Color-code by level:
+  // warnings (red) are the rejection paths, info (default) are
+  // routine reads. Includes the file name so cross-batch context
+  // stays clear when one file's events bleed into the next.
+  const events = (s.events || []).slice().reverse();
+  vodEvents.innerHTML = events.map(ev => {
+    const level = (ev.level || 'info').toLowerCase();
+    const lvlClass = level === 'warning' || level === 'error' ? 'reject'
+                   : level === 'info' ? 'info'
+                   : 'state';
+    const fileTag = ev.file
+      ? `<span style="color:var(--text-faint);margin-right:6px;">
+           ${ev.file}</span>`
+      : '';
+    return `<div class="ev ${lvlClass}">
+       <span class="ev-time">${fmtTime(ev.ts)}</span>
+       <span class="ev-level">${level}</span>
+       <span class="ev-msg">${fileTag}${(ev.msg || '')
+          .replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>
+     </div>`;
+  }).join('') ||
+    `<div style="color:var(--text-faint);text-align:center;padding:8px;">
+      no events yet — VodDetector hasn't logged anything (the scan may
+      not have hit any sanity-check rejections)</div>`;
+
+  // KDA reader failures — newest first. Each entry shows the raw KDA
+  // strip alongside the binarised 8x view (when binarisation produced
+  // anything), the failure reason, the source file, and the timestamp.
+  // Crops are base64 PNG inlined directly into the page so there's no
+  // extra HTTP round-trip per failure.
+  const fails = (s.kda_failures || []).slice().reverse();
+  if (fails.length === 0) {
+    vodKdaFailures.innerHTML =
+      `<div style="color:var(--text-faint);
+                   font-size:12px;padding:6px 2px;">
+         no failures yet</div>`;
+  } else {
+    vodKdaFailures.innerHTML = fails.map(f => {
+      const rawImg = f.crop_b64
+        ? `<img class="kda-fail-img" alt="raw crop"
+                src="data:image/png;base64,${f.crop_b64}">`
+        : `<div class="kda-fail-empty">no raw crop</div>`;
+      const binImg = f.binary_b64
+        ? `<img class="kda-fail-img kda-fail-img-bin" alt="binarized"
+                src="data:image/png;base64,${f.binary_b64}">`
+        : `<div class="kda-fail-empty">no binarized output</div>`;
+      // Format video timestamp as M:SS when present — much more useful
+      // than wall-clock for telling "this happened at 0:00 in the
+      // loading screen" from "this happened at 12:34 mid-match".
+      let vtTag = '';
+      if (typeof f.video_t === 'number') {
+        const mins = Math.floor(f.video_t / 60);
+        const secs = Math.floor(f.video_t % 60).toString().padStart(2, '0');
+        vtTag = `<span class="kda-fail-vt">@ ${mins}:${secs}</span>`;
+      }
+      const resTag = f.source_resolution
+        ? `<span class="kda-fail-res">${f.source_resolution}</span>` : '';
+      const fileTag = f.file
+        ? `<div class="kda-fail-file">${f.file} ${vtTag} ${resTag}</div>`
+        : `<div class="kda-fail-file">${vtTag} ${resTag}</div>`;
+      // Two flavors of issue:
+      //  - "read_failure": read_kda returned None (blank crop, no
+      //    digits, group split couldn't divide components into 3).
+      //  - "rejected:<why>": read_kda succeeded but detect()'s sanity
+      //    guards rejected the value (implausible baseline, partial
+      //    decrease, max jump). For rejections we show prev_kda →
+      //    read_kda so the user can see what the misread came out as.
+      const kind = (f.kind || 'read_failure').toString();
+      const isReject = kind.startsWith('rejected:');
+      let reasonLabel;
+      if (isReject) {
+        reasonLabel = kind.replace('rejected:', '').replace(/_/g, ' ');
+      } else {
+        reasonLabel = f.failure_reason || '(no reason)';
+      }
+      reasonLabel = reasonLabel
+        .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const reasonClass = isReject
+        ? 'kda-fail-reason kda-fail-reason-reject'
+        : 'kda-fail-reason';
+
+      // KDA delta line — only for rejections.
+      let kdaLine = '';
+      if (isReject && Array.isArray(f.read_kda)) {
+        const fmt = a => Array.isArray(a)
+          ? a.map(n => String(n)).join(' / ')
+          : '--';
+        const prev = f.prev_kda ? fmt(f.prev_kda) : 'no baseline';
+        const read = fmt(f.read_kda);
+        kdaLine = `<div class="kda-fail-delta">
+          <span class="kda-fail-prev">${prev}</span>
+          <span class="kda-fail-arrow">→</span>
+          <span class="kda-fail-read">${read}</span>
+        </div>`;
+      }
+
+      // Per-digit OCR breakdown — top-3 matches with distances. Most
+      // useful when "read_kda came back as 44/4/2 but the right answer
+      // is 11/4/2": the digit-level top-N usually shows that one of
+      // the digits was on a knife-edge between two glyphs.
+      let groupsTable = '';
+      if (Array.isArray(f.groups) && f.groups.length) {
+        const rows = [];
+        f.groups.forEach(g => {
+          const groupLabel = (g.label || '?').toString();
+          const groupValue = (g.value || '').toString();
+          (g.digits || []).forEach((d, di) => {
+            const tn = (d.top_n || []).slice(0, 3).map(
+              x => `${x[0]} (${(+x[1]).toFixed(2)})`
+            ).join(', ');
+            const margin = (+d.margin || 0).toFixed(2);
+            const verdict = (d.verdict || '?').toString();
+            const verdictCls = verdict === 'accepted'
+              ? 'kda-fail-verdict-ok' : 'kda-fail-verdict-bad';
+            const groupCell = di === 0
+              ? `<td class="kda-fail-group" rowspan="${g.digits.length}">
+                   <b>${groupLabel}</b> = ${groupValue}
+                 </td>` : '';
+            rows.push(`<tr>${groupCell}
+              <td>${d.best || '?'}</td>
+              <td class="num">${margin}</td>
+              <td class="${verdictCls}">${verdict}</td>
+              <td class="kda-fail-topn">${tn || '--'}</td>
+            </tr>`);
+          });
+        });
+        if (rows.length) {
+          groupsTable = `<table class="kda-fail-groups">
+            <thead><tr>
+              <th>group</th><th>digit</th><th>margin</th>
+              <th>verdict</th><th>top-3</th>
+            </tr></thead>
+            <tbody>${rows.join('')}</tbody>
+          </table>`;
+        }
+      }
+
+      return `<div class="kda-fail ${isReject ? 'kda-fail-rej' : ''}">
+        <div class="kda-fail-head">
+          <span class="kda-fail-time">${fmtTime(f.ts)}</span>
+          <span class="${reasonClass}">${reasonLabel}</span>
+          <span class="kda-fail-ms">${(f.elapsed_ms || 0).toFixed(1)} ms</span>
+        </div>
+        ${fileTag}
+        ${kdaLine}
+        <div class="kda-fail-row">
+          <div class="kda-fail-col">
+            <div class="kda-fail-label">raw</div>${rawImg}
+          </div>
+          <div class="kda-fail-col">
+            <div class="kda-fail-label">binarised 8×</div>${binImg}
+          </div>
+        </div>
+        ${groupsTable}
+      </div>`;
+    }).join('');
+  }
+}
+
+function renderState(s) {
+  if (!s) return;
+
+  // Sync the UI with the backend's authoritative pause flag. Catches
+  // the case where the bot was restarted, another /detector tab
+  // toggled pause, or the page was loaded while already paused.
+  // The opposite direction (frontend-paused, backend-unpaused) can't
+  // happen here because pollState short-circuits while paused.
+  if (typeof s.paused === 'boolean' && s.paused !== paused) {
+    setPausedUI(s.paused);
+  }
+
+  // Mode swap — VOD scan in progress vs live detector. The same
+  // /detector URL morphs between the two layouts so the user never
+  // has to remember a different URL.
+  if (s.mode === 'vod') {
+    livePanels.style.display = 'none';
+    vodPanels.style.display  = '';
+    renderVodState(s);
+    return;
+  } else {
+    vodPanels.style.display  = 'none';
+    livePanels.style.display = '';
+  }
+
+  // --- Header pills ---
+  if (s.obs_connected) setPill(els.obsPill, 'OBS: connected', 'ok');
+  else                 setPill(els.obsPill, 'OBS: disconnected', 'bad');
+
+  els.framePill.innerHTML = `<span class="dot"></span>frame ${s.frame || 0}`;
+  const ageSec = s.timestamp ? (Date.now() / 1000 - s.timestamp) : 0;
+  setPill(els.agePill, `age ${ageSec.toFixed(1)}s`,
+          ageSec < 3 ? 'ok' : ageSec < 10 ? 'warn' : 'bad');
+  setPill(els.scanPill, `scan ${(s.last_scan_ms || 0).toFixed(0)} ms`, '');
+
+  // "Last KDA read" age pill — always visible so the operator can tell
+  // at a glance whether the KDA pipeline is currently producing reads,
+  // even when the panel is below the fold.
+  const lastKdaTs = (s.match || {}).last_kda_read_time || 0;
+  if (lastKdaTs > 0) {
+    const kdaAge = Date.now() / 1000 - lastKdaTs;
+    setPill(els.kdaAgePill,
+            `KDA ${kdaAge < 60 ? kdaAge.toFixed(1) + 's' :
+                  kdaAge < 3600 ? Math.round(kdaAge / 60) + 'm' :
+                  Math.round(kdaAge / 3600) + 'h'} ago`,
+            kdaAge < 5 ? 'ok' : kdaAge < 30 ? 'warn' : 'bad');
+  } else {
+    setPill(els.kdaAgePill, 'KDA --', '');
+  }
+
+  // --- Portrait panel ---
+  const god = s.god || {};
+  const pb = god.portrait_crop_b64;
+  if (pb) {
+    els.portraitCrop.outerHTML =
+      `<img id="portrait-crop" class="crop-img portrait" src="${pngDataURL(pb)}" alt="portrait">`;
+    els.portraitCrop = document.getElementById('portrait-crop');
+  }
+  const topn = god.top_n || [];
+  const sparkSvg = document.getElementById('god-sparkline');
+  if (topn.length > 0) {
+    const [bestName, bestScore] = topn[0];
+    els.godBest.textContent = bestName;
+    // Replace just the text content but keep the inline sparkline SVG.
+    els.godScore.childNodes[0].nodeValue = fmtNum(bestScore, 4) + ' ';
+    const thresh = god.threshold;
+    if (thresh != null) {
+      els.godScore.className = (bestScore >= thresh) ? 'ok' : 'bad';
+    }
+    godScoreHistory.push(typeof bestScore === 'number' ? bestScore : null);
+  } else {
+    els.godBest.textContent = '--';
+    els.godScore.childNodes[0].nodeValue = '-- ';
+    els.godScore.className = '';
+    godScoreHistory.push(null);
+  }
+  while (godScoreHistory.length > SPARK_HISTORY_LEN) godScoreHistory.shift();
+  if (sparkSvg) drawSparkline(sparkSvg, godScoreHistory, god.threshold);
+
+  // Threshold-violation banner. Track consecutive below-threshold
+  // frames and surface a banner once we've crossed the patience
+  // window. Clears immediately once we cross back above.
+  const threshForBanner = god.threshold;
+  const bestScore = (topn[0] && typeof topn[0][1] === 'number')
+                      ? topn[0][1] : null;
+  if (threshForBanner != null && bestScore != null
+      && bestScore < threshForBanner
+      && !god.identified) {
+    consecutiveBelowThreshold += 1;
+  } else {
+    consecutiveBelowThreshold = 0;
+  }
+  if (consecutiveBelowThreshold >= BELOW_THRESHOLD_BANNER_AFTER) {
+    const bestName = topn[0][0];
+    els.alertBanner.className = 'alert-banner warn';
+    els.alertBanner.style.display = 'flex';
+    els.alertBanner.innerHTML =
+      `⚠ <span><strong>Portrait below threshold for
+       ${consecutiveBelowThreshold} consecutive polls</strong> —
+       best=${bestName} ${fmtNum(bestScore, 4)} vs threshold
+       ${fmtNum(threshForBanner, 2)}. Check the
+       <em>Top Candidates</em> list and the fullframe view for the
+       likely cause (HUD shifted, overlay covering portrait, custom
+       icon mismatch).</span>`;
+  } else {
+    els.alertBanner.style.display = 'none';
+  }
+  els.godThreshold.textContent = god.threshold != null
+    ? fmtNum(god.threshold, 2) : '--';
+  els.godVerdict.innerHTML =
+    `<span class="verdict-tag ${god.verdict || 'not_run'}">${god.verdict || 'not_run'}</span>`;
+  els.godIdentified.textContent = god.identified
+    ? (god.current || '?')
+    : 'no';
+  els.godIdentified.className = god.identified ? 'ok' : '';
+  els.godConfirming.textContent =
+    god.confirm_name
+      ? `${god.confirm_name}  ${god.confirm_count}/${god.confirm_required}`
+      : '--';
+  els.godTopn.innerHTML = topn.slice(0, 5).map((row, i) => {
+    // row is [name, score] or [name, score, source]. Source defaults
+    // to "base" for back-compat with older debug payloads.
+    const name = row[0];
+    const score = row[1];
+    const source = row[2] || 'base';
+    let cls = '';
+    if (i === 0) cls = 'win';
+    else if (i === 1) cls = 'runner-up';
+    return `<div class="topn-row ${cls}">
+              <span class="topn-name">${name}</span>
+              <span class="topn-score">
+                <span class="source-tag ${source}">${source}</span>${fmtNum(score, 4)}
+              </span>
+            </div>`;
+  }).join('') || '<div style="color:var(--text-faint)">no candidates</div>';
+
+  // --- KDA panel ---
+  const kda = s.kda || {};
+  const details = kda.details || {};
+  if (details.crop) {
+    els.kdaCrop.outerHTML =
+      `<img id="kda-crop" class="crop-img kda" src="${pngDataURL(details.crop)}" alt="kda">`;
+    els.kdaCrop = document.getElementById('kda-crop');
+    els.kdaCrop.style.width = '280px';
+    els.kdaCrop.style.height = 'auto';
+  }
+  if (details.binary_8x) {
+    els.kdaBinary.outerHTML =
+      `<img id="kda-binary" class="crop-img kda" src="${pngDataURL(details.binary_8x)}" alt="kda-bin">`;
+    els.kdaBinary = document.getElementById('kda-binary');
+    // Paint the K/D/A split overlays + per-group crops as soon as the
+    // binary image has decoded enough to expose its natural dimensions.
+    // The groups array is captured here so a slow image-load can't
+    // race the next poll into using stale bbox values.
+    paintKdaSplit(els.kdaBinary, details.groups || []);
+  } else {
+    // No binary this frame — clear the overlays and reset the split row
+    // to its empty state so we don't leave stale boxes lying around.
+    clearKdaSplit();
+  }
+  if (details.kda) {
+    const [k, d, a] = details.kda;
+    els.kdaResult.textContent = `${k} / ${d} / ${a}`;
+    els.kdaResult.className = 'ok';
+  } else {
+    els.kdaResult.textContent = kda.ran ? 'no read' : '--';
+    els.kdaResult.className = kda.ran ? 'bad' : '';
+  }
+  els.kdaGate.textContent = kda.gated_by || '--';
+  els.kdaElapsed.textContent = details.elapsed_ms != null
+    ? `${details.elapsed_ms.toFixed(0)} ms` : '--';
+  els.kdaFailure.textContent = details.failure_reason || '--';
+  els.kdaFailure.className = details.failure_reason ? 'bad' : '';
+
+  // Digit table
+  const rows = [];
+  for (const g of (details.groups || [])) {
+    g.digits.forEach((d, i) => {
+      // Highlight slow per-digit times — template matches should be
+      // sub-millisecond, Tesseract fallbacks land in the 50-200 ms
+      // range. Anything over 30ms is worth flagging.
+      const ms = d.time_ms;
+      const msStr = ms != null ? ms.toFixed(1) : '--';
+      const msCls = (ms == null) ? '' :
+                    (ms > 30) ? 'bad' :
+                    (ms > 5)  ? 'warn' : 'ok';
+      rows.push(`<tr>
+        <td>${g.label}</td>
+        <td>${i}</td>
+        <td>${d.best != null ? d.best : '--'}</td>
+        <td>${d.distance != null ? d.distance.toFixed(3) : '--'}</td>
+        <td>${d.margin != null ? d.margin.toFixed(3) : '--'}</td>
+        <td>${d.method || '--'}</td>
+        <td class="${msCls}">${msStr}</td>
+        <td class="verdict ${d.verdict}">${d.verdict || '--'}</td>
+      </tr>`);
+    });
+  }
+  els.kdaDigits.innerHTML = rows.join('') || `<tr><td colspan="8"
+    style="color:var(--text-faint);text-align:center;padding:14px;">
+    pipeline not run this frame</td></tr>`;
+
+  // --- Binarization diagnostic panel ---
+  const binDiag = details.binarization;
+  if (binDiag && binDiag.methods && binDiag.methods.length) {
+    const blocks = binDiag.methods.map(m => {
+      const chosenCls = (m.method === binDiag.chosen_method) ? 'chosen' : '';
+      const chosenTag = (m.method === binDiag.chosen_method)
+        ? ' <span style="color:var(--green)">[chosen]</span>'
+        : '';
+      const digitCount = (m.components || []).filter(c =>
+        c.classification === 'digit').length;
+      const rows = (m.components || []).map(c => `<tr>
+        <td>${c.x}</td><td>${c.y}</td><td>${c.w}</td><td>${c.h}</td>
+        <td>${c.area}</td><td>${c.aspect}</td>
+        <td class="cls-${c.classification}">${c.classification}</td>
+      </tr>`).join('') ||
+        `<tr><td colspan="7" style="color:var(--text-faint);text-align:center">
+         no components detected (threshold produced uniform output)</td></tr>`;
+      return `
+        <div class="method-block ${chosenCls}">
+          <div class="method-head">
+            <span>${m.method.toUpperCase()}${chosenTag}</span>
+            <span>${digitCount} digit${digitCount === 1 ? '' : 's'}
+              / ${m.n_components_total} component${m.n_components_total === 1 ? '' : 's'}
+              · white ratio ${(m.white_pixel_ratio * 100).toFixed(1)}%</span>
+          </div>
+          <table>
+            <thead><tr>
+              <th>x</th><th>y</th><th>w</th><th>h</th>
+              <th>area</th><th>aspect</th><th>classification</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
+    }).join('');
+    els.kdaBinarizeBody.innerHTML = blocks;
+  } else {
+    els.kdaBinarizeBody.innerHTML =
+      `<div style="color:var(--text-faint);padding:8px;font-family:var(--mono);font-size:11px;">
+        binarization diagnostic not available (pipeline didn't reach binarization step)
+       </div>`;
+  }
+
+  // --- Scene classification ---
+  const scene = s.scene || {};
+  const thr = scene.thresholds || {};
+  const sceneRows = [
+    ['Is gameplay', scene.is_gameplay ? 'YES' : 'no',
+     scene.is_gameplay ? 'ok' : 'bad'],
+    ['Overlay open', scene.overlay_open ? 'YES (skipping)' : 'no',
+     scene.overlay_open ? 'warn' : 'ok'],
+    ['HUD std',
+     `${fmtNum(scene.hud_std, 1)} / need ≥ ${thr.hud_min_std ?? '--'}`,
+     (scene.hud_std >= (thr.hud_min_std ?? 0)) ? 'ok' : 'warn'],
+    ['HUD mean',
+     `${fmtNum(scene.hud_mean, 1)} / need ≥ ${thr.hud_min_mean ?? '--'}`,
+     (scene.hud_mean >= (thr.hud_min_mean ?? 0)) ? 'ok' : 'warn'],
+    ['Portrait std',
+     `${fmtNum(scene.portrait_std, 1)} / need ≥ ${thr.portrait_min_std ?? '--'}`,
+     (scene.portrait_std >= (thr.portrait_min_std ?? 0)) ? 'ok' : 'warn'],
+    ['Overlay dark ratio',
+     `${fmtNum(scene.overlay_dark_ratio, 3)} > ${thr.overlay_dark_threshold ?? '--'}`,
+     ''],
+    ['Overlay bar std',
+     `${fmtNum(scene.overlay_bar_std, 1)} < ${thr.overlay_bar_visible_std ?? '--'}`,
+     ''],
+    ['KDA crop std', fmtNum(scene.kda_crop_std, 1), ''],
+  ];
+  els.sceneStats.innerHTML = sceneRows.map(([l, v, cls]) =>
+    `<div class="stat"><span class="label">${l}</span>
+       <span class="value ${cls}">${v}</span></div>`).join('');
+
+  // --- Match state ---
+  const m = s.match || {};
+  const matchRows = [
+    ['Kills',   m.kills ?? 0, ''],
+    ['Deaths',  m.deaths ?? 0, ''],
+    ['Assists', m.assists ?? 0, ''],
+    ['Saved KDA', Array.isArray(m.prev_kda)
+       ? m.prev_kda.join(' / ') : 'none', ''],
+    ['Startup validated', m.startup_validated ? 'YES' : 'no',
+     m.startup_validated ? 'ok' : 'warn'],
+    ['Running', m.running ? 'YES' : 'no',
+     m.running ? 'ok' : 'bad'],
+    ['Manual mode', m.manual_mode ? 'YES' : 'no', ''],
+    ['Chat announce', m.announce_chat ? 'on' : 'off', ''],
+    ['Non-gameplay streak', m.non_gameplay_count ?? 0, ''],
+  ];
+  els.matchStats.innerHTML = matchRows.map(([l, v, cls]) =>
+    `<div class="stat"><span class="label">${l}</span>
+       <span class="value ${cls}">${v}</span></div>`).join('');
+
+  // --- Event log (newest at top) ---
+  const events = (s.events || []).slice().reverse();
+  els.events.innerHTML = events.map(ev =>
+    `<div class="ev ${ev.level || 'info'}">
+       <span class="ev-time">${fmtTime(ev.ts)}</span>
+       <span class="ev-level">${ev.level || 'info'}</span>
+       <span class="ev-msg">${ev.msg || ''}</span>
+     </div>`).join('') ||
+    '<div style="color:var(--text-faint);text-align:center;padding:8px;">no events yet</div>';
+}
+
+// Pause/Resume — coordinates between the frontend (stop polling) AND
+// the backend (stop the scan loop). Both must agree, otherwise the
+// frame the user sees could drift from the frame the next save_portrait
+// _reference call captures. The backend call is awaited; the UI state
+// is only flipped on a successful response so a network failure leaves
+// the button in a recoverable state instead of lying.
+function setPausedUI(isPaused) {
+  paused = isPaused;
+  if (isPaused) {
+    els.btnPause.textContent = 'Resume';
+    els.btnPause.style.borderColor = 'var(--yellow)';
+    els.btnPause.style.color = 'var(--yellow)';
+    els.saveRefRow.classList.add('paused');
+    // Pre-fill the god name with whatever the matcher's best candidate
+    // currently is — usually that's what the operator wants to save.
+    // Operator can still edit before confirming.
+    if (!els.saveRefGod.value && lastState && lastState.god) {
+      const guess = lastState.god.confirm_name
+                 || (lastState.god.top_n && lastState.god.top_n[0]
+                     && lastState.god.top_n[0][0])
+                 || '';
+      els.saveRefGod.value = guess;
+    }
+    setTimeout(() => els.saveRefGod.focus(), 50);
+  } else {
+    els.btnPause.textContent = 'Pause';
+    els.btnPause.style.borderColor = '';
+    els.btnPause.style.color = '';
+    els.saveRefRow.classList.remove('paused');
+    els.saveRefGod.value = '';
+  }
+}
+
+els.btnPause.addEventListener('click', async () => {
+  const targetPaused = !paused;
+  els.btnPause.disabled = true;
+  try {
+    const r = await fetch(
+      '/api/detector_debug/' + (targetPaused ? 'pause' : 'resume'),
+      {method: 'POST'},
+    );
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d.ok === false) {
+      toast(`${targetPaused ? 'pause' : 'resume'} failed: ${d.error || r.status}`,
+            6000);
+      return;
+    }
+    setPausedUI(targetPaused);
+    if (targetPaused) {
+      toast('paused — bot scanning halted, view frozen');
+    } else {
+      // Catch up immediately when resuming so the user isn't staring
+      // at the frozen frame waiting for the next 2s poll tick.
+      pollState();
+      refreshFullFrame();
+      toast('resumed');
+    }
+  } catch (e) {
+    toast(`${targetPaused ? 'pause' : 'resume'} failed: ${e}`, 6000);
+  } finally {
+    els.btnPause.disabled = false;
+  }
+});
+
+// Save current portrait as a Portrait_Source/<God>.png reference.
+// Only meaningful while paused (the UI hides the form otherwise via
+// the .paused class). On success the matcher reloads inline server
+// side so the next pollState() call already shows the new confidence.
+async function saveCurrentPortraitReference() {
+  const god = (els.saveRefGod.value || '').trim();
+  if (!god) {
+    toast('enter a god name first', 4000);
+    els.saveRefGod.focus();
+    return;
+  }
+  if (!paused) {
+    toast('pause first so the saved frame matches what you see', 5000);
+    return;
+  }
+  els.btnSaveRef.disabled = true;
+  els.btnSaveRef.textContent = 'Saving...';
+  try {
+    const r = await fetch('/api/detector_debug/save_portrait_reference', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({god_name: god}),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.ok) {
+      toast(`save failed: ${d.error || r.status}`, 6000);
+      return;
+    }
+    toast(`saved ${god} reference (matcher now ${d.icon_count} icons) — `
+        + `unpause to re-check confidence`, 7000);
+    els.saveRefGod.value = '';
+  } catch (e) {
+    toast(`save failed: ${e}`, 6000);
+  } finally {
+    els.btnSaveRef.disabled = false;
+    els.btnSaveRef.textContent = 'Save Reference';
+  }
+}
+
+els.btnSaveRef.addEventListener('click', saveCurrentPortraitReference);
+els.saveRefGod.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Enter') {
+    ev.preventDefault();
+    saveCurrentPortraitReference();
+  }
+});
+
+els.btnSnapNow.addEventListener('click', () => {
+  // Force a refresh even when paused — explicit user action overrides.
+  const wasPaused = paused;
+  paused = false;
+  refreshFullFrame();
+  pollState();
+  paused = wasPaused;
+  toast(wasPaused ? 'refreshed (still paused)' : 'refreshed');
+});
+
+els.btnSaveSnap.addEventListener('click', async () => {
+  try {
+    const r = await fetch('/api/detector_debug/save_snapshot',
+                          {method: 'POST'});
+    const d = await r.json();
+    if (d.ok) {
+      toast(`saved to ${d.path}`, 6000);
+    } else {
+      toast(`save failed: ${d.error || 'unknown'}`, 6000);
+    }
+  } catch (e) {
+    toast(`save failed: ${e}`, 6000);
+  }
+});
+
+// Initial render and start polling loops.
+refreshFullFrame();
+pollState();
+setInterval(pollState,      STATE_POLL_MS);
+setInterval(refreshFullFrame, FRAME_REFRESH_MS);
+</script>
+</body>
+</html>

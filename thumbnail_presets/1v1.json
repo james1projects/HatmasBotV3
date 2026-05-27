@@ -1,0 +1,285 @@
+{
+  "schema_version": 1,
+  "name": "1v1",
+  "description": "Two-god matchup. Cards feathered across the seam, big gold VS centered, my god name asymmetric upper-left, opposing god name lower-right. All text in Big Noodle Titling with stroke + colored glow. Auto-fills labels with god names by default.",
+  "size": [
+    1280,
+    720
+  ],
+  "layers": [
+    {
+      "type": "gradient",
+      "name": "Background",
+      "direction": "horizontal",
+      "stops": [
+        {
+          "at": 0.0,
+          "color": "#0a1530"
+        },
+        {
+          "at": 0.5,
+          "color": "#1a1f2c"
+        },
+        {
+          "at": 1.0,
+          "color": "#3a0a14"
+        }
+      ]
+    },
+    {
+      "type": "image",
+      "name": "Left god card",
+      "src": "{my_god_card}",
+      "pos": [
+        0,
+        0
+      ],
+      "size": [
+        720,
+        720
+      ],
+      "fit": "cover",
+      "fit_anchor": "top",
+      "anchor": "topleft",
+      "feather_edges": {
+        "right": 80
+      },
+      "fallback_text": "{my_god}"
+    },
+    {
+      "type": "image",
+      "name": "Right god card",
+      "src": "{vs_god_card}",
+      "pos": [
+        560,
+        0
+      ],
+      "size": [
+        720,
+        720
+      ],
+      "fit": "cover",
+      "fit_anchor": "top",
+      "anchor": "topleft",
+      "flip_h": true,
+      "feather_edges": {
+        "left": 80
+      },
+      "fallback_text": "{vs_god}"
+    },
+    {
+      "type": "gradient",
+      "name": "Center seam darkening",
+      "pos": [
+        440,
+        0
+      ],
+      "size": [
+        400,
+        720
+      ],
+      "direction": "horizontal",
+      "stops": [
+        {
+          "at": 0.0,
+          "color": "#000000",
+          "opacity": 0.0
+        },
+        {
+          "at": 0.5,
+          "color": "#000000",
+          "opacity": 0.55
+        },
+        {
+          "at": 1.0,
+          "color": "#000000",
+          "opacity": 0.0
+        }
+      ]
+    },
+    {
+      "type": "gradient",
+      "name": "Headline darkening band",
+      "pos": [
+        0,
+        0
+      ],
+      "size": [
+        1280,
+        240
+      ],
+      "direction": "vertical",
+      "stops": [
+        {
+          "at": 0.0,
+          "color": "#000000",
+          "opacity": 0.7
+        },
+        {
+          "at": 0.7,
+          "color": "#000000",
+          "opacity": 0.35
+        },
+        {
+          "at": 1.0,
+          "color": "#000000",
+          "opacity": 0.0
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "name": "VS",
+      "value": "VS",
+      "pos": [
+        640,
+        360
+      ],
+      "anchor": "center",
+      "font": "Big Noodle Titling",
+      "size": 240,
+      "fill": "#ffd24d",
+      "stroke": {
+        "color": "#000000",
+        "width": 10
+      },
+      "shadow": {
+        "color": "#000000",
+        "offset": [
+          6,
+          6
+        ],
+        "blur": 12,
+        "opacity": 0.85
+      }
+    },
+    {
+      "type": "text",
+      "name": "Headline",
+      "value": "{text}",
+      "pos": [
+        200,
+        130
+      ],
+      "anchor": "left_center",
+      "font": "Big Noodle Titling",
+      "size": 120,
+      "fill": "#ffffff",
+      "stroke": {
+        "color": "#000000",
+        "width": 10
+      },
+      "shadow": {
+        "color": "#ffd24d",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 28,
+        "opacity": 0.75
+      },
+      "max_width": 700
+    },
+    {
+      "type": "icon",
+      "name": "My god icon",
+      "god": "{my_god}",
+      "pos": [
+        40,
+        40
+      ],
+      "size": 140,
+      "border": {
+        "color": "#4dc3ff",
+        "width": 6
+      },
+      "shadow": {
+        "color": "#4dc3ff",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 28,
+        "opacity": 0.85
+      }
+    },
+    {
+      "type": "icon",
+      "name": "Vs god icon",
+      "god": "{vs_god}",
+      "pos": [
+        1100,
+        40
+      ],
+      "size": 140,
+      "border": {
+        "color": "#ff4d6d",
+        "width": 6
+      },
+      "shadow": {
+        "color": "#ff4d6d",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 28,
+        "opacity": 0.85
+      }
+    },
+    {
+      "type": "text",
+      "name": "Subtext",
+      "value": "{subtext}",
+      "pos": [
+        1080,
+        590
+      ],
+      "anchor": "right_center",
+      "font": "Big Noodle Titling",
+      "size": 120,
+      "fill": "#ffffff",
+      "stroke": {
+        "color": "#000000",
+        "width": 10
+      },
+      "shadow": {
+        "color": "#ffd24d",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 28,
+        "opacity": 0.75
+      },
+      "max_width": 700,
+      "skip_if_empty": true
+    },
+    {
+      "type": "text",
+      "name": "Result badge",
+      "value": "{result}",
+      "pos": [
+        640,
+        660
+      ],
+      "anchor": "center_bottom",
+      "font": "Big Noodle Titling",
+      "size": 72,
+      "fill": "#39ff8c",
+      "stroke": {
+        "color": "#000000",
+        "width": 8
+      },
+      "shadow": {
+        "color": "#000000",
+        "offset": [
+          4,
+          4
+        ],
+        "blur": 8,
+        "opacity": 0.85
+      },
+      "skip_if_empty": true
+    }
+  ]
+}

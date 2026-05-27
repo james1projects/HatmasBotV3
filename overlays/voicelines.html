@@ -148,23 +148,40 @@
       }
     }
 
-    audioEl.onended = () => { audioEnded = true; checkDone(); };
-    audioEl.onerror = () => { audioEnded = true; checkDone(); };
-    audioEl.oncanplaythrough = () => {};
-    audioEl.src = event.audio_url;
+    // Buffer-then-play. Calling .play() before the browser has
+    // decoded enough audio causes the first few hundred ms to be
+    // clipped — sounds like the line is "cut off" at the start.
+    // We wait for `canplay` (audio) and `canplay` (video, if any)
+    // to fire, then kick off playback for both at once so they
+    // stay tightly in sync.
+    let audioReady = false;
+    let videoReady = !event.video_url;
+
+    function tryStart() {
+      if (!audioReady || !videoReady) return;
+      if (event.video_url) {
+        videoEl.play().catch(() => {});
+      }
+      audioEl.play().catch(e => { audioEnded = true; checkDone(); });
+    }
+
+    audioEl.onended    = () => { audioEnded = true; checkDone(); };
+    audioEl.onerror    = () => { audioEnded = true; checkDone(); };
+    audioEl.oncanplay  = () => { audioReady = true; tryStart(); };
+    audioEl.src        = event.audio_url;
+    // Explicit load() so a previously-played element doesn't reuse
+    // a stale buffer that fires `canplay` instantly with no audio.
+    audioEl.load();
 
     if (event.video_url) {
       videoEl.style.display = 'block';
-      videoEl.onended = () => { videoEnded = true; checkDone(); };
-      videoEl.onerror = () => { videoEnded = true; checkDone(); };
-      videoEl.src = event.video_url;
-      videoEl.oncanplay = () => {
-        videoEl.play().catch(() => {});
-        audioEl.play().catch(e => { audioEnded = true; checkDone(); });
-      };
+      videoEl.onended    = () => { videoEnded = true; checkDone(); };
+      videoEl.onerror    = () => { videoEnded = true; checkDone(); };
+      videoEl.oncanplay  = () => { videoReady = true; tryStart(); };
+      videoEl.src        = event.video_url;
+      videoEl.load();
     } else {
       videoEl.style.display = 'none';
-      audioEl.play().catch(e => { audioEnded = true; checkDone(); });
     }
 
     // Safety timeout — auto-hide after 15 seconds max

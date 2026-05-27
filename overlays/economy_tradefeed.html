@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Hatmas Market — Trade Feed</title>
+<title>Hatmas Market: Trade Feed</title>
 <link rel="stylesheet" href="hatmas_theme.css">
 <style>
   body {
@@ -29,7 +29,7 @@
   }
 
   .feed-title {
-    font-family: 'BigNoodleTitling', 'Poppins', sans-serif;
+    font-family: 'BigNoodleTitling', 'Inter', sans-serif;
     font-size: 17px;
     color: var(--hm-text-secondary);
     letter-spacing: 2px;
@@ -73,7 +73,7 @@
 
   .trade-text {
     flex: 1;
-    font-family: 'Poppins', sans-serif;
+    font-family: 'Inter', sans-serif;
     font-size: 11px;
     color: var(--hm-text-secondary);
     line-height: 1.3;
@@ -180,10 +180,10 @@ function renderTrade(t) {
     text = '<span class="user">' + t.username + '</span> <span class="action-sell">sold</span> <span class="amount">' + n + (n === 1 ? ' share' : ' shares') + '</span> of <span class="god">' + god + '</span>';
   } else if (t.type === 'dividend') {
     cls += ' dividend';
-    text = '<span class="dividend-label">Dividend</span> — <span class="god">' + god + '</span> paid <span class="amount">' + formatAmount(t.total_hats || t.amount || 0) + '</span> to <span class="amount">' + (t.holders || 0) + '</span> holders';
+    text = '<span class="dividend-label">Dividend:</span> <span class="god">' + god + '</span> paid <span class="amount">' + formatAmount(t.total_hats || t.amount || 0) + '</span> to <span class="amount">' + (t.holders || 0) + '</span> holders';
   } else if (t.type === 'free') {
     cls += ' free-share';
-    text = '<span class="free-label">Free share</span> — <span class="god">' + god + '</span> distributed to <span class="amount">' + (t.viewers || 0) + '</span> viewers';
+    text = '<span class="free-label">Free share:</span> <span class="god">' + god + '</span> distributed to <span class="amount">' + (t.viewers || 0) + '</span> viewers';
   }
 
   return '<div class="' + cls + '">' + icon + '<div class="trade-text">' + text + '</div><span class="trade-time">now</span></div>';

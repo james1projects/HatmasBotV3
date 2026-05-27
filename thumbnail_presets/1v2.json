@@ -1,0 +1,445 @@
+{
+  "schema_version": 1,
+  "name": "1v2",
+  "description": "Single video, two 1v1 matchups with the same god of yours. My god dominates the left half full-height; the two opponents share the right half (top and bottom). Two 'VS' markers on the seam, one per matchup. Independent result badges per opponent via {result} and {result2}. Same color language as 1v1 (cyan on my god, red on opponents). Use --vs for the top opponent and --vs2 for the bottom one.",
+  "size": [
+    1280,
+    720
+  ],
+  "layers": [
+    {
+      "type": "gradient",
+      "name": "Background",
+      "direction": "horizontal",
+      "stops": [
+        {
+          "at": 0.0,
+          "color": "#0a1530"
+        },
+        {
+          "at": 0.5,
+          "color": "#1a1f2c"
+        },
+        {
+          "at": 1.0,
+          "color": "#3a0a14"
+        }
+      ]
+    },
+    {
+      "type": "image",
+      "name": "Left god card",
+      "src": "{my_god_card}",
+      "pos": [
+        0,
+        -100
+      ],
+      "size": [
+        700,
+        820
+      ],
+      "fit": "cover",
+      "fit_anchor": "top",
+      "anchor": "topleft",
+      "feather_edges": {
+        "right": 80
+      },
+      "fallback_text": "{my_god}"
+    },
+    {
+      "type": "image",
+      "name": "Top-right god card (vs)",
+      "src": "{vs_god_card}",
+      "pos": [
+        540,
+        -100
+      ],
+      "size": [
+        740,
+        510
+      ],
+      "fit": "cover",
+      "fit_anchor": "top",
+      "anchor": "topleft",
+      "flip_h": true,
+      "feather_edges": {
+        "left": 80,
+        "bottom": 60
+      },
+      "fallback_text": "{vs_god}"
+    },
+    {
+      "type": "image",
+      "name": "Bottom-right god card (vs2)",
+      "src": "{vs2_god_card}",
+      "pos": [
+        540,
+        310
+      ],
+      "size": [
+        740,
+        410
+      ],
+      "fit": "cover",
+      "fit_anchor": "top",
+      "anchor": "topleft",
+      "flip_h": true,
+      "feather_edges": {
+        "left": 80,
+        "top": 60
+      },
+      "fallback_text": "{vs2_god}"
+    },
+    {
+      "type": "gradient",
+      "name": "Vertical seam darkening (left card vs right column)",
+      "pos": [
+        420,
+        0
+      ],
+      "size": [
+        400,
+        720
+      ],
+      "direction": "horizontal",
+      "stops": [
+        {
+          "at": 0.0,
+          "color": "#000000",
+          "opacity": 0.0
+        },
+        {
+          "at": 0.5,
+          "color": "#000000",
+          "opacity": 0.55
+        },
+        {
+          "at": 1.0,
+          "color": "#000000",
+          "opacity": 0.0
+        }
+      ]
+    },
+    {
+      "type": "gradient",
+      "name": "Horizontal seam darkening (between vs and vs2)",
+      "pos": [
+        540,
+        270
+      ],
+      "size": [
+        740,
+        180
+      ],
+      "direction": "vertical",
+      "stops": [
+        {
+          "at": 0.0,
+          "color": "#000000",
+          "opacity": 0.0
+        },
+        {
+          "at": 0.5,
+          "color": "#000000",
+          "opacity": 0.45
+        },
+        {
+          "at": 1.0,
+          "color": "#000000",
+          "opacity": 0.0
+        }
+      ]
+    },
+    {
+      "type": "gradient",
+      "name": "Headline darkening band",
+      "pos": [
+        0,
+        0
+      ],
+      "size": [
+        1280,
+        220
+      ],
+      "direction": "vertical",
+      "stops": [
+        {
+          "at": 0.0,
+          "color": "#000000",
+          "opacity": 0.7
+        },
+        {
+          "at": 0.7,
+          "color": "#000000",
+          "opacity": 0.35
+        },
+        {
+          "at": 1.0,
+          "color": "#000000",
+          "opacity": 0.0
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "name": "VS top",
+      "value": "VS",
+      "pos": [
+        640,
+        180
+      ],
+      "anchor": "center",
+      "font": "Big Noodle Titling",
+      "size": 150,
+      "fill": "#ffd24d",
+      "stroke": {
+        "color": "#000000",
+        "width": 8
+      },
+      "shadow": {
+        "color": "#000000",
+        "offset": [
+          5,
+          5
+        ],
+        "blur": 10,
+        "opacity": 0.85
+      }
+    },
+    {
+      "type": "text",
+      "name": "VS bottom",
+      "value": "VS",
+      "pos": [
+        640,
+        540
+      ],
+      "anchor": "center",
+      "font": "Big Noodle Titling",
+      "size": 150,
+      "fill": "#ffd24d",
+      "stroke": {
+        "color": "#000000",
+        "width": 8
+      },
+      "shadow": {
+        "color": "#000000",
+        "offset": [
+          5,
+          5
+        ],
+        "blur": 10,
+        "opacity": 0.85
+      }
+    },
+    {
+      "type": "text",
+      "name": "Headline",
+      "value": "{text}",
+      "pos": [
+        40,
+        230
+      ],
+      "anchor": "topleft",
+      "font": "Big Noodle Titling",
+      "size": 100,
+      "fill": "#ffffff",
+      "stroke": {
+        "color": "#000000",
+        "width": 10
+      },
+      "shadow": {
+        "color": "#ffd24d",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 28,
+        "opacity": 0.75
+      },
+      "max_width": 540,
+      "skip_if_empty": true
+    },
+    {
+      "type": "icon",
+      "name": "My god icon",
+      "god": "{my_god}",
+      "pos": [
+        40,
+        40
+      ],
+      "size": 140,
+      "border": {
+        "color": "#4dc3ff",
+        "width": 6
+      },
+      "shadow": {
+        "color": "#4dc3ff",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 28,
+        "opacity": 0.85
+      }
+    },
+    {
+      "type": "icon",
+      "name": "Top opponent icon (vs)",
+      "god": "{vs_god}",
+      "pos": [
+        1240,
+        30
+      ],
+      "size": 110,
+      "anchor": "topright",
+      "border": {
+        "color": "#ff4d6d",
+        "width": 5
+      },
+      "shadow": {
+        "color": "#ff4d6d",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 22,
+        "opacity": 0.85
+      }
+    },
+    {
+      "type": "icon",
+      "name": "Bottom opponent icon (vs2)",
+      "god": "{vs2_god}",
+      "pos": [
+        1240,
+        690
+      ],
+      "size": 110,
+      "anchor": "bottomright",
+      "border": {
+        "color": "#ff4d6d",
+        "width": 5
+      },
+      "shadow": {
+        "color": "#ff4d6d",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 22,
+        "opacity": 0.85
+      }
+    },
+    {
+      "type": "text",
+      "name": "Top opponent name",
+      "value": "{vs_god}",
+      "pos": [
+        1100,
+        160
+      ],
+      "anchor": "right_center",
+      "font": "Big Noodle Titling",
+      "size": 56,
+      "fill": "#ffffff",
+      "stroke": {
+        "color": "#000000",
+        "width": 6
+      },
+      "shadow": {
+        "color": "#ff4d6d",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 18,
+        "opacity": 0.75
+      },
+      "max_width": 360,
+      "skip_if_empty": true
+    },
+    {
+      "type": "text",
+      "name": "Bottom opponent name",
+      "value": "{vs2_god}",
+      "pos": [
+        1100,
+        560
+      ],
+      "anchor": "right_center",
+      "font": "Big Noodle Titling",
+      "size": 56,
+      "fill": "#ffffff",
+      "stroke": {
+        "color": "#000000",
+        "width": 6
+      },
+      "shadow": {
+        "color": "#ff4d6d",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 18,
+        "opacity": 0.75
+      },
+      "max_width": 360,
+      "skip_if_empty": true
+    },
+    {
+      "type": "text",
+      "name": "Top result badge",
+      "value": "{result}",
+      "pos": [
+        560,
+        260
+      ],
+      "anchor": "left_center",
+      "font": "Big Noodle Titling",
+      "size": 60,
+      "fill": "#39ff8c",
+      "stroke": {
+        "color": "#000000",
+        "width": 7
+      },
+      "shadow": {
+        "color": "#000000",
+        "offset": [
+          3,
+          3
+        ],
+        "blur": 8,
+        "opacity": 0.85
+      },
+      "skip_if_empty": true
+    },
+    {
+      "type": "text",
+      "name": "Bottom result badge",
+      "value": "{result2}",
+      "pos": [
+        560,
+        460
+      ],
+      "anchor": "left_center",
+      "font": "Big Noodle Titling",
+      "size": 60,
+      "fill": "#39ff8c",
+      "stroke": {
+        "color": "#000000",
+        "width": 7
+      },
+      "shadow": {
+        "color": "#000000",
+        "offset": [
+          3,
+          3
+        ],
+        "blur": 8,
+        "opacity": 0.85
+      },
+      "skip_if_empty": true
+    }
+  ]
+}

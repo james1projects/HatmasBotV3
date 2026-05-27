@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Hatmas Market — Portfolio Leaderboard</title>
+<title>Hatmas Market: Portfolio Leaderboard</title>
 <link rel="stylesheet" href="hatmas_theme.css">
 <style>
   body {
@@ -29,7 +29,7 @@
   }
 
   .board-title {
-    font-family: 'BigNoodleTitling', 'Poppins', sans-serif;
+    font-family: 'BigNoodleTitling', 'Inter', sans-serif;
     font-size: 17px;
     color: var(--hm-text-secondary);
     letter-spacing: 2px;
@@ -37,7 +37,7 @@
   }
 
   .board-subtitle {
-    font-family: 'Poppins', sans-serif;
+    font-family: 'Inter', sans-serif;
     font-size: 9px;
     color: var(--hm-text-muted);
     text-transform: uppercase;
@@ -98,7 +98,7 @@
   }
 
   .viewer-name {
-    font-family: 'Poppins', sans-serif;
+    font-family: 'Inter', sans-serif;
     font-weight: 600;
     font-size: 12px;
     color: var(--hm-text);
@@ -156,7 +156,7 @@
   .board-footer {
     padding: 7px 14px;
     border-top: 1px solid var(--hm-separator);
-    font-family: 'BigNoodleTitling', 'Poppins', sans-serif;
+    font-family: 'BigNoodleTitling', 'Inter', sans-serif;
     font-size: 11px;
     color: var(--hm-text-muted);
     letter-spacing: 1px;
@@ -215,7 +215,7 @@ function formatValue(v) {
 function getRankArrow(rankChange) {
   if (rankChange > 0) return '▲';
   if (rankChange < 0) return '▼';
-  return '—';
+  return '=';
 }
 
 function getRankArrowClass(rankChange) {

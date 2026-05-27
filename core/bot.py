@@ -519,6 +519,9 @@ class HatmasBot(commands.Bot):
         """Fired when a viewer redeems a custom channel point reward."""
         try:
             reward_id = payload.reward.id if hasattr(payload, "reward") else None
+            # The redemption itself has its own ID — needed by Helix when we
+            # want to cancel/refund the redemption (PATCH /custom_rewards/redemptions).
+            redemption_id = getattr(payload, "id", None)
             # TwitchIO model uses .user.name, not .user_name
             user_name = "unknown"
             if hasattr(payload, "user") and payload.user:
@@ -531,7 +534,7 @@ class HatmasBot(commands.Bot):
             # Dispatch to voice line plugin if it handles this reward
             vl = self.plugins.get("voicelines")
             if vl and hasattr(vl, "handle_redemption"):
-                handled = await vl.handle_redemption(reward_id, user_name)
+                handled = await vl.handle_redemption(reward_id, user_name, redemption_id)
                 if handled:
                     return
 

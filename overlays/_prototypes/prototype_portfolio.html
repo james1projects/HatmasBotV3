@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Portfolio Overlay — Hatmas Economy</title>
+<title>Portfolio Overlay: Hatmas Economy</title>
 <link rel="stylesheet" href="hatmas_theme.css">
 <style>
   body {
@@ -338,7 +338,7 @@
   <div class="footer">
     <div class="footer-stat">
       <span class="footer-stat-label">RANK</span>
-      <span class="footer-stat-value rank" id="rank">#—</span>
+      <span class="footer-stat-value rank" id="rank">#--</span>
     </div>
     <div class="footer-stat">
       <span class="footer-stat-label">GODS</span>
@@ -350,7 +350,7 @@
     </div>
     <div class="footer-stat">
       <span class="footer-stat-label">BEST</span>
-      <span class="footer-stat-value" id="bestGod" style="color: var(--hm-green);">—</span>
+      <span class="footer-stat-value" id="bestGod" style="color: var(--hm-green);">--</span>
     </div>
     <div class="footer-stat">
       <span class="footer-stat-label">NET WORTH</span>
@@ -537,7 +537,7 @@ function renderPortfolio(user) {
   document.getElementById('rank').textContent = `#${user.rank}`;
   document.getElementById('godCount').textContent = user.holdings.length;
   document.getElementById('totalShares').textContent = totalShares;
-  document.getElementById('bestGod').textContent = bestGod || '—';
+  document.getElementById('bestGod').textContent = bestGod || '--';
   document.getElementById('netWorth').textContent = formatHats(netWorth);
 
   // Render holdings (sorted by value descending)

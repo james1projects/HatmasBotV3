@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Hatmas Market — Stock Ticker</title>
+<title>Hatmas Market: Stock Ticker</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@400;600;700&display=swap');
 
@@ -226,11 +226,8 @@ const gods = [
 ];
 
 // Emoji fallback for god icons (in production: actual icons)
-const godEmojis = {
-  "Ymir": "❄️", "Athena": "🦉", "Thanatos": "💀", "Danzaburou": "🦝",
-  "Bellona": "⚔️", "Anubis": "🐺", "Loki": "🗡️", "Zeus": "⚡",
-  "Poseidon": "🔱", "Agni": "🔥", "Kukulkan": "🐍", "Hercules": "💪"
-};
+// Per-god icons handled via god icon images, not emoji.
+const godEmojis = {};
 
 function createMiniChart(trend, isUp) {
   const w = 48, h = 24, pad = 2;
@@ -266,9 +263,9 @@ function renderTicker() {
   for (let dup = 0; dup < 2; dup++) {
     gods.forEach(god => {
       const changeClass = god.change > 0 ? 'up' : god.change < 0 ? 'down' : 'neutral';
-      const changeStr = god.change > 0 ? `+${god.change.toFixed(1)}%` : god.change === 0 ? '—' : `${god.change.toFixed(1)}%`;
+      const changeStr = god.change > 0 ? `+${god.change.toFixed(1)}%` : god.change === 0 ? '0.0%' : `${god.change.toFixed(1)}%`;
       const arrow = god.change > 0 ? '▲' : god.change < 0 ? '▼' : '';
-      const emoji = godEmojis[god.name] || '⚔️';
+      const emoji = godEmojis[god.name] || '';
       const chart = createMiniChart(god.trend, god.change >= 0);
 
       html += `

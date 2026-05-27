@@ -11,6 +11,17 @@ data/*.json
 CURRENT_TASK.md
 Future_Features.txt
 Gods - SMITE 2 Wiki.html
+cleanup_plan.md
+
+# === Perf / debug logs (left over from one-off testing) ===
+scan*.log
+
+# === build_thumbnail.py test artifacts at repo root ===
+# Real outputs go in thumbnails/ — these are scratchpad renders.
+test*.png
+test*.psd
+test_preview.png
+test_layers/
 
 
 # === PYTHON ===
@@ -37,7 +48,39 @@ desktop.ini
 
 # === DIRECTORIES TO IGNORE ===
 Custom God Icons/
+Custom God Cards/
+Portrait_Source/
 unpacked_doc/
 Table Reference — TwitchIO 3.2.1 documentation_files/
-data/
+data/*
 Gods - SMITE 2 Wiki_files/
+
+# === EXCEPTIONS to data/ ignore ===
+# Test fixtures are regression-test infrastructure, NOT runtime data —
+# they live under data/ for proximity to the rest of the detector
+# pipeline but they need to be committed so the test suite survives a
+# fresh clone.  Re-include the whole subtree.
+!data/test_fixtures/
+!data/test_fixtures/**
+
+# === LARGE / SCRATCH DIRECTORIES (never commit) ===
+# recordings/ regularly grows past 100 GB; inbox/ holds in-progress
+# OBS recordings; thumbnails/ is build_thumbnail.py's output landing
+# zone (can hit hundreds of MB of PSDs); jobs/ is the Vegas-pipeline
+# orchestration scratch (current.json / go.flag handshake files).
+recordings/
+inbox/
+thumbnails/
+jobs/
+
+# === LOCAL TOOL STATE ===
+# Claude Code's per-machine settings live here and should not travel
+# between machines.
+.claude/settings.local.json
+
+# === ACCIDENTAL FILES ===
+# Empty / short scratch files that look like they came from a typo'd
+# shell redirection (e.g. `git status > git` or `find ... > query`).
+# Listed so they don't reappear in `git status` if recreated by mistake.
+/git
+/query

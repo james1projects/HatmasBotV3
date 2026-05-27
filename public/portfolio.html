@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#202C39">
+<title>{{OG_TITLE}}</title>
+<meta name="description" content="{{OG_DESCRIPTION}}">
+<meta property="og:type" content="profile">
+<meta property="og:site_name" content="Hatmas Market">
+<meta property="og:url" content="{{OG_URL}}">
+<meta property="og:title" content="{{OG_TITLE}}">
+<meta property="og:description" content="{{OG_DESCRIPTION}}">
+<meta property="og:image" content="https://hatmaster.tv/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{OG_TITLE}}">
+<meta name="twitter:description" content="{{OG_DESCRIPTION}}">
+<meta name="twitter:image" content="https://hatmaster.tv/og-image.png">
+<link rel="stylesheet" href="/theme.css">
+<style>
+  .wrap {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 16px 14px 80px;
+  }
+
+  .brand-band {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 1px solid var(--border);
+    padding: 8px 0 12px;
+    margin-bottom: 16px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--text-dim);
+  }
+  .brand-band a.left {
+    color: var(--accent);
+    font-weight: 700;
+  }
+  .brand-band .status .dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--text-fade);
+    margin-right: 6px;
+    vertical-align: middle;
+    transition: background 0.2s;
+  }
+  .brand-band .status .dot.connected {
+    background: var(--green);
+    box-shadow: 0 0 6px var(--green);
+  }
+  .brand-band .status .dot.disconnected { background: var(--red); }
+
+  /* ─── header ──────────────────────────────────────────────────── */
+  header {
+    padding: 14px 0 16px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+  }
+  header .kicker {
+    /* Inherits .kicker base style from theme.css (mono, amber, tracked).
+       Just adds the bit of bottom spacing for this page's header. */
+    display: block;
+    margin-bottom: 10px;
+  }
+  .name {
+    font-size: 32px;
+    font-weight: 700;
+    margin: 0 0 6px;
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+  }
+  .subname {
+    font-family: var(--font-mono);
+    color: var(--text-dim);
+    font-size: 11px;
+    margin: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+  }
+
+  /* Rank pill — sits under the username. Hidden by default; the
+     hydrate() call below reveals it only when the API returns a
+     real rank (portfolios with zero value don't appear in the
+     leaderboard and stay rankless). */
+  .rank-pill {
+    display: none;
+    margin-top: 10px;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .rank-pill.shown { display: inline-flex; }
+  .rank-pill .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: var(--panel);
+    border: 1px solid var(--accent);
+    border-radius: 100px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+  .rank-pill .badge .num {
+    font-feature-settings: 'tnum' 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .rank-pill .pct {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  /* ─── total card ─────────────────────────────────────────────── */
+  .total-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    margin: 0 0 22px;
+  }
+  .total-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+  }
+  .total-value {
+    font-family: var(--font-mono);
+    font-feature-settings: 'tnum' 1;
+    font-variant-numeric: tabular-nums;
+    font-size: 38px;
+    font-weight: 700;
+    line-height: 1;
+    transition: color 0.4s;
+    color: var(--accent);
+  }
+  .total-value.flash { color: var(--tick-flash); }
+  .total-pl {
+    font-family: var(--font-mono);
+    font-feature-settings: 'tnum' 1;
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+    margin-top: 6px;
+  }
+  .total-pl.up { color: var(--green); }
+  .total-pl.down { color: var(--red); }
+
+  /* ─── card primitive ──────────────────────────────────────────── */
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    margin: 14px 0;
+  }
+
+  /* ─── holdings ───────────────────────────────────────────────── */
+  .holding {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+    margin-bottom: 4px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 4px 16px;
+    align-items: center;
+  }
+  .holding .god {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .holding .price {
+    font-family: var(--font-mono);
+    font-feature-settings: 'tnum' 1;
+    font-variant-numeric: tabular-nums;
+    font-size: 15px;
+    font-weight: 600;
+    text-align: right;
+    transition: color 0.4s, transform 0.15s;
+    color: var(--accent);
+  }
+  .holding .price.up   { color: var(--green); }
+  .holding .price.down { color: var(--red); }
+  .holding .price.flash { color: var(--tick-flash); transform: scale(1.05); }
+  .holding .meta {
+    font-family: var(--font-mono);
+    font-feature-settings: 'tnum' 1;
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .holding .value {
+    font-family: var(--font-mono);
+    font-feature-settings: 'tnum' 1;
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    color: var(--text-fade);
+    text-align: right;
+  }
+
+  /* ─── activity ────────────────────────────────────────────────── */
+  .event {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    margin-bottom: 3px;
+    font-size: 12px;
+  }
+  .event .desc { color: var(--text); }
+  .event .time {
+    font-family: var(--font-mono);
+    color: var(--text-fade);
+    font-size: 10px;
+    white-space: nowrap;
+    padding-left: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .event.dividend { border-left: 2px solid var(--accent); }
+  .event.share    { border-left: 2px solid var(--green); }
+
+  .empty {
+    text-align: center;
+    color: var(--text-fade);
+    padding: 24px 10px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand-band">
+      <a class="left" href="/">// HATMASTER.TV</a>
+      <div class="status"><span class="dot" id="live-dot"></span><span id="status">connecting…</span></div>
+    </div>
+
+    <header>
+      <div class="kicker">// PORTFOLIO</div>
+      <h1 class="name" id="display-name">Loading…</h1>
+      <p class="subname" id="subname"></p>
+      <div class="rank-pill" id="rank-pill">
+        <span class="badge">RANK <span class="num" id="rank-num"></span>
+          <span style="color: var(--text-dim); font-weight:400;"> / </span>
+          <span class="num" id="rank-total"></span></span>
+        <span class="pct" id="rank-pct"></span>
+      </div>
+    </header>
+
+    <div class="total-card">
+      <div class="total-label">Portfolio value</div>
+      <div class="total-value" id="total-value">--</div>
+      <div class="total-pl" id="total-pl"></div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Holdings</div>
+      <div id="holdings"></div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Recent activity</div>
+      <div id="activity"></div>
+    </div>
+
+    <div class="footer-brand">
+      <div class="footer-build">
+        <span class="dot"></span><span id="last-ping">DATA · &lt;1s</span> &nbsp;·&nbsp; HATMASBOT v2.5
+      </div>
+      <div>Made by <a href="https://twitch.tv/hatmaster" target="_blank">Hatmaster</a> &amp; Claude</div>
+    </div>
+  </div>
+
+<script>
+  // Determine platform from URL path: /yt/<id> or /twitch/<name>.
+  // The same template renders both — the only difference is which API
+  // endpoint we hit and which WebSocket bucket we subscribe to.
+  const _pathParts = location.pathname.split('/').filter(Boolean);
+  const _platform = _pathParts[0] === 'twitch' ? 'twitch' : 'youtube';
+  const channelId = decodeURIComponent(_pathParts[1] || '');
+  const PORTFOLIO_API_URL = (_platform === 'twitch'
+    ? '/api/twitch/' + encodeURIComponent(channelId)
+    : '/api/yt/'    + encodeURIComponent(channelId));
+  const PORTFOLIO_WS_PATH = (_platform === 'twitch'
+    ? '/ws/twitch/' + encodeURIComponent(channelId)
+    : '/ws/yt/'    + encodeURIComponent(channelId));
+
+  // The stream embed used to live here and on /god/<name>, copy-pasted
+  // from the landing page. Removed — the embed makes sense on the
+  // landing hub but not on a per-viewer portfolio page (or a per-god
+  // detail page). Viewers who want to watch can jump to / from the
+  // brand-band link in the top-left.
+
+  // Bloomberg-style "last data received" tick in the footer. Bumped
+  // from any successful poll/WebSocket message — see WebSocket
+  // handler below for the bumpPing() call.
+  let _lastPingMs = Date.now();
+  function bumpPing() { _lastPingMs = Date.now(); updatePingLabel(); }
+  function updatePingLabel() {
+    const el = document.getElementById('last-ping');
+    if (!el) return;
+    const ago = Math.floor((Date.now() - _lastPingMs) / 1000);
+    if (ago < 2)       el.textContent = 'DATA · <1s';
+    else if (ago < 60) el.textContent = 'DATA · ' + ago + 's';
+    else               el.textContent = 'DATA · ' + Math.floor(ago / 60) + 'm';
+  }
+  setInterval(updatePingLabel, 1000);
+
+  const $name      = document.getElementById('display-name');
+  const $subname   = document.getElementById('subname');
+  const $totalVal  = document.getElementById('total-value');
+  const $totalPL   = document.getElementById('total-pl');
+  const $holdings  = document.getElementById('holdings');
+  const $activity  = document.getElementById('activity');
+  const $status    = document.getElementById('status');
+  const $liveDot   = document.getElementById('live-dot');
+
+  let state = {
+    holdings: {},
+    totalCost: 0,
+    displayName: '',
+  };
+
+  loadPortfolio();
+
+  async function loadPortfolio() {
+    try {
+      const resp = await fetch(PORTFOLIO_API_URL);
+      if (resp.status === 404) {
+        $name.textContent = 'Portfolio not found';
+        $subname.textContent = 'no shares earned yet';
+        return;
+      }
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      bumpPing();
+      hydrate(data);
+      connectWebSocket();
+    } catch (err) {
+      $name.textContent = "ERR · couldn't load";
+      $subname.textContent = err.message || 'error';
+    }
+  }
+
+  function hydrate(data) {
+    state.displayName = data.display_name;
+    state.totalCost = data.total_cost || 0;
+    state.holdings = {};
+
+    document.title = data.display_name + ': Hatmas Market';
+    $name.textContent = data.display_name;
+    $subname.textContent = (_platform === 'twitch'
+      ? 'TWITCH PORTFOLIO'
+      : 'YOUTUBE PORTFOLIO');
+
+    // Rank pill — only render when the API gives us a real rank.
+    // Portfolios with zero positive-value holdings don't appear in
+    // the leaderboard and stay rankless; we hide the pill in that
+    // case rather than show "rank null".
+    const $pill = document.getElementById('rank-pill');
+    if (data.rank && data.total_traders) {
+      document.getElementById('rank-num').textContent = data.rank;
+      document.getElementById('rank-total').textContent = data.total_traders;
+      const pct = (data.rank / data.total_traders) * 100;
+      // "TOP 6%" framing reads more flattering than the raw rank
+      // when you're near the top; floor to 1% so a clear winner
+      // doesn't get "TOP 0%".
+      const topPct = Math.max(1, Math.ceil(pct));
+      document.getElementById('rank-pct').textContent =
+        'TOP ' + topPct + '%';
+      $pill.classList.add('shown');
+    } else {
+      $pill.classList.remove('shown');
+    }
+
+    $holdings.innerHTML = '';
+    if (!data.holdings.length) {
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = 'No active holdings yet. Comment on a Smite video to earn shares.';
+      $holdings.appendChild(empty);
+    } else {
+      for (const h of data.holdings) {
+        state.holdings[h.god] = h;
+        $holdings.appendChild(renderHolding(h));
+      }
+    }
+
+    renderTotal();
+    renderActivity(data.recent || []);
+  }
+
+  function renderHolding(h) {
+    const el = document.createElement('div');
+    el.className = 'holding';
+    el.dataset.god = h.god;
+    el.innerHTML = `
+      <div>
+        <div class="god">${escapeHtml(h.god)}</div>
+        <div class="meta">${h.shares.toFixed(h.shares < 10 ? 2 : 1)} shares · avg ${h.avg_cost.toFixed(0)}</div>
+      </div>
+      <div>
+        <div class="price" data-price>${h.price.toFixed(0)}</div>
+        <div class="value" data-value>${h.value.toFixed(0)} hats</div>
+      </div>`;
+    return el;
+  }
+
+  function renderTotal() {
+    let totalValue = 0;
+    for (const god in state.holdings) {
+      totalValue += state.holdings[god].value;
+    }
+    $totalVal.textContent = totalValue.toFixed(0) + ' hats';
+    const pl = totalValue - state.totalCost;
+    if (state.totalCost > 0) {
+      const pct = (pl / state.totalCost) * 100;
+      $totalPL.textContent =
+        (pl >= 0 ? '+' : '') + pl.toFixed(0) + ' hats ' +
+        '(' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%)';
+      $totalPL.className = 'total-pl ' + (pl >= 0 ? 'up' : 'down');
+    } else {
+      $totalPL.textContent = '';
+      $totalPL.className = 'total-pl';
+    }
+  }
+
+  function renderActivity(events) {
+    $activity.innerHTML = '';
+    if (!events.length) {
+      const empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = 'No activity yet';
+      $activity.appendChild(empty);
+      return;
+    }
+    for (const e of events) {
+      const el = document.createElement('div');
+      const isDividend = (e.type === 'dividend_share' || e.type === 'dividend');
+      el.className = 'event ' + (isDividend ? 'dividend' : 'share');
+      const desc = document.createElement('div');
+      desc.className = 'desc';
+      if (e.type === 'comment_share') {
+        desc.textContent = '+' + e.shares.toFixed(2) + ' share of ' + e.god + ' (comment)';
+      } else if (e.type === 'dividend_share') {
+        desc.textContent = '+' + e.shares.toFixed(3) + ' bonus ' + e.god + ' (dividend)';
+      } else if (e.type === 'dividend') {
+        // Twitch dividend (paid in hats)
+        desc.textContent = '+' + (e.total || 0).toFixed(0) + ' hats from ' + e.god + ' dividend';
+      } else if (e.type === 'free_share') {
+        desc.textContent = '+' + e.shares.toFixed(2) + ' free share of ' + e.god;
+      } else if (e.type === 'buy') {
+        desc.textContent = 'Bought ' + e.shares.toFixed(2) + ' ' + e.god + ' @ ' + e.price.toFixed(0);
+      } else if (e.type === 'sell') {
+        desc.textContent = 'Sold ' + e.shares.toFixed(2) + ' ' + e.god + ' @ ' + e.price.toFixed(0);
+      } else {
+        desc.textContent = e.type + ' ' + e.shares + ' ' + e.god;
+      }
+      const time = document.createElement('div');
+      time.className = 'time';
+      time.textContent = relativeTime(e.timestamp);
+      el.appendChild(desc);
+      el.appendChild(time);
+      $activity.appendChild(el);
+    }
+  }
+
+  // ─── live updates via WebSocket ──────────────────────────────────
+  let ws = null;
+  let reconnectTimer = null;
+  let reconnectDelay = 1000;
+
+  function connectWebSocket() {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const url = proto + '//' + location.host + PORTFOLIO_WS_PATH;
+    try {
+      ws = new WebSocket(url);
+    } catch (err) {
+      scheduleReconnect();
+      return;
+    }
+    ws.onopen = () => {
+      $status.textContent = 'LIVE';
+      $liveDot.className = 'dot connected';
+      reconnectDelay = 1000;
+    };
+    ws.onmessage = (msg) => {
+      try {
+        const payload = JSON.parse(msg.data);
+        bumpPing();
+        handleEvent(payload.event, payload.data);
+      } catch (e) {}
+    };
+    ws.onclose = () => {
+      $status.textContent = 'reconnecting…';
+      $liveDot.className = 'dot disconnected';
+      scheduleReconnect();
+    };
+    ws.onerror = () => {};
+  }
+
+  function scheduleReconnect() {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => {
+      connectWebSocket();
+      reconnectDelay = Math.min(reconnectDelay * 1.6, 30000);
+    }, reconnectDelay);
+  }
+
+  function handleEvent(name, data) {
+    if (!data) return;
+    const god = data.god_name || data.god;
+    if (!god) return;
+    const h = state.holdings[god];
+    if (!h) return;
+
+    if (name === 'god_stock_update' || name === 'god_stock_update_kd') {
+      const newPrice = Number(data.price);
+      if (!isFinite(newPrice)) return;
+      const oldPrice = h.price;
+      h.price = newPrice;
+      h.value = h.shares * newPrice;
+      h.pl = h.value - h.shares * h.avg_cost;
+      updateHoldingDom(god, oldPrice, newPrice);
+      renderTotal();
+      flashTotal();
+    } else if (name === 'dividend_paid') {
+      const rate = Number(data.rate) || 0.05;
+      const bonus = h.shares * rate;
+      h.shares = h.shares * (1 + rate);
+      h.avg_cost = h.avg_cost / (1 + rate);
+      h.value = h.shares * h.price;
+      h.pl = h.value - h.shares * h.avg_cost;
+      const old = $holdings.querySelector(`[data-god="${cssEscape(god)}"]`);
+      if (old) old.replaceWith(renderHolding(h));
+      renderTotal();
+      flashTotal();
+      prependActivity({
+        god: god,
+        type: 'dividend_share',
+        shares: bonus,
+        timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
+      });
+    }
+  }
+
+  function updateHoldingDom(god, oldPrice, newPrice) {
+    const card = $holdings.querySelector(`[data-god="${cssEscape(god)}"]`);
+    if (!card) return;
+    const priceEl = card.querySelector('[data-price]');
+    const valueEl = card.querySelector('[data-value]');
+    priceEl.textContent = newPrice.toFixed(0);
+    const h = state.holdings[god];
+    valueEl.textContent = h.value.toFixed(0) + ' hats';
+    priceEl.classList.remove('up', 'down', 'flash');
+    void priceEl.offsetWidth;
+    if (newPrice > oldPrice) {
+      priceEl.classList.add('flash', 'up');
+    } else if (newPrice < oldPrice) {
+      priceEl.classList.add('flash', 'down');
+    }
+    setTimeout(() => priceEl.classList.remove('flash'), 600);
+  }
+
+  function flashTotal() {
+    $totalVal.classList.add('flash');
+    setTimeout(() => $totalVal.classList.remove('flash'), 500);
+  }
+
+  function prependActivity(e) {
+    const el = document.createElement('div');
+    el.className = 'event dividend';
+    el.innerHTML =
+      '<div class="desc">+' + e.shares.toFixed(3) + ' bonus ' +
+        escapeHtml(e.god) + ' (dividend)</div>' +
+      '<div class="time">now</div>';
+    if ($activity.firstChild && $activity.firstChild.classList?.contains('empty')) {
+      $activity.innerHTML = '';
+    }
+    $activity.insertBefore(el, $activity.firstChild);
+    while ($activity.children.length > 20) {
+      $activity.removeChild($activity.lastChild);
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[c]);
+  }
+  function cssEscape(s) {
+    if (window.CSS && CSS.escape) return CSS.escape(s);
+    return String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
+  }
+  function relativeTime(iso) {
+    if (!iso) return '--';
+    const t = Date.parse(iso.replace(' ', 'T') + 'Z');
+    if (isNaN(t)) return iso;
+    const diff = Date.now() - t;
+    const sec = Math.floor(diff / 1000);
+    if (sec < 60) return 'now';
+    if (sec < 3600) return Math.floor(sec / 60) + 'm';
+    if (sec < 86400) return Math.floor(sec / 3600) + 'h';
+    return Math.floor(sec / 86400) + 'd';
+  }
+
+  setInterval(loadPortfolio, 5 * 60 * 1000);
+</script>
+</body>
+</html>

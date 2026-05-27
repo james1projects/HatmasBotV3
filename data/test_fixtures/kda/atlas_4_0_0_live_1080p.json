@@ -1,0 +1,71 @@
+{
+  "fixture_version": 1,
+  "image": "atlas_4_0_0_live_1080p.png",
+  "source": "data/detector_snapshots/20260517_161303/fullframe.png",
+  "captured": "2026-05-17T22:13",
+  "context": {
+    "god": "Atlas",
+    "mode": "live (OBS-scaled 1080p capture, not VOD)",
+    "resolution": [1920, 1080],
+    "notes": "Clean baseline frame from an early-game Atlas match. Bright HUD, no overlays, no colored bleed-through into the K/D/A bar. Used as the canary fixture for the KDA reader: if this one ever fails, something fundamental in the pipeline (region coords, binarisation, template matcher) regressed."
+  },
+  "expected": {
+    "kda": [4, 0, 0],
+    "failure_reason": null,
+    "groups": [
+      {
+        "label": "K",
+        "concatenated": "4",
+        "digit_count": 1,
+        "digits": [
+          {
+            "best": "4",
+            "verdict": "accepted",
+            "method": "template",
+            "max_distance": 0.05,
+            "min_margin": 0.08
+          }
+        ]
+      },
+      {
+        "label": "D",
+        "concatenated": "0",
+        "digit_count": 1,
+        "digits": [
+          {
+            "best": "0",
+            "verdict": "accepted",
+            "method": "template",
+            "max_distance": 0.10,
+            "min_margin": 0.20
+          }
+        ]
+      },
+      {
+        "label": "A",
+        "concatenated": "0",
+        "digit_count": 1,
+        "digits": [
+          {
+            "best": "0",
+            "verdict": "accepted",
+            "method": "template",
+            "max_distance": 0.10,
+            "min_margin": 0.20
+          }
+        ]
+      }
+    ],
+    "binarization": {
+      "chosen_method_in": ["otsu", "adaptive"],
+      "component_count": 6,
+      "icon_count": 3,
+      "digit_count": 3
+    }
+  },
+  "tolerance": {
+    "max_distance_slack": 0.05,
+    "min_margin_slack": 0.05,
+    "notes": "Distances/margins shift slightly with binarisation tweaks. Use the slack values when comparing actual to expected — kda tuple must be exact, but distance/margin numbers only have to be within slack of the recorded values."
+  }
+}

@@ -9,8 +9,8 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   body {
-    background: #0a0b12;
-    color: #e8ddd0;
+    background: #202C39;
+    color: #FFFFFF;
     font-family: 'Inter', sans-serif;
     display: flex;
     flex-direction: column;
@@ -27,7 +27,7 @@
   #startup-overlay {
     position: fixed;
     inset: 0;
-    background: #0a0b12;
+    background: #202C39;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -41,12 +41,12 @@
   #startup-overlay h2 {
     font-size: 18px;
     font-weight: 400;
-    color: rgba(196, 168, 130, 0.7);
+    color: rgba(223, 160, 110, 0.7);
   }
 
   #startup-overlay p {
     font-size: 13px;
-    color: rgba(196, 168, 130, 0.4);
+    color: rgba(223, 160, 110, 0.4);
     max-width: 320px;
     text-align: center;
     line-height: 1.5;
@@ -55,10 +55,10 @@
   #enable-btn {
     margin-top: 8px;
     padding: 12px 32px;
-    background: rgba(196, 168, 130, 0.15);
-    border: 1px solid rgba(196, 168, 130, 0.3);
+    background: rgba(223, 160, 110, 0.15);
+    border: 1px solid rgba(223, 160, 110, 0.3);
     border-radius: 8px;
-    color: #c4a882;
+    color: #DFA06E;
     font-family: 'Inter', sans-serif;
     font-size: 14px;
     cursor: pointer;
@@ -66,19 +66,20 @@
   }
 
   #enable-btn:hover {
-    background: rgba(196, 168, 130, 0.25);
-    border-color: rgba(196, 168, 130, 0.5);
+    background: rgba(223, 160, 110, 0.25);
+    border-color: rgba(223, 160, 110, 0.5);
   }
 
   #status {
     margin-top: 24px;
     font-size: 12px;
-    color: rgba(196, 168, 130, 0.3);
+    color: rgba(223, 160, 110, 0.3);
     text-align: center;
   }
 
-  #status.active { color: rgba(130, 196, 140, 0.6); }
-  #status.waiting { color: rgba(196, 168, 130, 0.5); }
+  /* Active = Bronze accent (positive). Waiting = same bronze at lower alpha. */
+  #status.active { color: rgba(223, 160, 110, 0.85); }
+  #status.waiting { color: rgba(223, 160, 110, 0.5); }
 
   #player-wrap {
     width: 480px;
@@ -86,7 +87,7 @@
     border-radius: 8px;
     overflow: hidden;
     background: #000;
-    border: 1px solid rgba(196, 168, 130, 0.1);
+    border: 1px solid rgba(223, 160, 110, 0.1);
   }
 
   body.obs-mode #player-wrap {
@@ -257,7 +258,7 @@ function playVideo(videoId) {
   if (!audioEnabled) {
     pendingVideoId = videoId;
     console.log('[HatmasBot YT] Video queued, waiting for audio enable:', videoId);
-    setStatus('Song waiting — click Enable Audio above', '');
+    setStatus('Song waiting. Click Enable Audio above.', '');
     return;
   }
 

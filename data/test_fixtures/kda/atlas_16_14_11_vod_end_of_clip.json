@@ -1,0 +1,93 @@
+{
+  "fixture_version": 1,
+  "image": "atlas_16_14_11_vod_end_of_clip.png",
+  "source": "recordings/Atlas/Atlas-16.mp4 last frame @ 044.4s",
+  "captured": "2026-05-27",
+  "context": {
+    "god": "Atlas",
+    "mode": "VOD end-of-clip frame (AV1, 1080p60)",
+    "resolution": [
+      1920,
+      1080
+    ],
+    "notes": "Last frame of recordings/Atlas/Atlas-16.mp4. KDA=16/14/11 \u2014 every component is double-digit, so this exercises the digit-grouping pass (two largest x-gaps must correctly split into [K][D][A] with 2+2+2 digits). Caught by the end-of-clip detector fix."
+  },
+  "expected": {
+    "kda": [
+      16,
+      14,
+      11
+    ],
+    "failure_reason": null,
+    "groups": [
+      {
+        "label": "K",
+        "concatenated": "16",
+        "digit_count": 2,
+        "digits": [
+          {
+            "best": "1",
+            "verdict": "accepted",
+            "method": "template",
+            "max_distance": 0.12,
+            "min_margin": 0.09
+          },
+          {
+            "best": "6",
+            "verdict": "accepted",
+            "method": "template",
+            "max_distance": 0.12,
+            "min_margin": 0.12
+          }
+        ]
+      },
+      {
+        "label": "D",
+        "concatenated": "14",
+        "digit_count": 2,
+        "digits": [
+          {
+            "best": "1",
+            "verdict": "accepted",
+            "method": "template",
+            "max_distance": 0.19,
+            "min_margin": 0.02
+          },
+          {
+            "best": "4",
+            "verdict": "accepted",
+            "method": "template",
+            "max_distance": 0.11,
+            "min_margin": 0.02
+          }
+        ]
+      },
+      {
+        "label": "A",
+        "concatenated": "11",
+        "digit_count": 2,
+        "digits": [
+          {
+            "best": "1",
+            "verdict": "accepted",
+            "method": "template",
+            "max_distance": 0.16,
+            "min_margin": 0.07
+          },
+          {
+            "best": "1",
+            "verdict": "accepted",
+            "method": "template",
+            "max_distance": 0.19,
+            "min_margin": 0.02
+          }
+        ]
+      }
+    ]
+  },
+  "tolerance": {
+    "max_distance_slack": 0.05,
+    "min_margin_slack": 0.05,
+    "notes": "Same slack budget as other fixtures - kda tuple must be exact, distance/margin numbers within slack."
+  }
+}

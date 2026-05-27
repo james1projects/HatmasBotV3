@@ -67,7 +67,7 @@ body {
   font-family: 'Inter', sans-serif;
   font-size: 14px;
   font-weight: 500;
-  color: #e8ddd0;
+  color: #FFFFFF;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -194,10 +194,10 @@ body {
   <img class="album-art" id="albumArt" src="" alt="">
   <div class="info">
     <div class="label" id="nowPlayingLabel">now playing</div>
-    <div class="title" id="songTitle">—</div>
-    <div class="artist" id="songArtist">—</div>
+    <div class="title" id="songTitle">--</div>
+    <div class="artist" id="songArtist">--</div>
     <div class="meta-row">
-      <span class="requester" id="requester">—</span>
+      <span class="requester" id="requester">--</span>
       <span class="likes" id="likes">♡ 0</span>
       <span class="like-cmd">!like</span>
     </div>
@@ -268,8 +268,8 @@ function spawnHearts(count = 5) {
 function renderSong(data) {
   if (!data) return;
 
-  el.title.textContent = data.title || '—';
-  el.artist.textContent = data.artist || '—';
+  el.title.textContent = data.title || '--';
+  el.artist.textContent = data.artist || '--';
   el.art.src = data.album_art || '';
   el.art.style.display = data.album_art ? 'block' : 'none';
 

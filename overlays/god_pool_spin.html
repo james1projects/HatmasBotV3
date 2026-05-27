@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Hatmas Market: Spin</title>
+<link rel="stylesheet" href="hatmas_theme.css">
+<style>
+  /* OBS browser source: 720 × 360 recommended.
+     Background is transparent so this floats over gameplay. */
+  body {
+    background: transparent;
+    overflow: hidden;
+    width: 720px;
+    height: 360px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Inter', sans-serif;
+  }
+
+  .container {
+    width: 680px;
+    background: var(--hm-bg);
+    border: 1px solid var(--hm-border);
+    border-radius: 14px;
+    padding: 18px 22px 22px;
+    position: relative;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.55),
+                0 0 60px rgba(223, 160, 110, 0.12);
+
+    opacity: 0;
+    transform: translateY(-12px) scale(0.98);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+  }
+  .container.visible {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  /* Top accent bar */
+  .container::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg,
+                                 transparent 5%,
+                                 var(--hm-gold) 50%,
+                                 transparent 95%);
+    border-radius: 14px 14px 0 0;
+    opacity: 0.85;
+  }
+
+  .heading {
+    text-align: center;
+    margin-bottom: 14px;
+  }
+  .heading .label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.32em;
+    color: #ffffff;
+    -webkit-text-stroke: 1px #000;
+    paint-order: stroke fill;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+    text-transform: uppercase;
+  }
+  .heading .title {
+    font-family: 'BigNoodleTitling', 'Inter', sans-serif;
+    font-size: 30px;
+    letter-spacing: 4px;
+    color: #ffffff;
+    -webkit-text-stroke: 2px #000;
+    paint-order: stroke fill;
+    text-shadow: 0 2px 6px rgba(0, 0, 0, 0.85);
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+
+  /* ─── Reel ───────────────────────────────────────────────── */
+  .reel-frame {
+    position: relative;
+    height: 130px;
+    border-radius: 10px;
+    border: 1px solid var(--hm-border);
+    background: rgba(0, 0, 0, 0.35);
+    overflow: hidden;
+  }
+  /* Side fade masks so cards roll in/out smoothly */
+  .reel-frame::before,
+  .reel-frame::after {
+    content: '';
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 90px;
+    z-index: 2;
+    pointer-events: none;
+  }
+  .reel-frame::before {
+    left: 0;
+    background: linear-gradient(90deg,
+                                rgba(32, 44, 57,0.95),
+                                rgba(32, 44, 57,0));
+  }
+  .reel-frame::after {
+    right: 0;
+    background: linear-gradient(270deg,
+                                rgba(32, 44, 57,0.95),
+                                rgba(32, 44, 57,0));
+  }
+  /* Center marker — vertical line with notches */
+  .reel-marker {
+    position: absolute;
+    top: 0; bottom: 0;
+    left: 50%;
+    width: 2px;
+    transform: translateX(-1px);
+    background: var(--hm-gold);
+    box-shadow: 0 0 18px var(--hm-gold-glow);
+    z-index: 3;
+    opacity: 0.9;
+  }
+  .reel-marker::before,
+  .reel-marker::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    width: 0; height: 0;
+    transform: translateX(-50%);
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+  }
+  .reel-marker::before {
+    top: 0;
+    border-top: 8px solid var(--hm-gold);
+  }
+  .reel-marker::after {
+    bottom: 0;
+    border-bottom: 8px solid var(--hm-gold);
+  }
+
+  .reel-track {
+    display: flex;
+    align-items: center;
+    height: 100%;
+    /* Translated by JS */
+    transform: translateX(0);
+    will-change: transform;
+  }
+  .reel-track.spinning {
+    transition: transform 4.4s cubic-bezier(0.10, 0.85, 0.20, 1.0);
+  }
+
+  /* Each card: portrait + name */
+  .card {
+    flex: 0 0 auto;
+    width: 110px;
+    height: 110px;
+    margin: 0 6px;
+    border-radius: 8px;
+    background: var(--hm-icon-bg);
+    border: 1px solid var(--hm-border-subtle);
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .card img {
+    width: 100%;
+    height: 78px;
+    object-fit: cover;
+    background: #000;
+  }
+  .card .name {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    font-family: 'BigNoodleTitling', 'Inter', sans-serif;
+    font-size: 14px;
+    letter-spacing: 1.2px;
+    color: #ffffff;
+    -webkit-text-stroke: 1px #000;
+    paint-order: stroke fill;
+    text-transform: uppercase;
+    padding: 0 4px;
+    line-height: 1.05;
+    background: rgba(0, 0, 0, 0.45);
+  }
+  .card .votes {
+    position: absolute;
+    top: 4px; right: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: var(--hm-gold);
+    background: rgba(0, 0, 0, 0.65);
+    padding: 1px 5px;
+    border-radius: 3px;
+    border: 1px solid var(--hm-gold-glow);
+  }
+
+  /* Winner card glows + scales */
+  .card.winner {
+    transition: box-shadow 0.4s ease, transform 0.4s ease,
+                border-color 0.4s ease;
+  }
+  .reel-track.landed .card.winner {
+    border-color: var(--hm-gold);
+    box-shadow: 0 0 24px var(--hm-gold-glow),
+                0 0 48px rgba(223, 160, 110, 0.18);
+    transform: scale(1.06);
+  }
+
+  /* ─── Result line ────────────────────────────────────────── */
+  .result {
+    margin-top: 16px;
+    text-align: center;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.4s ease 0.1s, transform 0.4s ease 0.1s;
+    font-family: 'Inter', sans-serif;
+  }
+  .result.shown {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  .result .winner-label {
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.4em;
+    color: #ffffff;
+    -webkit-text-stroke: 1px #000;
+    paint-order: stroke fill;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .result .winner-name {
+    font-family: 'BigNoodleTitling', 'Inter', sans-serif;
+    font-size: 44px;
+    letter-spacing: 5px;
+    color: #ffffff;
+    -webkit-text-stroke: 3px #000;
+    paint-order: stroke fill;
+    text-transform: uppercase;
+    line-height: 1;
+    /* Layered shadow: tight black halo for legibility on any
+       background, plus a soft gold glow for stage presence. */
+    text-shadow: 0 2px 0 #000,
+                 0 0 12px rgba(0, 0, 0, 0.95),
+                 0 0 28px rgba(223, 160, 110, 0.55);
+  }
+  .result .winner-meta {
+    display: block;
+    margin-top: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: #ffffff;
+    -webkit-text-stroke: 1px #000;
+    paint-order: stroke fill;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+</style>
+</head>
+<body>
+  <div class="container" id="container">
+    <div class="heading">
+      <div class="title">Spinning the wheel</div>
+    </div>
+
+    <div class="reel-frame">
+      <div class="reel-marker"></div>
+      <div class="reel-track" id="track"></div>
+    </div>
+
+    <div class="result" id="result">
+      <span class="winner-label">Selected</span>
+      <span class="winner-name" id="resultName"></span>
+      <span class="winner-meta" id="resultMeta"></span>
+    </div>
+  </div>
+
+<script src="/overlays/overlay_client.js"></script>
+<script>
+  // Card width (110px) + margins (6px each side) = 122px stride.
+  const CARD_STRIDE = 122;
+  const FRAME_WIDTH = 680 - 44;     // matches container padding-aware width
+  const REEL_WIDTH  = 680 - 44;     // we read it dynamically below too
+  const SPIN_DURATION_MS = 4400;    // matches the CSS transition
+
+  // ────────────────────────────────────────────────────────────────
+  //  AUDIO  (procedural — same approach as the gamble overlay so we
+  //  don't need to ship sound assets)
+  // ────────────────────────────────────────────────────────────────
+  let audioCtx = null;
+  let scheduledTimers = [];
+
+  function getAudioCtx() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext
+                      || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume().catch(() => {});
+    }
+    return audioCtx;
+  }
+  // OBS occasionally starts the page with the audio context suspended.
+  // Resume it on any visibility change or user interaction so sounds
+  // are ready when the first spin event arrives.
+  document.addEventListener('visibilitychange', () => {
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  });
+  ['mousedown', 'keydown', 'touchstart'].forEach(evt => {
+    window.addEventListener(evt, () => {
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    }, { once: false, passive: true });
+  });
+
+  // Short, slightly-pitched click — the reel-card-passing-the-marker
+  // sound. Random pitch jitter keeps a long sequence from feeling
+  // robotic.
+  function playTick() {
+    try {
+      const ctx = getAudioCtx();
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(820 + Math.random() * 360, now);
+      gain.gain.setValueAtTime(0.07, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.06);
+    } catch (e) { /* audio unavailable — silent fail */ }
+  }
+
+  // Two-note rising chime when the reel lands on the chosen god.
+  // Modeled on playWinSound() from sound_alerts.html.
+  function playLand() {
+    try {
+      const ctx = getAudioCtx();
+      const now = ctx.currentTime;
+      [784, 1175].forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, now + i * 0.14);
+        gain.gain.setValueAtTime(0, now + i * 0.14);
+        gain.gain.linearRampToValueAtTime(0.22, now + i * 0.14 + 0.02);
+        gain.gain.exponentialRampToValueAtTime(
+          0.001, now + i * 0.14 + 0.55);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + i * 0.14);
+        osc.stop(now + i * 0.14 + 0.6);
+      });
+    } catch (e) { /* audio unavailable — silent fail */ }
+  }
+
+  function clearScheduledAudio() {
+    scheduledTimers.forEach(id => clearTimeout(id));
+    scheduledTimers = [];
+  }
+
+  // ────────────────────────────────────────────────────────────────
+  //  Bezier inverse — keeps the ticks in lock-step with the reel.
+  //
+  //  The CSS transition on .reel-track.spinning uses
+  //    cubic-bezier(0.10, 0.85, 0.20, 1.0)
+  //  Both halves of the bezier (x and y) are cubic polynomials in t
+  //  with the endpoints clamped to (0,0) and (1,1):
+  //    x(t) = 3(1-t)²·t·x1 + 3(1-t)·t²·x2 + t³
+  //    y(t) = 3(1-t)²·t·y1 + 3(1-t)·t²·y2 + t³
+  //  Given a target animation progress (= fraction of distance the
+  //  reel has covered), we want the real-time fraction of duration.
+  //  Solving y(t)=target by binary search gives the bezier parameter
+  //  t; plugging t into x(t) gives the time fraction.
+  //
+  //  This lets us schedule a tick at the exact moment each card
+  //  center crosses the marker, so the ticks slow with the reel.
+  // ────────────────────────────────────────────────────────────────
+  const BEZIER_X1 = 0.10, BEZIER_Y1 = 0.85;
+  const BEZIER_X2 = 0.20, BEZIER_Y2 = 1.0;
+  function _bezier(t, p1, p2) {
+    const inv = 1 - t;
+    return 3 * inv * inv * t * p1
+         + 3 * inv * t   * t * p2
+         + t * t * t;
+  }
+  function _bezierTForY(targetY) {
+    if (targetY <= 0) return 0;
+    if (targetY >= 1) return 1;
+    // Monotonic on [0,1] for our chosen control points, so binary
+    // search converges. 24 iterations is well under ±0.0001ms error
+    // at our 4.4s duration.
+    let lo = 0, hi = 1;
+    for (let i = 0; i < 24; i++) {
+      const mid = 0.5 * (lo + hi);
+      if (_bezier(mid, BEZIER_Y1, BEZIER_Y2) < targetY) lo = mid;
+      else                                              hi = mid;
+    }
+    return 0.5 * (lo + hi);
+  }
+
+  // Schedule one tick per card-center crossing the marker, synced
+  // to the reel's actual deceleration. Final landing chime fires
+  // when the reel comes to rest at the winner.
+  //
+  //   totalDistance — px the reel translates left over the spin
+  //                   (positive value; pass -offset).
+  //   frameWidth    — visible width of the reel viewport, used to
+  //                   find where each card's center sits relative
+  //                   to the marker (frame center).
+  function scheduleSpinAudio(totalDistance, frameWidth) {
+    clearScheduledAudio();
+    if (!(totalDistance > 0)) {
+      scheduledTimers.push(setTimeout(playLand, SPIN_DURATION_MS));
+      return;
+    }
+    // Card i has its center at reel-local x = i*CARD_STRIDE +
+    // CARD_STRIDE/2. The reel slides left by D, so the center hits
+    // the marker (frameWidth/2) when D = i*CARD_STRIDE +
+    // CARD_STRIDE/2 - frameWidth/2. We want every i where that D
+    // lies in (0, totalDistance].
+    const half  = CARD_STRIDE / 2 - frameWidth / 2;
+    const iMin  = Math.max(0, Math.ceil(-half / CARD_STRIDE));
+    const iMax  = Math.floor((totalDistance - half) / CARD_STRIDE);
+    for (let i = iMin; i <= iMax; i++) {
+      const d = i * CARD_STRIDE + half;
+      if (d <= 0 || d > totalDistance) continue;
+      const progressY   = d / totalDistance;
+      const bezT        = _bezierTForY(progressY);
+      const timeFrac    = _bezier(bezT, BEZIER_X1, BEZIER_X2);
+      const timeMs      = SPIN_DURATION_MS * timeFrac;
+      scheduledTimers.push(setTimeout(playTick, timeMs));
+    }
+    // Landing chime — fires exactly when the reel comes to rest.
+    // The last card-center tick lands at ~the same moment (within
+    // a few px of jitter), which is the intended "thunk + chime"
+    // feel of a slot machine settling.
+    scheduledTimers.push(setTimeout(playLand, SPIN_DURATION_MS));
+  }
+
+  function slugify(name) {
+    return String(name || '').toLowerCase()
+                              .replace(/\s+/g, '-')
+                              .replace(/'/g, '');
+  }
+  function customIconPath(name) {
+    // Webserver mounts these at /icons/custom/{Name}.png and
+    // /icons/gods/{slug}.png. Some god names contain apostrophes or
+    // spaces so we URL-encode the raw filename.
+    return '/icons/custom/' + encodeURIComponent(name) + '.png';
+  }
+  function fallbackIconPath(name) {
+    return '/icons/gods/' + slugify(name) + '.png';
+  }
+
+  let busy = false;
+  let landTimer = null;
+
+  function buildReel(candidates, chosen) {
+    const track = document.getElementById('track');
+    track.classList.remove('spinning', 'landed');
+    track.style.transform = 'translateX(0)';
+    track.innerHTML = '';
+
+    // Build a long padded-out reel: candidates loop several times so
+    // the spin always travels far. The winner is placed near the end.
+    // We loop the candidates LOOPS times then append a final
+    // "winner segment" that ends on the chosen card.
+    const LOOPS = 6;
+    const sequence = [];
+    for (let i = 0; i < LOOPS; i++) {
+      // Shuffle each loop so the reel doesn't look like a
+      // straight-up repeat of the same order.
+      const shuffled = candidates.slice();
+      for (let j = shuffled.length - 1; j > 0; j--) {
+        const k = Math.floor(Math.random() * (j + 1));
+        [shuffled[j], shuffled[k]] = [shuffled[k], shuffled[j]];
+      }
+      for (const c of shuffled) sequence.push(c);
+    }
+
+    // Insert the chosen god as the visual anchor near the END, with
+    // a few decoy cards after it so the camera "passes" the winner
+    // and lands on it cleanly (gives the slot-machine feel of just
+    // overshooting and snapping back).
+    const chosenObj = candidates.find(c => c.god === chosen)
+                       || { god: chosen, votes: 1 };
+    sequence.push(chosenObj);
+
+    // A handful of "tail" cards behind the winner so when the reel
+    // settles, there's still content visible to the right of center.
+    const tailPool = candidates.filter(c => c.god !== chosen);
+    const tailCount = Math.min(4, Math.max(2, tailPool.length));
+    for (let i = 0; i < tailCount; i++) {
+      const pick = tailPool.length
+        ? tailPool[Math.floor(Math.random() * tailPool.length)]
+        : chosenObj;
+      sequence.push(pick);
+    }
+
+    // Track the index of the winner card so we can compute the offset.
+    const winnerIndex = sequence.length - tailCount - 1;
+
+    // Render
+    sequence.forEach((c, idx) => {
+      const card = document.createElement('div');
+      card.className = 'card' + (idx === winnerIndex ? ' winner' : '');
+      const img = document.createElement('img');
+      img.src = customIconPath(c.god);
+      img.onerror = function() {
+        if (this.dataset.tried) {
+          this.style.opacity = 0.25;
+        } else {
+          this.dataset.tried = '1';
+          this.src = fallbackIconPath(c.god);
+        }
+      };
+      const nm = document.createElement('div');
+      nm.className = 'name';
+      nm.textContent = c.god;
+      card.appendChild(img);
+      card.appendChild(nm);
+      if (c.votes && c.votes > 1) {
+        const v = document.createElement('div');
+        v.className = 'votes';
+        v.textContent = c.votes;
+        card.appendChild(v);
+      }
+      track.appendChild(card);
+    });
+
+    return { track, winnerIndex };
+  }
+
+  function spin(candidates, chosen, chosenVotes) {
+    // If a previous spin is still mid-animation, cancel its landing
+    // timer + pending audio and start fresh — back-to-back !spins
+    // shouldn't be silently dropped.
+    if (landTimer) {
+      clearTimeout(landTimer);
+      landTimer = null;
+    }
+    clearScheduledAudio();
+    busy = true;
+
+    // Reset the result line
+    const resultEl = document.getElementById('result');
+    resultEl.classList.remove('shown');
+    document.getElementById('resultName').textContent = '';
+    document.getElementById('resultMeta').textContent = '';
+
+    const { track, winnerIndex } = buildReel(candidates, chosen);
+
+    // Force layout so the initial transform sticks before we transition.
+    void track.offsetWidth;
+
+    // Compute target offset: center the winner card under the marker.
+    // Each card sits at left = idx * CARD_STRIDE. Card center is at
+    // idx * CARD_STRIDE + CARD_STRIDE / 2. We want that at FRAME_WIDTH/2.
+    const frame = track.parentElement;
+    const frameWidth = frame.clientWidth || REEL_WIDTH;
+    const winnerCenter = winnerIndex * CARD_STRIDE + CARD_STRIDE / 2;
+    // Add a tiny random jitter (-6..+6 px) so it doesn't land
+    // perfectly centered every time — feels more like a real wheel.
+    const jitter = (Math.random() * 12) - 6;
+    const offset = -(winnerCenter - frameWidth / 2 + jitter);
+
+    // Trigger the transition + start the audio sequence. We pass
+    // the real travel distance and frame width so the tick scheduler
+    // can sync each tick to the moment a card center crosses the
+    // marker (rather than guessing with a pre-baked time ramp).
+    requestAnimationFrame(() => {
+      track.classList.add('spinning');
+      track.style.transform = `translateX(${offset}px)`;
+      scheduleSpinAudio(Math.abs(offset), frameWidth);
+    });
+
+    // After the spin finishes, light up the winner + show the line.
+    landTimer = setTimeout(() => {
+      track.classList.add('landed');
+      resultEl.classList.add('shown');
+      document.getElementById('resultName').textContent = chosen;
+      const v = chosenVotes || 1;
+      document.getElementById('resultMeta').textContent =
+        `${v} vote${v === 1 ? '' : 's'}`;
+      busy = false;
+      landTimer = null;
+    }, 4500);
+  }
+
+  HatmasOverlay.connect('god_pool_spin', {
+    container: '#container',
+    showClass: 'visible',
+    onShow(data) {
+      if (!data || !data.chosen) return;
+      const candidates = Array.isArray(data.candidates)
+                          ? data.candidates : [];
+      // If the candidate list is somehow missing the chosen god (race
+      // with pool deletion), inject it so the reel still has a winner
+      // card to land on.
+      if (candidates.length === 0
+          || !candidates.some(c => c.god === data.chosen)) {
+        candidates.push({ god: data.chosen,
+                          votes: data.chosen_votes || 1 });
+      }
+      spin(candidates, data.chosen, data.chosen_votes);
+    },
+    onHide() {
+      clearScheduledAudio();
+      if (landTimer) { clearTimeout(landTimer); landTimer = null; }
+      const track = document.getElementById('track');
+      track.classList.remove('spinning', 'landed');
+      track.innerHTML = '';
+      const resultEl = document.getElementById('result');
+      resultEl.classList.remove('shown');
+      busy = false;
+    }
+  });
+</script>
+</body>
+</html>

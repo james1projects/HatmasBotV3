@@ -1,0 +1,344 @@
+{
+  "schema_version": 1,
+  "name": "2gods",
+  "description": "One video covering two gods Hatmaster played — no opponents shown. Two god cards side by side filling the canvas, full height, feathered at the center seam. Both gods get cyan-glow icon badges in the upper corners (no red opponent glow because there are no opponents). No 'VS' marker — these are gods you played, not a matchup. A gold 'AND' sits at the center seam to signal companionship rather than confrontation. Use it when you played, e.g., 2 Sylvanus games + an Atlas game in one video and want to highlight both gods in the thumbnail. CLI: --god + --god2.",
+  "size": [
+    1280,
+    720
+  ],
+  "layers": [
+    {
+      "type": "gradient",
+      "name": "Background gradient",
+      "direction": "horizontal",
+      "stops": [
+        {
+          "at": 0.0,
+          "color": "#0a1530"
+        },
+        {
+          "at": 0.5,
+          "color": "#1a1f2c"
+        },
+        {
+          "at": 1.0,
+          "color": "#1a1530"
+        }
+      ]
+    },
+    {
+      "type": "image",
+      "name": "Left god card (my_god)",
+      "src": "{my_god_card}",
+      "pos": [
+        0,
+        0
+      ],
+      "size": [
+        720,
+        720
+      ],
+      "fit": "cover",
+      "fit_anchor": "top",
+      "anchor": "topleft",
+      "feather_edges": {
+        "right": 100
+      },
+      "fallback_text": "{my_god}"
+    },
+    {
+      "type": "image",
+      "name": "Right god card (my_god2)",
+      "src": "{my_god2_card}",
+      "pos": [
+        560,
+        0
+      ],
+      "size": [
+        720,
+        720
+      ],
+      "fit": "cover",
+      "fit_anchor": "top",
+      "anchor": "topleft",
+      "flip_h": true,
+      "feather_edges": {
+        "left": 100
+      },
+      "fallback_text": "{my_god2}"
+    },
+    {
+      "type": "gradient",
+      "name": "Center seam darkening",
+      "pos": [
+        420,
+        0
+      ],
+      "size": [
+        440,
+        720
+      ],
+      "direction": "horizontal",
+      "stops": [
+        {
+          "at": 0.0,
+          "color": "#000000",
+          "opacity": 0.0
+        },
+        {
+          "at": 0.5,
+          "color": "#000000",
+          "opacity": 0.5
+        },
+        {
+          "at": 1.0,
+          "color": "#000000",
+          "opacity": 0.0
+        }
+      ]
+    },
+    {
+      "type": "gradient",
+      "name": "Headline darkening band",
+      "pos": [
+        0,
+        0
+      ],
+      "size": [
+        1280,
+        220
+      ],
+      "direction": "vertical",
+      "stops": [
+        {
+          "at": 0.0,
+          "color": "#000000",
+          "opacity": 0.7
+        },
+        {
+          "at": 0.7,
+          "color": "#000000",
+          "opacity": 0.35
+        },
+        {
+          "at": 1.0,
+          "color": "#000000",
+          "opacity": 0.0
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "name": "Connector AND",
+      "value": "AND",
+      "pos": [
+        640,
+        360
+      ],
+      "anchor": "center",
+      "font": "Big Noodle Titling",
+      "size": 160,
+      "fill": "#ffd24d",
+      "stroke": {
+        "color": "#000000",
+        "width": 10
+      },
+      "shadow": {
+        "color": "#000000",
+        "offset": [
+          6,
+          6
+        ],
+        "blur": 12,
+        "opacity": 0.85
+      }
+    },
+    {
+      "type": "text",
+      "name": "Headline",
+      "value": "{text}",
+      "pos": [
+        640,
+        110
+      ],
+      "anchor": "center",
+      "font": "Big Noodle Titling",
+      "size": 100,
+      "fill": "#ffffff",
+      "stroke": {
+        "color": "#000000",
+        "width": 10
+      },
+      "shadow": {
+        "color": "#ffd24d",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 28,
+        "opacity": 0.75
+      },
+      "max_width": 1100,
+      "skip_if_empty": true
+    },
+    {
+      "type": "icon",
+      "name": "Left god icon (my_god)",
+      "god": "{my_god}",
+      "pos": [
+        30,
+        30
+      ],
+      "size": 130,
+      "anchor": "topleft",
+      "border": {
+        "color": "#4dc3ff",
+        "width": 6
+      },
+      "shadow": {
+        "color": "#4dc3ff",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 28,
+        "opacity": 0.85
+      }
+    },
+    {
+      "type": "icon",
+      "name": "Right god icon (my_god2)",
+      "god": "{my_god2}",
+      "pos": [
+        1250,
+        30
+      ],
+      "size": 130,
+      "anchor": "topright",
+      "border": {
+        "color": "#4dc3ff",
+        "width": 6
+      },
+      "shadow": {
+        "color": "#4dc3ff",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 28,
+        "opacity": 0.85
+      }
+    },
+    {
+      "type": "text",
+      "name": "Left god name",
+      "value": "{my_god}",
+      "pos": [
+        180,
+        95
+      ],
+      "anchor": "left_center",
+      "font": "Big Noodle Titling",
+      "size": 64,
+      "fill": "#ffffff",
+      "stroke": {
+        "color": "#000000",
+        "width": 7
+      },
+      "shadow": {
+        "color": "#4dc3ff",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 22,
+        "opacity": 0.8
+      },
+      "max_width": 380,
+      "skip_if_empty": true
+    },
+    {
+      "type": "text",
+      "name": "Right god name",
+      "value": "{my_god2}",
+      "pos": [
+        1100,
+        95
+      ],
+      "anchor": "right_center",
+      "font": "Big Noodle Titling",
+      "size": 64,
+      "fill": "#ffffff",
+      "stroke": {
+        "color": "#000000",
+        "width": 7
+      },
+      "shadow": {
+        "color": "#4dc3ff",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 22,
+        "opacity": 0.8
+      },
+      "max_width": 380,
+      "skip_if_empty": true
+    },
+    {
+      "type": "text",
+      "name": "Subtext",
+      "value": "{subtext}",
+      "pos": [
+        640,
+        660
+      ],
+      "anchor": "center_bottom",
+      "font": "Big Noodle Titling",
+      "size": 70,
+      "fill": "#ffffff",
+      "stroke": {
+        "color": "#000000",
+        "width": 8
+      },
+      "shadow": {
+        "color": "#ffd24d",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 22,
+        "opacity": 0.7
+      },
+      "max_width": 900,
+      "skip_if_empty": true
+    },
+    {
+      "type": "text",
+      "name": "Result badge",
+      "value": "{result}",
+      "pos": [
+        640,
+        595
+      ],
+      "anchor": "center_bottom",
+      "font": "Big Noodle Titling",
+      "size": 64,
+      "fill": "#39ff8c",
+      "stroke": {
+        "color": "#000000",
+        "width": 7
+      },
+      "shadow": {
+        "color": "#000000",
+        "offset": [
+          3,
+          3
+        ],
+        "blur": 8,
+        "opacity": 0.85
+      },
+      "skip_if_empty": true
+    }
+  ]
+}

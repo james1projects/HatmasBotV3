@@ -69,15 +69,30 @@ def main():
     print(f"Saved: {out_path}")
     print(f"Size: {img.size[0]}x{img.size[1]}")
 
-    # Also show the current KDA_REGION crop for reference
-    from plugins.killdetector import KDA_REGION
+    # Also show the current KDA_REGION crop for reference. The
+    # constant moved to core.kda_reader when the KDA-reading code
+    # was split out of killdetector — older versions of this file
+    # imported it from plugins.killdetector.
+    from core.kda_reader import KDA_REGION
     crop = img.crop(KDA_REGION)
     crop_path = Path(__file__).parent.parent / "data" / "obs_screenshot_kda_crop.png"
     crop.save(str(crop_path))
     print(f"Current KDA crop ({KDA_REGION}): {crop_path}")
 
+    # And the god-portrait crop, used by core.god_matcher to
+    # identify which god is being played. Same iterate-by-eye loop
+    # as the KDA crop: if the saved image doesn't cleanly contain
+    # the round god portrait, retune PORTRAIT_REGION in
+    # core/god_matcher.py and re-run.
+    from core.god_matcher import PORTRAIT_REGION
+    p_crop = img.crop(PORTRAIT_REGION)
+    p_crop_path = (Path(__file__).parent.parent
+                   / "data" / "obs_screenshot_portrait_crop.png")
+    p_crop.save(str(p_crop_path))
+    print(f"Current portrait crop ({PORTRAIT_REGION}): {p_crop_path}")
+
     client.disconnect()
-    print("Done! Open obs_screenshot.png and find the new KDA position.")
+    print("Done! Open both crops and confirm each shows the right region.")
 
 
 if __name__ == "__main__":
