@@ -179,6 +179,16 @@ public class EntryPoint
     //   alive at compile time with the same "set once" semantics.
     static readonly string SCRIPT_MODE = "god_folder";  // "events_file" | "god_folder" | "rescan_append"
 
+    // Set this to true to pop a small "pick a run mode" dialog at the
+    // top of every script run (with SCRIPT_MODE pre-selected, so hitting
+    // Enter keeps the default).  Lets you switch between events_file /
+    // god_folder / rescan_append without editing this file each time.
+    // Set false to skip the prompt and silently use SCRIPT_MODE — the
+    // old behaviour, useful when you've settled into one workflow.
+    //
+    // Same `static readonly` rationale as SHOW_FILE_PICKER + SCRIPT_MODE.
+    static readonly bool SHOW_MODE_PICKER = true;
+
     // Folder scanned in god-folder mode. Each immediate subfolder is a
     // selectable god name (e.g. recordings\Ymir\, recordings\Loki\, plus
     // recordings\mixed\ and recordings\unknown\ written by
@@ -403,13 +413,19 @@ public class EntryPoint
         // cards. rescan-append mode is yet another self-contained path —
         // see RunRescanAppend.  events_file mode falls through to the
         // original logic unchanged.
-        if (string.Equals(SCRIPT_MODE, "god_folder",
+        // SHOW_MODE_PICKER (top of file) decides whether the operator
+        // gets a runtime prompt or we silently use SCRIPT_MODE.  Either
+        // way, ``activeMode`` is the string we dispatch on below.
+        string activeMode = SHOW_MODE_PICKER
+            ? PickRunMode(SCRIPT_MODE)
+            : SCRIPT_MODE;
+        if (string.Equals(activeMode, "god_folder",
                           StringComparison.OrdinalIgnoreCase))
         {
             RunGodFolder(vegas, proj, buildWarnings);
             return;
         }
-        if (string.Equals(SCRIPT_MODE, "rescan_append",
+        if (string.Equals(activeMode, "rescan_append",
                           StringComparison.OrdinalIgnoreCase))
         {
             RunRescanAppend(vegas, proj, buildWarnings);
@@ -1759,6 +1775,116 @@ public class EntryPoint
             }
 
             return Path.Combine(recordingsRoot, (string)lb.SelectedItem);
+        }
+    }
+
+
+    // Show a runtime "pick a run mode" dialog with the three SCRIPT_MODE
+    // options as a ListBox.  ``defaultMode`` is pre-selected so the
+    // operator can just hit Enter for their usual workflow; pick a
+    // different row + OK to override for this run only (the SCRIPT_MODE
+    // constant at the top of the file is not mutated).  Throws on
+    // cancel — the outer try/catch turns that into a polite dialog,
+    // same pattern as PickGodFolder / PickEventsJsonViaDialog.
+    //
+    // Mode labels intentionally include a short description so the
+    // operator picking from the list doesn't have to remember what
+    // each mode does:
+    //     events_file    — single .events.json, vertical TikTok timeline
+    //     god_folder     — every clip in a per-god folder, horizontal montage
+    //     rescan_append  — append rescan-diff fixed clips to current project
+    static string PickRunMode(string defaultMode)
+    {
+        // Display strings shown to the operator (with description) and
+        // their machine-readable counterparts that Run() dispatches on.
+        // The two arrays MUST stay in lockstep.
+        string[] labels = new[] {
+            "events_file    — single .events.json (vertical TikTok)",
+            "god_folder     — all clips in a per-god folder (horizontal)",
+            "rescan_append  — append rescan diff to current project",
+        };
+        string[] values = new[] {
+            "events_file",
+            "god_folder",
+            "rescan_append",
+        };
+
+        // Map defaultMode to its row index so the picker pre-selects it.
+        int defaultIdx = 0;
+        for (int i = 0; i < values.Length; i++)
+        {
+            if (string.Equals(values[i], defaultMode,
+                              StringComparison.OrdinalIgnoreCase))
+            {
+                defaultIdx = i;
+                break;
+            }
+        }
+
+        using (Form dlg = new Form())
+        {
+            dlg.Text             = "HighlightBuilder — pick a run mode";
+            dlg.Width            = 500;
+            dlg.Height           = 220;
+            dlg.StartPosition    = FormStartPosition.CenterScreen;
+            dlg.MinimizeBox      = false;
+            dlg.MaximizeBox      = false;
+            dlg.FormBorderStyle  = FormBorderStyle.FixedDialog;
+
+            Label header = new Label();
+            header.Text    = "Pick a run mode (default highlighted):";
+            header.Dock    = DockStyle.Top;
+            header.Height  = 26;
+            header.Padding = new Padding(8, 6, 0, 0);
+
+            ListBox lb = new ListBox();
+            lb.Dock           = DockStyle.Fill;
+            lb.IntegralHeight = false;
+            lb.Font           = new System.Drawing.Font(
+                "Consolas", 9.5f, System.Drawing.FontStyle.Regular);
+            foreach (string l in labels) lb.Items.Add(l);
+            lb.SelectedIndex  = defaultIdx;
+
+            Panel buttonPanel = new Panel();
+            buttonPanel.Dock   = DockStyle.Bottom;
+            buttonPanel.Height = 44;
+
+            Button ok = new Button();
+            ok.Text         = "OK";
+            ok.DialogResult = DialogResult.OK;
+            ok.SetBounds(308, 8, 80, 28);
+            ok.Anchor       = AnchorStyles.Right | AnchorStyles.Top;
+
+            Button cancel = new Button();
+            cancel.Text         = "Cancel";
+            cancel.DialogResult = DialogResult.Cancel;
+            cancel.SetBounds(398, 8, 80, 28);
+            cancel.Anchor       = AnchorStyles.Right | AnchorStyles.Top;
+
+            buttonPanel.Controls.Add(ok);
+            buttonPanel.Controls.Add(cancel);
+
+            // Double-click on a list item also accepts.
+            lb.DoubleClick += delegate(object s, EventArgs e) {
+                dlg.DialogResult = DialogResult.OK;
+                dlg.Close();
+            };
+
+            // Add order: Fill must be added LAST relative to docked
+            // siblings so it claims the remaining space correctly.
+            dlg.Controls.Add(lb);
+            dlg.Controls.Add(buttonPanel);
+            dlg.Controls.Add(header);
+            dlg.AcceptButton = ok;
+            dlg.CancelButton = cancel;
+
+            if (dlg.ShowDialog() != DialogResult.OK || lb.SelectedIndex < 0)
+            {
+                throw new Exception(
+                    "No mode chosen — HighlightBuilder cancelled.");
+            }
+
+            return values[lb.SelectedIndex];
         }
     }
 
