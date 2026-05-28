@@ -55,6 +55,18 @@ class GodPoolPlugin:
         bot.register_command("spin", self.cmd_spin, mod_only=True)
         bot.register_command("poolclear", self.cmd_pool_clear, mod_only=True)
 
+        # Load the known god list eagerly here — NOT in on_ready().
+        # setup() runs synchronously during plugin registration in
+        # main.py, well before bot.start() subscribes to chat events.
+        # If we waited until on_ready(), there would be a startup race:
+        # chat subscription happens in bot.setup_hook() BEFORE the
+        # per-plugin on_ready() loop runs, so a !nominate command
+        # arriving in that window would hit an empty _known_gods list
+        # and every input — regardless of case — would be reported as
+        # "Unknown god". load_known_gods is a synchronous filesystem
+        # scan, perfectly safe to call here.
+        self._known_gods = load_known_gods(BASE_DIR)
+
         # Register our schema with the shared DB. Runs once at
         # core.db.init_db() time, before any plugin's on_ready fires.
         if _shared_db.is_available():
@@ -75,6 +87,10 @@ class GodPoolPlugin:
             return
 
         await self._prune_old_votes()
+        # _known_gods was already loaded in setup() to avoid the
+        # startup race described there. Refresh here in case new
+        # god icons landed between setup and on_ready (rare, but
+        # cheap and idempotent).
         self._known_gods = load_known_gods(BASE_DIR)
         print(f"[GodPool] Ready — {len(self._known_gods)} gods loaded for "
               f"validation")

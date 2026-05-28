@@ -154,6 +154,20 @@ public class EntryPoint
     //                       on a single horizontal timeline using
     //                       HORIZONTAL_PRESET_FILE (1920x1080). No title
     //                       cards — this is a raw montage of one god.
+    //     "god_folder_incremental" — Sibling to god_folder for the
+    //                       "I processed more recordings and want to add
+    //                       the new ones to my in-progress montage" flow.
+    //                       Walks the same god folder as god_folder, but
+    //                       also walks the CURRENT project's timeline to
+    //                       collect already-imported source paths, then
+    //                       appends ONLY the clips not already on the
+    //                       timeline.  Self-tracking: the project itself
+    //                       is the record of what's been imported, so no
+    //                       external timestamp/manifest files are needed.
+    //                       Reuses existing tracks (created by an earlier
+    //                       god_folder run).  Pops a confirmation dialog
+    //                       listing the new clips before any timeline
+    //                       change.
     //     "rescan_append" — Sibling to god_folder, but for the rescan
     //                       workflow.  You ran tools/rescan_events.py on
     //                       a god folder after a detector fix; it wrote a
@@ -177,7 +191,7 @@ public class EntryPoint
     //   then flag the unused branch as unreachable code (Vegas's strict
     //   compiler error 0x80131600). `static readonly` keeps both branches
     //   alive at compile time with the same "set once" semantics.
-    static readonly string SCRIPT_MODE = "god_folder";  // "events_file" | "god_folder" | "rescan_append"
+    static readonly string SCRIPT_MODE = "god_folder";  // "events_file" | "god_folder" | "god_folder_incremental" | "rescan_append"
 
     // Set this to true to pop a small "pick a run mode" dialog at the
     // top of every script run (with SCRIPT_MODE pre-selected, so hitting
@@ -423,6 +437,12 @@ public class EntryPoint
                           StringComparison.OrdinalIgnoreCase))
         {
             RunGodFolder(vegas, proj, buildWarnings);
+            return;
+        }
+        if (string.Equals(activeMode, "god_folder_incremental",
+                          StringComparison.OrdinalIgnoreCase))
+        {
+            RunGodFolderIncremental(vegas, proj, buildWarnings);
             return;
         }
         if (string.Equals(activeMode, "rescan_append",
@@ -1520,6 +1540,381 @@ public class EntryPoint
     }
 
 
+    // ════════════════════════════════════════════════════════════════════════
+    //   GOD-FOLDER INCREMENTAL APPEND MODE
+    //   ---------------------------------------------------------------------
+    //   Activated by SCRIPT_MODE = "god_folder_incremental" (or chosen at
+    //   runtime via the mode picker).  Same source-clip discovery as
+    //   god_folder mode, same horizontal preset, same back-to-back layout
+    //   logic — but instead of always building from cursor=0, it:
+    //
+    //     1. Walks the CURRENT project's timeline to collect the set of
+    //        source video paths already referenced by any TrackEvent.
+    //        This is the project's own record of "what's already been
+    //        imported" — zero external state files needed.
+    //     2. Filters the god folder's .events.json candidates against that
+    //        set, keeping only clips whose source mp4 is NOT already on
+    //        the timeline.
+    //     3. Pops a confirmation dialog listing the N new clips so the
+    //        operator can review before any timeline change happens.
+    //     4. On OK: finds the end of the current timeline (max Start +
+    //        Length across all tracks), reuses the existing video/audio
+    //        tracks, and appends the new clips back-to-back from the
+    //        insert point — same machinery as rescan_append mode.
+    //
+    //   First-time run on an empty project: nothing to filter, all clips
+    //   are "new", but the project has no tracks yet so ResolveExistingTracks
+    //   throws a clear error.  For first-time builds, use god_folder mode
+    //   (which creates tracks); for incremental top-ups thereafter, use
+    //   god_folder_incremental.
+    //
+    //   Re-importing a deleted clip: if you remove a clip from the timeline
+    //   in Vegas and re-run incremental mode, that clip's source isn't in
+    //   the project anymore so it counts as "new" again and gets re-added.
+    //   Intuitive and self-healing.
+    // ════════════════════════════════════════════════════════════════════════
+
+    void RunGodFolderIncremental(Vegas vegas, Project proj, List<string> buildWarnings)
+    {
+        // ── 1) Load the horizontal preset ──────────────────────────────────
+        if (!File.Exists(HORIZONTAL_PRESET_FILE))
+        {
+            throw new Exception(
+                "Horizontal preset not found:\n  " + HORIZONTAL_PRESET_FILE +
+                "\n\nCapture one with TuneFrame.cs first, or edit " +
+                "HORIZONTAL_PRESET_FILE at the top of this script.");
+        }
+        ACTIVE_PRESET = LoadPreset(HORIZONTAL_PRESET_FILE);
+
+        // ── 2) Pick the god folder ─────────────────────────────────────────
+        string godFolder = PickGodFolder(RECORDINGS_FOLDER);
+        string godName = new DirectoryInfo(godFolder).Name;
+
+        // ── 3) Discover every clip's .events.json in the folder ────────────
+        string[] jsonPaths = Directory.GetFiles(
+            godFolder, "*.events.json", SearchOption.TopDirectoryOnly);
+        if (jsonPaths.Length == 0)
+        {
+            throw new Exception(
+                "No *.events.json files in god folder:\n  " + godFolder +
+                "\n\nRun tools\\extract_events.py or " +
+                "tools\\process_recordings.py first.");
+        }
+        Array.Sort(jsonPaths, delegate(string a, string b) {
+            return NaturalCompare(Path.GetFileName(a), Path.GetFileName(b));
+        });
+
+        // ── 4) Load + filter clips by event-type filter (same as god_folder) ──
+        List<EventsFile> allPlans = new List<EventsFile>();
+        List<string> skipNotes = new List<string>();
+        foreach (string jp in jsonPaths)
+        {
+            EventsFile ef;
+            try { ef = LoadEventsFile(jp); }
+            catch (Exception ex)
+            {
+                skipNotes.Add(Path.GetFileName(jp) + ": parse failed — "
+                              + ex.Message);
+                continue;
+            }
+            List<HighlightEvent> keep = new List<HighlightEvent>();
+            foreach (HighlightEvent e in ef.Events)
+            {
+                foreach (string keepType in GOD_FOLDER_EVENT_TYPES)
+                {
+                    if (string.Equals(e.Type, keepType,
+                                      StringComparison.OrdinalIgnoreCase))
+                    {
+                        keep.Add(e);
+                        break;
+                    }
+                }
+            }
+            if (keep.Count == 0)
+            {
+                skipNotes.Add(Path.GetFileName(jp)
+                    + ": no events of types ["
+                    + string.Join(", ", GOD_FOLDER_EVENT_TYPES) + "]");
+                continue;
+            }
+            if (!File.Exists(ef.SourceVideo))
+            {
+                skipNotes.Add(Path.GetFileName(jp)
+                    + ": source missing — " + ef.SourceVideo);
+                continue;
+            }
+            ef.Events = keep;
+            allPlans.Add(ef);
+        }
+
+        // ── 5) Walk the current project, collect already-imported sources ──
+        HashSet<string> imported = CollectImportedSources(proj);
+
+        // ── 6) Filter to only NEW clips (source not already on timeline) ───
+        List<EventsFile> newPlans = new List<EventsFile>();
+        List<string> alreadyImportedNotes = new List<string>();
+        foreach (EventsFile ef in allPlans)
+        {
+            string norm;
+            try { norm = Path.GetFullPath(ef.SourceVideo); }
+            catch { norm = ef.SourceVideo; }
+            if (imported.Contains(norm))
+                alreadyImportedNotes.Add(Path.GetFileName(ef.SourceVideo));
+            else
+                newPlans.Add(ef);
+        }
+
+        if (newPlans.Count == 0)
+        {
+            MessageBox.Show(
+                "Nothing new to import.\n\n"
+                + "All " + allPlans.Count + " eligible clip(s) in "
+                + godName + " are already on this project's timeline.\n\n"
+                + "Process new recordings into recordings\\" + godName
+                + "\\ first, then re-run.",
+                "HighlightBuilder — no new clips");
+            return;
+        }
+
+        // ── 7) Confirmation dialog showing what will be appended ──────────
+        if (!ConfirmAppendImport(godName, newPlans, allPlans.Count,
+                                  alreadyImportedNotes.Count))
+        {
+            return;  // user cancelled — no timeline change
+        }
+
+        // ── 8) Find insert point + resolve existing tracks ────────────────
+        Timecode insertAt = FindTimelineEnd(proj);
+        int firstAudioCount = 0;
+        Media firstMedia = proj.MediaPool.AddMedia(newPlans[0].SourceVideo);
+        foreach (MediaStream s in firstMedia.Streams)
+            if (s.MediaType == MediaType.Audio) firstAudioCount++;
+        if (firstAudioCount == 0)
+        {
+            throw new Exception(
+                "First new clip has no audio streams:\n  "
+                + newPlans[0].SourceVideo);
+        }
+
+        VideoTrack[] videoTracks;
+        AudioTrack[] audioTracks;
+        ResolveExistingTracks(proj, ACTIVE_PRESET, firstAudioCount,
+                              out videoTracks, out audioTracks,
+                              buildWarnings);
+
+        // ── 9) Append clips back-to-back from insertAt (mirrors RunRescanAppend) ──
+        Timecode cursor = insertAt;
+        double totalSeconds = 0.0;
+        int totalEvents = 0;
+
+        foreach (EventsFile ef in newPlans)
+        {
+            Media srcMedia = (ef.SourceVideo == newPlans[0].SourceVideo)
+                              ? firstMedia
+                              : proj.MediaPool.AddMedia(ef.SourceVideo);
+
+            MediaStream srcVideo = null;
+            List<MediaStream> srcAudio = new List<MediaStream>();
+            foreach (MediaStream s in srcMedia.Streams)
+            {
+                if (s.MediaType == MediaType.Video && srcVideo == null)
+                    srcVideo = s;
+                else if (s.MediaType == MediaType.Audio)
+                    srcAudio.Add(s);
+            }
+            if (srcVideo == null)
+            {
+                buildWarnings.Add(Path.GetFileName(ef.SourceVideo)
+                    + ": no video stream — recording skipped");
+                continue;
+            }
+            if (srcAudio.Count != firstAudioCount)
+            {
+                buildWarnings.Add(string.Format(
+                    "{0}: audio stream count {1} differs from first new "
+                    + "clip's {2}",
+                    Path.GetFileName(ef.SourceVideo),
+                    srcAudio.Count, firstAudioCount));
+            }
+
+            foreach (HighlightEvent ev in ef.Events)
+            {
+                double srcStartSec = Math.Max(0.0,
+                                              ev.TimestampSec - ev.PreSec);
+                double srcEndSec   = ev.TimestampSec + ev.PostSec;
+                double clipLenSec  = srcEndSec - srcStartSec;
+                Timecode srcOffset = Timecode.FromSeconds(srcStartSec);
+                Timecode clipLen   = Timecode.FromSeconds(clipLenSec);
+
+                List<TrackEvent> linked = new List<TrackEvent>();
+                for (int i = 0; i < videoTracks.Length; i++)
+                {
+                    VideoEvent vEvent = videoTracks[i].AddVideoEvent(
+                        cursor, clipLen);
+                    vEvent.AddTake(srcVideo, true);
+                    vEvent.ActiveTake.Offset = srcOffset;
+                    ApplyPanCrop(vEvent, ACTIVE_PRESET.Tracks[i]);
+                    ApplyEffects(vEvent,
+                                 ACTIVE_PRESET.Tracks[i].Effects,
+                                 vegas, buildWarnings);
+                    linked.Add(vEvent);
+                }
+                int audioCount = Math.Min(srcAudio.Count, audioTracks.Length);
+                for (int i = 0; i < audioCount; i++)
+                {
+                    AudioEvent aEvent = audioTracks[i].AddAudioEvent(
+                        cursor, clipLen);
+                    aEvent.AddTake(srcAudio[i], true);
+                    aEvent.ActiveTake.Offset = srcOffset;
+                    linked.Add(aEvent);
+                }
+                TrackEventGroup group = new TrackEventGroup(proj);
+                proj.Groups.Add(group);
+                foreach (TrackEvent te in linked) group.Add(te);
+
+                cursor += clipLen;
+                totalSeconds += clipLenSec;
+                totalEvents++;
+            }
+        }
+
+        // ── 10) Summary dialog ─────────────────────────────────────────────
+        System.Text.StringBuilder summary = new System.Text.StringBuilder();
+        summary.AppendLine("HighlightBuilder (god-folder incremental) complete.");
+        summary.AppendLine();
+        summary.AppendFormat("God folder:        {0}\n", godName);
+        summary.AppendFormat("Total eligible:    {0} clip(s) with events of types [{1}]\n",
+            allPlans.Count, string.Join(", ", GOD_FOLDER_EVENT_TYPES));
+        summary.AppendFormat("Already imported:  {0} clip(s) — skipped\n",
+            alreadyImportedNotes.Count);
+        summary.AppendFormat("Newly appended:    {0} clip(s), {1} event(s)\n",
+            newPlans.Count, totalEvents);
+        summary.AppendFormat("Insert point:      {0}\n", insertAt.ToString());
+        summary.AppendFormat("Appended length:   {0:0.0}s\n", totalSeconds);
+
+        if (skipNotes.Count > 0)
+        {
+            summary.AppendLine();
+            summary.AppendLine("Skipped (couldn't load / no events):");
+            foreach (string s in skipNotes) summary.AppendFormat("  - {0}\n", s);
+        }
+        if (buildWarnings.Count > 0)
+        {
+            summary.AppendLine();
+            summary.AppendLine("Warnings:");
+            foreach (string w in buildWarnings) summary.AppendFormat("  ! {0}\n", w);
+        }
+
+        MessageBox.Show(summary.ToString(), "HighlightBuilder — done");
+    }
+
+
+    // Walk every TrackEvent on every Track in the project and return the
+    // set of source video FilePaths already referenced.  Used by
+    // RunGodFolderIncremental to filter out clips that are already on
+    // the timeline.  Paths normalized via Path.GetFullPath (handles
+    // relative paths, dot-segments) and matched case-insensitively
+    // (Windows filesystem semantics).  Title-card events and other
+    // generated media without a FilePath are silently skipped.
+    static HashSet<string> CollectImportedSources(Project proj)
+    {
+        HashSet<string> sources = new HashSet<string>(
+            StringComparer.OrdinalIgnoreCase);
+        foreach (Track t in proj.Tracks)
+        {
+            foreach (TrackEvent ev in t.Events)
+            {
+                Take take = ev.ActiveTake;
+                if (take == null) continue;
+                Media media = take.Media;
+                if (media == null) continue;
+                string fp = media.FilePath;
+                if (string.IsNullOrEmpty(fp)) continue;
+                try { fp = Path.GetFullPath(fp); }
+                catch { /* keep raw on normalization failure */ }
+                sources.Add(fp);
+            }
+        }
+        return sources;
+    }
+
+
+    // Show a confirmation dialog listing the new clips that incremental
+    // mode is about to append.  Returns true on OK, false on Cancel.
+    // Designed to fit the largest realistic case (~50 new clips) without
+    // scrolling getting unreadable.
+    static bool ConfirmAppendImport(string godName, List<EventsFile> newPlans,
+                                    int totalEligible, int alreadyImported)
+    {
+        using (Form dlg = new Form())
+        {
+            dlg.Text             = "HighlightBuilder — confirm append";
+            dlg.Width            = 560;
+            dlg.Height           = 480;
+            dlg.StartPosition    = FormStartPosition.CenterScreen;
+            dlg.MinimizeBox      = false;
+            dlg.MaximizeBox      = false;
+            dlg.FormBorderStyle  = FormBorderStyle.FixedDialog;
+
+            Label header = new Label();
+            header.Text    = string.Format(
+                "About to append {0} new clip(s) to your timeline.\n"
+                + "({1} of {2} eligible clip(s) are already imported.)\n"
+                + "Folder: recordings\\{3}\\",
+                newPlans.Count, alreadyImported, totalEligible, godName);
+            header.Dock    = DockStyle.Top;
+            header.Height  = 56;
+            header.Padding = new Padding(8, 8, 0, 0);
+
+            ListBox lb = new ListBox();
+            lb.Dock           = DockStyle.Fill;
+            lb.IntegralHeight = false;
+            lb.Font           = new System.Drawing.Font(
+                "Consolas", 9f, System.Drawing.FontStyle.Regular);
+            foreach (EventsFile ef in newPlans)
+            {
+                int k = 0, d = 0, a = 0;
+                foreach (HighlightEvent e in ef.Events)
+                {
+                    if (e.Type == "kill")        k++;
+                    else if (e.Type == "death")  d++;
+                    else if (e.Type == "assist") a++;
+                }
+                lb.Items.Add(string.Format(
+                    "  {0,-32}  K={1} D={2} A={3}",
+                    Path.GetFileName(ef.SourceVideo), k, d, a));
+            }
+
+            Panel buttonPanel = new Panel();
+            buttonPanel.Dock   = DockStyle.Bottom;
+            buttonPanel.Height = 44;
+
+            Button ok = new Button();
+            ok.Text         = "Append";
+            ok.DialogResult = DialogResult.OK;
+            ok.SetBounds(368, 8, 80, 28);
+            ok.Anchor       = AnchorStyles.Right | AnchorStyles.Top;
+
+            Button cancel = new Button();
+            cancel.Text         = "Cancel";
+            cancel.DialogResult = DialogResult.Cancel;
+            cancel.SetBounds(458, 8, 80, 28);
+            cancel.Anchor       = AnchorStyles.Right | AnchorStyles.Top;
+
+            buttonPanel.Controls.Add(ok);
+            buttonPanel.Controls.Add(cancel);
+
+            dlg.Controls.Add(lb);
+            dlg.Controls.Add(buttonPanel);
+            dlg.Controls.Add(header);
+            dlg.AcceptButton = ok;
+            dlg.CancelButton = cancel;
+
+            return dlg.ShowDialog() == DialogResult.OK;
+        }
+    }
+
+
     // Show an OpenFileDialog filtered to _rescan_diff*.json, defaulting
     // to the recordings folder + pre-selecting the newest match.  Same
     // UX shape as PickEventsJsonViaDialog.
@@ -1799,13 +2194,15 @@ public class EntryPoint
         // their machine-readable counterparts that Run() dispatches on.
         // The two arrays MUST stay in lockstep.
         string[] labels = new[] {
-            "events_file    — single .events.json (vertical TikTok)",
-            "god_folder     — all clips in a per-god folder (horizontal)",
-            "rescan_append  — append rescan diff to current project",
+            "events_file              — single .events.json (vertical TikTok)",
+            "god_folder               — all clips in folder (NEW project)",
+            "god_folder_incremental   — append NEW clips to EXISTING project",
+            "rescan_append            — append rescan-diff fixed clips",
         };
         string[] values = new[] {
             "events_file",
             "god_folder",
+            "god_folder_incremental",
             "rescan_append",
         };
 
@@ -1824,8 +2221,8 @@ public class EntryPoint
         using (Form dlg = new Form())
         {
             dlg.Text             = "HighlightBuilder — pick a run mode";
-            dlg.Width            = 500;
-            dlg.Height           = 220;
+            dlg.Width            = 560;
+            dlg.Height           = 240;
             dlg.StartPosition    = FormStartPosition.CenterScreen;
             dlg.MinimizeBox      = false;
             dlg.MaximizeBox      = false;
