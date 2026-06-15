@@ -23,8 +23,10 @@ class OBSPlugin:
 
     def setup(self, bot):
         self.bot = bot
-        bot.register_command("scene", self.cmd_scene, mod_only=True)
-        bot.register_command("overlay", self.cmd_overlay, mod_only=True)
+        bot.register_command("scene", self.cmd_scene,
+                             mod_only=True, description="Switch OBS scene", plugin="obs")
+        bot.register_command("overlay", self.cmd_overlay,
+                             mod_only=True, description="Toggle an OBS overlay", plugin="obs")
 
     async def on_ready(self):
         connected = await self._connect()

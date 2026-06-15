@@ -101,6 +101,8 @@ class WebServer:
         self.app.router.add_get("/overlay/voicelines", self.handle_voiceline_overlay)
         self.app.router.add_get("/overlay/spin", self.handle_spin_overlay)
         self.app.router.add_get("/api/suggestions", self.handle_get_suggestions)
+        self.app.router.add_get("/api/priority_payments",
+                                self.handle_priority_payments)
         self.app.router.add_get("/api/state", self.handle_get_state)
         self.app.router.add_post("/api/state", self.handle_update_state)
         self.app.router.add_post("/api/action", self.handle_action)
@@ -420,6 +422,19 @@ class WebServer:
             return self._no_cache_file_response(html_path)
         return web.Response(text="Voice line overlay not found", status=404)
 
+    async def handle_priority_payments(self, request):
+        """Recent $5 priority requests for the control panel table."""
+        plugin = self.bot.plugins.get("priority_request") \
+            if self.bot else None
+        if plugin is None:
+            return web.json_response({"payments": []})
+        try:
+            payments = await plugin.list_payments(limit=50)
+        except Exception as e:
+            print(f"[WebServer] priority payments read error: {e}")
+            payments = []
+        return web.json_response({"payments": payments})
+
     async def handle_get_suggestions(self, request):
         """Return all suggestions for the dashboard."""
         if self.bot and "basic" in self.bot.plugins:
@@ -436,6 +451,14 @@ class WebServer:
                 "commands": self.bot.command_count,
                 "plugins": list(self.bot.plugins.keys()),
             }
+            # Streamloots hub status for the dashboard
+            sl = self.bot.plugins.get("streamloots")
+            if sl is not None and hasattr(sl, "get_status"):
+                state["streamloots"] = sl.get_status()
+            # Factorio integration status for the dashboard
+            fp = self.bot.plugins.get("factorio")
+            if fp is not None and hasattr(fp, "get_status"):
+                state["factorio"] = fp.get_status()
             # Include current title templates and command rotation for the dashboard
             if "smite" in self.bot.plugins:
                 import core.config as _cfg
@@ -587,6 +610,24 @@ class WebServer:
                 return web.json_response({"ok": True, "removed": removed})
             return web.json_response({"error": "Missing command"}, status=400)
 
+        elif action == "refund_priority":
+            # Manual Stripe refund from the dashboard. Real money —
+            # the plugin creates the refund via Stripe's API, marks
+            # the local row, and pulls any still-queued entry.
+            plugin = self.bot.plugins.get("priority_request") \
+                if self.bot else None
+            if plugin is None:
+                return web.json_response(
+                    {"error": "priority_request plugin not loaded"},
+                    status=400)
+            session_id = (data.get("session_id") or "").strip()
+            if not session_id:
+                return web.json_response(
+                    {"error": "session_id required"}, status=400)
+            result = await plugin.refund_session(session_id)
+            status = 200 if result.get("ok") else 502
+            return web.json_response(result, status=status)
+
         elif action == "clear_suggestions":
             if "basic" in self.bot.plugins:
                 count = len(self.bot.plugins["basic"]._suggestions)
@@ -638,6 +679,21 @@ class WebServer:
             test_user = data.get("user", "TestViewer")
             test_msg = data.get("message", "This is a test of the highlighted message text-to-speech system!")
             self.trigger_tts(test_user, test_msg)
+            return web.json_response({"ok": True})
+
+        elif action == "test_streamloots":
+            # Simulate a Streamloots card redemption (no real card spent).
+            # Optional params: card, user, message, rarity.
+            sl = self.bot.plugins.get("streamloots") if self.bot else None
+            if not sl:
+                return web.json_response(
+                    {"ok": False, "error": "streamloots plugin not registered"})
+            await sl.simulate_redemption(
+                card_name=data.get("card", "Test Card"),
+                username=data.get("user", "TestViewer"),
+                message=data.get("message", ""),
+                rarity=data.get("rarity", "common"),
+            )
             return web.json_response({"ok": True})
 
         elif action == "send_chat":

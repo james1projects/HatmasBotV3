@@ -410,9 +410,10 @@ class KdaReader:
 
         try:
             import cv2
-            import pytesseract
-            if self._tesseract_path:
-                pytesseract.pytesseract.tesseract_cmd = self._tesseract_path
+            if self._ocr_available:
+                import pytesseract
+                if self._tesseract_path:
+                    pytesseract.pytesseract.tesseract_cmd = self._tesseract_path
 
             ox, oy = crop_origin
             x1, y1, x2, y2 = KDA_REGION
@@ -635,9 +636,10 @@ class KdaReader:
 
         try:
             import cv2
-            import pytesseract
-            if self._tesseract_path:
-                pytesseract.pytesseract.tesseract_cmd = self._tesseract_path
+            if self._ocr_available:
+                import pytesseract
+                if self._tesseract_path:
+                    pytesseract.pytesseract.tesseract_cmd = self._tesseract_path
 
             ox, oy = crop_origin
             x1, y1, x2, y2 = KDA_REGION
@@ -1181,7 +1183,6 @@ class KdaReader:
         If any single component can't be identified the whole read fails.
         """
         import cv2
-        import pytesseract
 
         digits.sort(key=lambda c: c[0])
 
@@ -1233,6 +1234,7 @@ class KdaReader:
 
                 # Tesseract on the single component for any holdout.
                 if digit_str is None and self._ocr_available:
+                    import pytesseract
                     comp_padded = cv2.copyMakeBorder(
                         comp_crop, 20, 20, 20, 20,
                         cv2.BORDER_CONSTANT, value=0,

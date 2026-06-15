@@ -14,6 +14,8 @@ obsws-python>=1.7.0             # OBS WebSocket control (scenes, sources, screen
 anthropic>=0.40.0               # Claude API client for !@HatmasBot mentions
 yt-dlp>=2024.0.0                # YouTube audio fetch for song requests
 gtts>=2.5.0                     # Text-to-speech for highlighted-message overlay
+stripe>=11.0.0                  # Priority god request — Checkout Sessions + webhook signature verify
+discord.py>=2.6                 # Discord bridge (plugins/discord_bridge.py). Latest release has Py 3.14 fixes.
 
 # === Frame analysis (kill detector + offline VOD pipeline) ===
 Pillow>=10.0.0                  # PIL — image read/write/composition

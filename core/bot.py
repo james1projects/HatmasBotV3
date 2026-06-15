@@ -6,6 +6,7 @@ Built for TwitchIO v3.
 """
 
 import asyncio
+import time
 import traceback
 from datetime import datetime
 
@@ -17,7 +18,7 @@ from core.config import (
     TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET,
     TWITCH_BOT_TOKEN, TWITCH_BOT_USERNAME, TWITCH_CHANNEL,
     DEFAULT_FEATURES, SHOUTOUT_ENABLED, SHOUTOUT_MIN_VIEWERS,
-    SHOUTOUT_COOLDOWN, TWITCH_OWNER_ID, TTS_MAX_LENGTH,
+    SHOUTOUT_COOLDOWN, TWITCH_OWNER_ID, TTS_MAX_LENGTH, DATA_DIR,
 )
 
 
@@ -75,6 +76,12 @@ class HatmasBot(commands.Bot):
         self.start_time = datetime.now()
         self.command_count = 0
         self._custom_commands = {}
+        # Per-command platform overrides, edited from the /mod page.
+        # {"cmd": {"twitch": bool, "discord": bool}}. Absent key means
+        # use the code default from register_command(platforms=...).
+        self._platform_overrides = self._load_platform_overrides()
+        self._catalog_listeners = []   # async callables(), fired on toggle
+        self._cooldown_uses = {}       # (cmd, user_key) -> last use ts
         self._mention_handlers = []
         self._raw_handlers = []
         self._owner_id = owner_id
@@ -173,11 +180,159 @@ class HatmasBot(commands.Bot):
             plugin_instance.setup(self)
         print(f"[Plugin] {name} loaded")
 
-    def register_command(self, name, handler, mod_only=False):
+    def register_command(self, name, handler, mod_only=False,
+                         description="", platforms=("twitch",),
+                         identity=False, plugin=None, cooldown=0):
+        """Register a chat command.
+
+        Backward compatible: old call sites get twitch-only, no
+        description. New metadata (Crossplatform_Commands_Plan.md):
+          description: required for Discord slash registration (<=100 chars)
+          platforms:   code-level default surfaces ("twitch", "discord")
+          identity:    needs to know who asks; no Discord until Phase 5
+          plugin:      grouping label for the /mod page
+          cooldown:    per-user seconds between uses, 0 = off (default).
+                       Mods exempt on Twitch. Editable from /mod.
+        """
         self._custom_commands[name.lower()] = {
             "handler": handler,
             "mod_only": mod_only,
+            "description": description,
+            "platforms": tuple(platforms),
+            "identity": identity,
+            "plugin": plugin or "misc",
+            "cooldown": float(cooldown),
         }
+
+    # ── command platform toggles (mod page / Discord bridge) ──
+
+    def _load_platform_overrides(self):
+        import json
+        path = DATA_DIR / "command_platforms.json"
+        try:
+            if path.exists():
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return data
+        except Exception as e:
+            print(f"[Commands] Could not load platform overrides: {e}")
+        return {}
+
+    def _save_platform_overrides(self):
+        import json
+        path = DATA_DIR / "command_platforms.json"
+        try:
+            path.write_text(json.dumps(self._platform_overrides, indent=2,
+                                       sort_keys=True), encoding="utf-8")
+        except Exception as e:
+            print(f"[Commands] Could not save platform overrides: {e}")
+
+    def is_command_enabled(self, name, platform):
+        """Effective availability of a command on a platform.
+        Precedence: mod-page override > code default. Discord
+        additionally requires not mod_only and not identity (v1)."""
+        cmd = self._custom_commands.get(name.lower())
+        if cmd is None:
+            return False
+        if platform == "discord" and (cmd["mod_only"] or cmd["identity"]):
+            return False
+        override = self._platform_overrides.get(name.lower(), {})
+        if platform in override:
+            return bool(override[platform])
+        return platform in cmd["platforms"]
+
+    async def notify_catalog_changed(self):
+        """Fire catalog listeners (Discord slash re-sync, etc.)."""
+        for listener in self._catalog_listeners:
+            try:
+                await listener()
+            except Exception as e:
+                print(f"[Commands] catalog listener error: {e}")
+
+    def unregister_command(self, name):
+        """Remove a command and its overrides. Used by custom commands.
+        Caller should await notify_catalog_changed() after."""
+        name = name.lower()
+        removed = self._custom_commands.pop(name, None) is not None
+        if self._platform_overrides.pop(name, None) is not None:
+            self._save_platform_overrides()
+        return removed
+
+    def get_command_cooldown(self, name):
+        """Effective per-user cooldown seconds. Override beats default."""
+        cmd = self._custom_commands.get(name.lower())
+        if cmd is None:
+            return 0.0
+        override = self._platform_overrides.get(name.lower(), {})
+        if "cooldown" in override:
+            return float(override["cooldown"])
+        return float(cmd.get("cooldown", 0))
+
+    async def set_command_cooldown(self, name, seconds):
+        """Set a command's cooldown (0 disables). Persists and notifies
+        catalog listeners. Returns the catalog entry or None."""
+        name = name.lower()
+        if name not in self._custom_commands:
+            return None
+        self._platform_overrides.setdefault(name, {})["cooldown"] = float(seconds)
+        self._save_platform_overrides()
+        await self.notify_catalog_changed()
+        for entry in self.get_command_catalog():
+            if entry["name"] == name:
+                return entry
+        return None
+
+    def check_cooldown(self, name, user_key):
+        """0 if allowed (records the use), else seconds remaining."""
+        cd = self.get_command_cooldown(name)
+        if cd <= 0:
+            return 0
+        now = time.time()
+        key = (name.lower(), str(user_key).lower())
+        remaining = cd - (now - self._cooldown_uses.get(key, 0))
+        if remaining > 0:
+            return remaining
+        self._cooldown_uses[key] = now
+        return 0
+
+    def get_command_catalog(self):
+        """Full command list with effective platform states. Consumed
+        by the /mod page API and the Discord slash-command sync."""
+        out = []
+        for name, cmd in sorted(self._custom_commands.items()):
+            out.append({
+                "name": name,
+                "plugin": cmd["plugin"],
+                "description": cmd["description"],
+                "mod_only": cmd["mod_only"],
+                "identity": cmd["identity"],
+                "custom": bool(cmd.get("custom")),
+                "cooldown": self.get_command_cooldown(name),
+                "twitch_enabled": self.is_command_enabled(name, "twitch"),
+                "discord_enabled": self.is_command_enabled(name, "discord"),
+                "discord_eligible": not (cmd["mod_only"] or cmd["identity"])
+                                    and bool(cmd["description"]),
+            })
+        return out
+
+    def add_catalog_listener(self, coro):
+        """Register an async callable() fired after any platform toggle."""
+        self._catalog_listeners.append(coro)
+
+    async def set_command_platform(self, name, platform, enabled):
+        """Flip a command's availability on a platform. Persists and
+        notifies listeners (e.g. Discord slash re-sync). Returns the
+        catalog entry, or None if the command doesn't exist."""
+        name = name.lower()
+        if name not in self._custom_commands or platform not in ("twitch", "discord"):
+            return None
+        self._platform_overrides.setdefault(name, {})[platform] = bool(enabled)
+        self._save_platform_overrides()
+        await self.notify_catalog_changed()
+        for entry in self.get_command_catalog():
+            if entry["name"] == name:
+                return entry
+        return None
 
     def register_mention_handler(self, handler):
         self._mention_handlers.append(handler)
@@ -268,7 +423,15 @@ class HatmasBot(commands.Bot):
             if cmd_name in self._custom_commands:
                 cmd = self._custom_commands[cmd_name]
 
+                if not self.is_command_enabled(cmd_name, "twitch"):
+                    return  # disabled from the /mod page
+
                 if cmd["mod_only"] and not self.is_mod(chatter):
+                    return
+
+                # per-user cooldown (set from /mod, mods exempt)
+                if (not self.is_mod(chatter)
+                        and self.check_cooldown(cmd_name, chatter.name) > 0):
                     return
 
                 try:
@@ -327,6 +490,11 @@ class HatmasBot(commands.Bot):
 
             if cmd_name in self._custom_commands:
                 cmd = self._custom_commands[cmd_name]
+                if not self.is_command_enabled(cmd_name, "twitch"):
+                    return  # disabled from the /mod page
+                if (not self.is_mod(wrapped.chatter)
+                        and self.check_cooldown(cmd_name, sender_name) > 0):
+                    return
                 try:
                     await cmd["handler"](wrapped, args, whisper=True)
                 except Exception as e:

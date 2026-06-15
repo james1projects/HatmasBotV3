@@ -145,16 +145,26 @@ class SmitePlugin(
 
     def setup(self, bot):
         self.bot = bot
-        bot.register_command("god", self.cmd_god)
-        bot.register_command("stats", self.cmd_stats)
-        bot.register_command("rank", self.cmd_rank)
-        bot.register_command("match", self.cmd_match)
-        bot.register_command("winrate", self.cmd_winrate)
-        bot.register_command("kda", self.cmd_kda)
-        bot.register_command("damage", self.cmd_damage)
-        bot.register_command("team", self.cmd_team)
-        bot.register_command("lastmatch", self.cmd_lastmatch)
-        bot.register_command("record", self.cmd_record)
+        bot.register_command("god", self.cmd_god,
+                             description="Current god's stats, or look up any god by name", platforms=("twitch", "discord"), plugin="smite")
+        bot.register_command("stats", self.cmd_stats,
+                             description="Ranked Conquest K/D/A, win rate, and KDA", platforms=("twitch", "discord"), plugin="smite")
+        bot.register_command("rank", self.cmd_rank,
+                             description="Current SR and rank tier", platforms=("twitch", "discord"), plugin="smite")
+        bot.register_command("match", self.cmd_match,
+                             description="Current match status with duration and live KDA", platforms=("twitch", "discord"), plugin="smite")
+        bot.register_command("winrate", self.cmd_winrate,
+                             description="Ranked win percentage", platforms=("twitch", "discord"), plugin="smite")
+        bot.register_command("kda", self.cmd_kda,
+                             description="KDA ratio and KA/D", platforms=("twitch", "discord"), plugin="smite")
+        bot.register_command("damage", self.cmd_damage,
+                             description="Total, per match, and per minute damage", platforms=("twitch", "discord"), plugin="smite")
+        bot.register_command("team", self.cmd_team,
+                             description="Every teammate with their god and KDA", platforms=("twitch", "discord"), plugin="smite")
+        bot.register_command("lastmatch", self.cmd_lastmatch,
+                             description="Last completed match result", platforms=("twitch", "discord"), plugin="smite")
+        bot.register_command("record", self.cmd_record,
+                             description="Today's W-L and win rate", platforms=("twitch", "discord"), plugin="smite")
 
     async def on_ready(self):
         # Re-load saved title templates from disk (overrides config defaults

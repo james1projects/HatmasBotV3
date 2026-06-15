@@ -77,6 +77,13 @@ class GodRequestPlugin:
         self._miu_item_id = None
         self._miu_connected = False
 
+        # History listeners (append-only list, same pattern as the
+        # kill detector's add_*_listener hooks). Fired with the final
+        # history entry whenever a queue entry is resolved (status:
+        # played | skipped | removed). PriorityRequestPlugin uses this
+        # to stamp played_at on paid requests.
+        self._history_listeners = []
+
         self._load_data()
 
     # === DATA PERSISTENCE ===
@@ -104,19 +111,40 @@ class GodRequestPlugin:
         history.append(entry)
         with open(GODREQ_HISTORY_FILE, "w") as f:
             json.dump(history, f, indent=2)
+        for fn in self._history_listeners:
+            try:
+                fn(entry)
+            except Exception as e:
+                print(f"[GodRequest] history listener error: {e}")
+
+    def add_history_listener(self, fn):
+        """Subscribe to resolved queue entries. `fn` is called
+        synchronously with the history dict each time an entry leaves
+        the queue (includes status: played | skipped | removed, plus
+        stripe_session_id for paid_priority entries)."""
+        if fn not in self._history_listeners:
+            self._history_listeners.append(fn)
 
     # === SETUP ===
 
     def setup(self, bot):
         self.bot = bot
-        bot.register_command("godrequest", self.cmd_godrequest)
-        bot.register_command("godreq", self.cmd_godreq, mod_only=True)
-        bot.register_command("godqueue", self.cmd_godqueue)
-        bot.register_command("godskip", self.cmd_godskip, mod_only=True)
-        bot.register_command("clear", self.cmd_godclear, mod_only=True)
-        bot.register_command("godtokens", self.cmd_godtokens)
-        bot.register_command("remove", self.cmd_remove, mod_only=True)
-        bot.register_command("godlist", self.cmd_godlist)
+        bot.register_command("godrequest", self.cmd_godrequest,
+                             description="Spend a God Token to request a god", identity=True, plugin="godrequest")
+        bot.register_command("godreq", self.cmd_godreq,
+                             mod_only=True, description="Add a god to the queue for free", plugin="godrequest")
+        bot.register_command("godqueue", self.cmd_godqueue,
+                             description="Next 5 gods in the request queue", platforms=("twitch", "discord"), plugin="godrequest")
+        bot.register_command("godskip", self.cmd_godskip,
+                             mod_only=True, description="Remove the next god from the queue", plugin="godrequest")
+        bot.register_command("clear", self.cmd_godclear,
+                             mod_only=True, description="Clear the entire god queue", plugin="godrequest")
+        bot.register_command("godtokens", self.cmd_godtokens,
+                             description="Your God Token balance", identity=True, plugin="godrequest")
+        bot.register_command("remove", self.cmd_remove,
+                             mod_only=True, description="Remove the god at a queue position", plugin="godrequest")
+        bot.register_command("godlist", self.cmd_godlist,
+                             description="The entire god request queue", platforms=("twitch", "discord"), plugin="godrequest")
 
         # Register for Smite god detection events
         if "smite" in bot.plugins:
@@ -312,11 +340,25 @@ class GodRequestPlugin:
         group = OBS_GODREQ_GROUP or None
 
         if self.queue:
-            next_god = self.queue[0]["god"]
+            head = self.queue[0]
+            next_god = head["god"]
 
-            # Set the text to the god name
+            # Prefix the OBS text source with a PRIORITY tag when the
+            # head-of-queue entry was paid for ($5 via Stripe through
+            # the website). The image source is unchanged — the badge
+            # is text-only because the existing OBS layout already has
+            # a "GodReqText" element that's easy to repurpose without
+            # asking James to add a new source. If you'd rather use a
+            # dedicated badge image source later, drop this prefix and
+            # add an OBS_SOURCE_GODREQ_PRIORITY_BADGE source instead.
+            display_text = next_god
+            if head.get("source") == "paid_priority":
+                display_text = f"PRIORITY - {next_god}"
+
+            # Set the text to the (possibly priority-prefixed) god name
             try:
-                await obs.update_text_source(OBS_SOURCE_GODREQ_TEXT, next_god)
+                await obs.update_text_source(
+                    OBS_SOURCE_GODREQ_TEXT, display_text)
             except Exception as e:
                 print(f"[GodReq] OBS text error: {e}")
 

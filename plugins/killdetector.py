@@ -116,6 +116,17 @@ STARTUP_REQUIRED_READS = 3
 # every read in the new match forever.
 ZERO_READ_RESET_THRESHOLD = 5
 
+# Loud-failure observability. When the god is identified and we're in
+# gameplay but KDA reads keep failing, something is broken (region
+# drift, binarization regression, missing dependency). Every
+# READ_FAILURE_ALERT_EVERY consecutive failures (~20s at 0.8s/frame)
+# we log a non-debug warning with the reader's failure_reason, and
+# save a full-frame snapshot (rate-limited) for postmortem / fixture
+# creation. Added June 2026 after a whole session failed silently
+# because pytesseract was missing (ImportError swallowed by read_kda).
+READ_FAILURE_ALERT_EVERY = 25
+READ_FAILURE_SNAPSHOT_MIN_INTERVAL = 300.0  # seconds between snapshots
+
 
 class KillDeathDetector:
     """
@@ -803,6 +814,32 @@ class KillDeathDetector:
         )
         return True
 
+    def _save_failure_snapshot(self, img: Image.Image, reason) -> None:
+        """Save a full frame + reason for postmortem when KDA reads fail
+        persistently during identified gameplay. Rate-limited via
+        READ_FAILURE_SNAPSHOT_MIN_INTERVAL so a broken reader doesn't
+        fill the disk. Snapshots land in data/detector_snapshots/
+        readfail_<ts>/fullframe.png — the same layout fixtures are
+        built from, so a failing frame can be promoted straight into
+        data/test_fixtures/kda/ once the truth is known."""
+        now = time.time()
+        last = getattr(self, "_last_failure_snapshot_ts", 0.0)
+        if now - last < READ_FAILURE_SNAPSHOT_MIN_INTERVAL:
+            return
+        self._last_failure_snapshot_ts = now
+        import datetime
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        snap_dir = DATA_DIR / "detector_snapshots" / f"readfail_{ts}"
+        try:
+            snap_dir.mkdir(parents=True, exist_ok=True)
+            img.save(str(snap_dir / "fullframe.png"))
+            (snap_dir / "reason.txt").write_text(
+                str(reason), encoding="utf-8"
+            )
+            _log(f"[KillDetector] Saved failure snapshot -> {snap_dir}")
+        except OSError as e:
+            _log(f"[KillDetector] Failed to save failure snapshot: {e}")
+
     async def _detection_loop(self):
         """Main loop: grab screenshots, read KDA, detect changes.
 
@@ -1450,6 +1487,31 @@ class KillDeathDetector:
                             f"[KillDetector] KDA read failed "
                             f"(consecutive: {self._kda_read_failures})"
                         )
+                    # Loud, non-debug alert on sustained failure during
+                    # identified gameplay. This state used to be silent
+                    # — a fully-broken reader looked identical to lobby
+                    # idling in the logs. Run the with_details pipeline
+                    # once per alert (~10-20ms) to capture WHY it fails.
+                    if self._kda_read_failures % READ_FAILURE_ALERT_EVERY == 0:
+                        reason = None
+                        try:
+                            details = self._reader.read_kda_with_details(img)
+                            reason = details.get("failure_reason")
+                        except Exception as e:
+                            reason = f"details_error:{type(e).__name__}:{e}"
+                        _log(
+                            f"[KillDetector] WARNING: "
+                            f"{self._kda_read_failures} consecutive KDA "
+                            f"read failures during gameplay "
+                            f"(god={self._god_confirm_name}, "
+                            f"reason={reason})"
+                        )
+                        self._log_debug_event(
+                            "reject",
+                            f"{self._kda_read_failures} consecutive read "
+                            f"failures (reason={reason})",
+                        )
+                        self._save_failure_snapshot(img, reason)
 
                 _frame_elapsed = (time.time() - _frame_start) * 1000
                 if _frame_count % 20 == 1:

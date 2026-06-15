@@ -50,10 +50,14 @@ class GodPoolPlugin:
 
     def setup(self, bot):
         self.bot = bot
-        bot.register_command("nominate", self.cmd_nominate)
-        bot.register_command("pool", self.cmd_pool)
-        bot.register_command("spin", self.cmd_spin, mod_only=True)
-        bot.register_command("poolclear", self.cmd_pool_clear, mod_only=True)
+        bot.register_command("nominate", self.cmd_nominate,
+                             description="Nominate a god for the pool", identity=True, plugin="god_pool")
+        bot.register_command("pool", self.cmd_pool,
+                             description="Current god pool nominations", plugin="god_pool")
+        bot.register_command("spin", self.cmd_spin,
+                             mod_only=True, description="Spin the god pool wheel", plugin="god_pool")
+        bot.register_command("poolclear", self.cmd_pool_clear,
+                             mod_only=True, description="Clear the god pool", plugin="god_pool")
 
         # Load the known god list eagerly here — NOT in on_ready().
         # setup() runs synchronously during plugin registration in
@@ -419,17 +423,30 @@ class GodPoolPlugin:
         # Play the god-select voice line — delayed so it lands AFTER
         # the spin reel animation completes and the win chime fades.
         # Timing math:
-        #   - Reel transition: 4.4s (SPIN_DURATION_MS in the overlay)
-        #   - Last tick + win chime fire at t=4.4s
-        #   - Win chime takes ~0.75s to ring out
-        #   - User-requested 1s gap after the last tick
-        #   → Voice line at t=4.4s + 1.0s = 5.4s
-        # If the spin reel constants in overlays/god_pool_spin.html
-        # change, bump this to match.
+        #   - Reel transition: SPIN_DURATION_BASE_MS (4.4s) plus
+        #     SPIN_DURATION_PER_GOD_MS (150ms) for every god in the
+        #     pool beyond SPIN_DURATION_FREE_GODS (8). The overlay
+        #     scales its spin so every god in the reveal pass reads
+        #     past the marker, so big pools = longer spins.
+        #   - Last tick + win chime fire at the end of the spin.
+        #   - Win chime takes ~0.75s to ring out.
+        #   - User-requested 1s gap after the last tick.
+        #   → Voice line at t=spin_duration + 1.0s.
+        # If the SPIN_DURATION_* constants in overlays/god_pool_spin.html
+        # change, mirror them here.
+        SPIN_DURATION_BASE_MS = 4400
+        SPIN_DURATION_PER_GOD_MS = 150
+        SPIN_DURATION_FREE_GODS = 8
+        spin_duration_ms = (
+            SPIN_DURATION_BASE_MS
+            + max(0, len(rows) - SPIN_DURATION_FREE_GODS)
+              * SPIN_DURATION_PER_GOD_MS
+        )
+
         voicelines = (self.bot.plugins.get("voicelines")
                       if self.bot and hasattr(self.bot, "plugins") else None)
         if voicelines and hasattr(voicelines, "play_god_select"):
-            SPIN_VOICELINE_DELAY_S = 5.4
+            SPIN_VOICELINE_DELAY_S = spin_duration_ms / 1000 + 1.0
 
             async def _delayed_voice_line(god=chosen_god, vl=voicelines):
                 try:

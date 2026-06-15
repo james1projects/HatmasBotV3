@@ -465,6 +465,16 @@ h1 {
     </div>
   </div>
 
+  <!-- Priority Requests (Stripe) -->
+  <div class="card" style="grid-column: 1 / -1;">
+    <div class="card-title">priority requests ($5 stripe)</div>
+    <div id="priorityPayments" style="font-size:12px">
+      <div class="queue-empty">No payments yet</div>
+    </div>
+    <div id="priorityRefundStatus"
+         style="font-size:11px;color:rgba(196,168,130,0.5);margin-top:6px;text-align:center"></div>
+  </div>
+
   <!-- Debug -->
   <div class="card" style="grid-column: 1 / -1;">
     <div class="card-title">debug</div>
@@ -535,6 +545,8 @@ h1 {
         <button class="big-btn" onclick="action('test_sound', {type:'win'})" style="padding:10px;font-size:12px">TEST WIN</button>
         <button class="big-btn" onclick="action('test_sound', {type:'loss'})" style="padding:10px;font-size:12px">TEST LOSS</button>
         <button class="big-btn snap-btn" onclick="action('test_tts')" style="padding:10px;font-size:12px">TEST TTS</button>
+        <button class="big-btn" onclick="action('test_streamloots', {card:'Test Card', user:'TestViewer'})" style="padding:10px;font-size:12px">TEST STREAMLOOTS</button>
+        <div id="streamlootsStatus" style="font-size:11px;margin-top:6px;color:#888">streamloots: --</div>
       </div>
 
     </div>
@@ -553,6 +565,75 @@ async function action(name, extra = {}) {
     });
   } catch(e) { console.error(e); }
 }
+
+async function loadPriorityPayments() {
+  try {
+    const r = await fetch(`${API}/api/priority_payments`);
+    const data = await r.json();
+    const rows = data.payments || [];
+    const el = document.getElementById('priorityPayments');
+    if (!rows.length) {
+      el.innerHTML = '<div class="queue-empty">No payments yet</div>';
+      return;
+    }
+    let html = '<table style="width:100%;border-collapse:collapse">' +
+      '<tr style="text-align:left;opacity:0.55">' +
+      '<th style="padding:3px 6px">WHEN</th><th>USER</th><th>GOD</th>' +
+      '<th>$</th><th>STATUS</th><th></th></tr>';
+    for (const p of rows) {
+      const when = (p.created_at || '').slice(5, 16);
+      let status = p.status.toUpperCase();
+      if (p.status === 'fulfilled' && p.played_at) status = 'PLAYED';
+      const color = p.status === 'refunded' ? '#DF2935'
+        : (status === 'PLAYED' ? '#7ec97e'
+        : (p.status === 'fulfilled' ? '#DFA06E' : 'rgba(196,168,130,0.5)'));
+      // Refund makes sense for anything paid-for and not yet refunded.
+      const refundable = (p.status === 'fulfilled' || p.status === 'paid');
+      html += '<tr style="border-top:1px solid rgba(196,168,130,0.12)">' +
+        `<td style="padding:3px 6px;white-space:nowrap">${when}</td>` +
+        `<td>${escapeHtmlCP(p.username || '?')}</td>` +
+        `<td>${escapeHtmlCP(p.god || '?')}</td>` +
+        `<td>${(p.amount_cents / 100).toFixed(2)}</td>` +
+        `<td style="color:${color}">${status}</td>` +
+        '<td style="text-align:right">' +
+        (refundable
+          ? `<button class="big-btn stop" style="margin:0;padding:2px 10px;font-size:10px"
+               onclick="refundPriority('${p.session_id}','${escapeHtmlCP(p.username || '')}')">REFUND</button>`
+          : '') +
+        '</td></tr>';
+    }
+    el.innerHTML = html + '</table>';
+  } catch (e) { console.error(e); }
+}
+
+function escapeHtmlCP(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;',
+    '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+async function refundPriority(sessionId, username) {
+  const st = document.getElementById('priorityRefundStatus');
+  if (!confirm(`Refund $5 to ${username}? This creates a REAL Stripe refund.`)) return;
+  st.textContent = 'Refunding...';
+  try {
+    const r = await fetch(`${API}/api/action`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({action: 'refund_priority', session_id: sessionId})
+    });
+    const data = await r.json();
+    st.textContent = data.ok
+      ? `Refunded. Queue entry removed: ${data.queue_entry_removed ? 'yes' : 'no / already played'}`
+      : `Refund failed: ${data.error || 'unknown'}`;
+  } catch (e) {
+    st.textContent = 'Refund failed: network error';
+  }
+  loadPriorityPayments();
+}
+
+loadPriorityPayments();
+setInterval(loadPriorityPayments, 30000);
 
 async function sendChat() {
   const input = document.getElementById('chatMsg');
@@ -745,6 +826,18 @@ async function poll() {
       document.getElementById('statUptime').textContent = data.stats.uptime || '--';
       document.getElementById('statCommands').textContent = data.stats.commands || 0;
       document.getElementById('statPlugins').textContent = (data.stats.plugins || []).join(', ');
+    }
+
+    if (data.streamloots) {
+      const sl = data.streamloots;
+      const el = document.getElementById('streamlootsStatus');
+      if (el) {
+        const status = sl.config_error ? 'CONFIG ERROR'
+          : sl.connected ? 'connected'
+          : sl.configured ? 'disconnected'
+          : 'not configured';
+        el.textContent = 'streamloots: ' + status + ' | events: ' + sl.events_received;
+      }
     }
 
     // Populate title templates on first load only (don't overwrite user edits)

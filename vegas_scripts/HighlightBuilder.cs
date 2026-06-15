@@ -1648,7 +1648,7 @@ public class EntryPoint
         }
 
         // ── 5) Walk the current project, collect already-imported sources ──
-        HashSet<string> imported = CollectImportedSources(proj);
+        Dictionary<string, byte> imported = CollectImportedSources(proj);
 
         // ── 6) Filter to only NEW clips (source not already on timeline) ───
         List<EventsFile> newPlans = new List<EventsFile>();
@@ -1658,7 +1658,7 @@ public class EntryPoint
             string norm;
             try { norm = Path.GetFullPath(ef.SourceVideo); }
             catch { norm = ef.SourceVideo; }
-            if (imported.Contains(norm))
+            if (imported.ContainsKey(norm))
                 alreadyImportedNotes.Add(Path.GetFileName(ef.SourceVideo));
             else
                 newPlans.Add(ef);
@@ -1816,9 +1816,9 @@ public class EntryPoint
     // relative paths, dot-segments) and matched case-insensitively
     // (Windows filesystem semantics).  Title-card events and other
     // generated media without a FilePath are silently skipped.
-    static HashSet<string> CollectImportedSources(Project proj)
+    static Dictionary<string, byte> CollectImportedSources(Project proj)
     {
-        HashSet<string> sources = new HashSet<string>(
+        Dictionary<string, byte> sources = new Dictionary<string, byte>(
             StringComparer.OrdinalIgnoreCase);
         foreach (Track t in proj.Tracks)
         {
@@ -1832,7 +1832,7 @@ public class EntryPoint
                 if (string.IsNullOrEmpty(fp)) continue;
                 try { fp = Path.GetFullPath(fp); }
                 catch { /* keep raw on normalization failure */ }
-                sources.Add(fp);
+                sources[fp] = 0;  // value unused; key set acts as the "hash set"
             }
         }
         return sources;

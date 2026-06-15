@@ -121,13 +121,20 @@ class EconomyPlugin(
 
     def setup(self, bot):
         self.bot = bot
-        bot.register_command("buy", self.cmd_buy)
-        bot.register_command("sell", self.cmd_sell)
-        bot.register_command("portfolio", self.cmd_portfolio)
-        bot.register_command("price", self.cmd_price)
-        bot.register_command("market", self.cmd_market)
-        bot.register_command("stocks", self.cmd_market)  # alias
-        bot.register_command("dividend", self.cmd_dividend)
+        bot.register_command("buy", self.cmd_buy,
+                             description="Buy shares of a god with Hats", identity=True, plugin="economy")
+        bot.register_command("sell", self.cmd_sell,
+                             description="Sell shares for Hats", identity=True, plugin="economy")
+        bot.register_command("portfolio", self.cmd_portfolio,
+                             description="Your holdings, P&L, and net worth", identity=True, plugin="economy")
+        bot.register_command("price", self.cmd_price,
+                             description="Current price, trend, and volatility tier for a god", platforms=("twitch", "discord"), plugin="economy")
+        bot.register_command("market", self.cmd_market,
+                             description="Top movers in the Hatmas Market", platforms=("twitch", "discord"), plugin="economy")
+        bot.register_command("stocks", self.cmd_market,
+                             description="Top movers in the Hatmas Market (alias)", platforms=("twitch", "discord"), plugin="economy")  # alias
+        bot.register_command("dividend", self.cmd_dividend,
+                             description="Most recent dividend payout info", platforms=("twitch", "discord"), plugin="economy")
 
         # Register our schema callback with the shared DB. main.py calls
         # core.db.init_db() between plugin setup and bot.start(), so by

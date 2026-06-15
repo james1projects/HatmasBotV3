@@ -47,6 +47,19 @@ CLAUDE_SYSTEM_PROMPT = """You are YourBotName, a Twitch chat bot.
 Keep responses SHORT (under 100 words), witty, and dry humor.
 Never be mean, but playful roasting is fine. One emoji max per message."""
 
+# === DISCORD ===
+# Setup steps: Discord_Integration_Plan.md, "One-time Discord setup".
+# Remember to enable MESSAGE CONTENT INTENT in the dev portal Bot tab.
+DISCORD_ENABLED = False
+DISCORD_BOT_TOKEN = "your_discord_bot_token_here"
+DISCORD_GUILD_ID = 0               # your server ID
+DISCORD_DEFAULT_CHANNEL_ID = 0     # e.g. #bot-spam channel ID
+
+# Go-live announcements (max one per day, automatic)
+DISCORD_ANNOUNCE_ENABLED = False
+DISCORD_ANNOUNCE_CHANNEL_ID = 0    # e.g. #announcements channel ID
+DISCORD_ANNOUNCE_ROLE_ID = 0       # e.g. a "Stream Pings" role ID, 0 = no ping
+
 # === OBS SCENE NAMES (match your OBS setup) ===
 # OBS_SCENE_MAIN = "Main"
 # OBS_SCENE_LOBBY = "Lobby"

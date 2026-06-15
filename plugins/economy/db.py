@@ -26,6 +26,7 @@ from __future__ import annotations
 from typing import List
 
 from core.config import ECONOMY_PRICE_FLOOR, ECONOMY_STARTING_PRICE
+from core.youtube_schema import YOUTUBE_SCHEMA_SQL
 
 
 # Number of price points kept in the in-memory sparkline cache. Used by
@@ -57,12 +58,6 @@ class _DBMixin:
         main.py — DO NOT close it from anywhere in this file.
         """
         self._db = conn
-
-        # Migration: god_prices used to have only total_wins/total_losses;
-        # the fair-value formula needs running KDA totals too. Add the
-        # columns if they don't exist. SQLite's ALTER TABLE doesn't
-        # support IF NOT EXISTS for columns, so we check via PRAGMA.
-        await self._migrate_god_prices_kda_columns()
 
         await self._db.executescript("""
             CREATE TABLE IF NOT EXISTS god_prices (
@@ -149,78 +144,34 @@ class _DBMixin:
 
             CREATE INDEX IF NOT EXISTS idx_processed_matches_when
                 ON processed_matches(processed_at DESC);
-
-            -- ─── YouTube commenter portfolio system ────────────────────────
-            -- Parallel to the Twitch-side tables above. Keyed on YouTube
-            -- channel ID (the immutable UCxxxx string from the Data API),
-            -- not display name (which can change). Display name is cached
-            -- for the public portfolio page's search-by-name UX.
-            CREATE TABLE IF NOT EXISTS youtube_portfolios (
-                yt_channel_id    TEXT PRIMARY KEY,
-                yt_display_name  TEXT NOT NULL,
-                first_seen_at    TEXT NOT NULL DEFAULT (datetime('now')),
-                last_seen_at     TEXT NOT NULL DEFAULT (datetime('now')),
-                leaderboard_opt_out INTEGER NOT NULL DEFAULT 0
-            );
-
-            -- Same shape as `portfolios` but keyed on yt_channel_id.
-            -- Dividends compound here as fractional bonus shares (YouTube
-            -- users have no Hats currency to credit), so `shares` can
-            -- carry decimals.
-            CREATE TABLE IF NOT EXISTS youtube_holdings (
-                yt_channel_id  TEXT NOT NULL,
-                god_name       TEXT NOT NULL,
-                shares         REAL NOT NULL DEFAULT 0,
-                avg_cost       REAL NOT NULL DEFAULT 0,
-                PRIMARY KEY (yt_channel_id, god_name),
-                FOREIGN KEY (god_name) REFERENCES god_prices(god_name)
-            );
-
-            -- Maps a YouTube video to the god James played in it. Filled
-            -- by the title parser (set_by='auto') or the
-            -- tools/mark_youtube_video.py CLI (set_by='manual'). Manual
-            -- entries always win over auto entries in case of a re-run.
-            CREATE TABLE IF NOT EXISTS youtube_video_gods (
-                yt_video_id  TEXT PRIMARY KEY,
-                god_name     TEXT NOT NULL,
-                title        TEXT,
-                set_at       TEXT NOT NULL DEFAULT (datetime('now')),
-                set_by       TEXT NOT NULL DEFAULT 'auto',
-                FOREIGN KEY (god_name) REFERENCES god_prices(god_name)
-            );
-
-            -- Dedup table. Keyed on (video, channel) so a viewer leaving
-            -- five comments on the same video still only earns one share.
-            -- comment_id is stored for debugging; the (video, channel) PK
-            -- is what enforces the one-reward-per-video rule.
-            CREATE TABLE IF NOT EXISTS youtube_processed_comments (
-                yt_video_id    TEXT NOT NULL,
-                yt_channel_id  TEXT NOT NULL,
-                comment_id     TEXT NOT NULL,
-                granted_at     TEXT NOT NULL DEFAULT (datetime('now')),
-                PRIMARY KEY (yt_video_id, yt_channel_id)
-            );
-
-            -- Mirrors `transactions` for YouTube-side share movements.
-            -- Types: 'comment_share' (initial earn), 'dividend_share'
-            -- (compound from dividend payout), 'price_settle' (record-only,
-            -- price moved against holdings).
-            CREATE TABLE IF NOT EXISTS youtube_transactions (
-                id             INTEGER PRIMARY KEY AUTOINCREMENT,
-                yt_channel_id  TEXT NOT NULL,
-                god_name       TEXT NOT NULL,
-                type           TEXT NOT NULL,
-                shares         REAL NOT NULL,
-                price          REAL NOT NULL,
-                yt_video_id    TEXT,
-                timestamp      TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_yt_holdings_god
-                ON youtube_holdings(god_name);
-            CREATE INDEX IF NOT EXISTS idx_yt_transactions_user
-                ON youtube_transactions(yt_channel_id, timestamp DESC);
         """)
+
+        # ─── YouTube commenter portfolio system ────────────────────────
+        # The YouTube tables (youtube_portfolios, youtube_holdings,
+        # youtube_video_gods, youtube_processed_comments,
+        # youtube_transactions + their two indexes) live in
+        # core/youtube_schema.py as the single source of truth. Standalone
+        # CLI tools (tools/mark_youtube_video.py) also import that module
+        # so the bot and the CLIs can never drift apart. We just run the
+        # shared DDL here after our own tables exist.
+        #
+        # The shared DDL intentionally omits the FOREIGN KEY clauses on
+        # youtube_holdings.god_name and youtube_video_gods.god_name that
+        # used to live in this file — the CLIs may run before god_prices
+        # exists, and FK enforcement on those columns was advisory only
+        # (god_prices rows are never deleted, and every YouTube-side
+        # insert is preceded by _ensure_god_exists).
+        await self._db.executescript(YOUTUBE_SCHEMA_SQL)
+
+        # Idempotent column-add migrations. Runs AFTER both executescripts
+        # so the ALTER TABLE statements never hit a "no such table" error
+        # on a fresh DB. Each ALTER is guarded by PRAGMA table_info, so it
+        # is also a no-op on a DB that already has every column. Order
+        # within the migration body doesn't matter — every step is
+        # independent.
+        await self._migrate_god_prices_kda_columns()
+        await self._migrate_transactions_channel_column()
+
         await self._db.commit()
         print("[Economy] Database initialized")
 
@@ -315,6 +266,26 @@ class _DBMixin:
             print("[Economy] Migration: added processed_matches.was_live_at_settle")
 
         await self._db.commit()
+
+    async def _migrate_transactions_channel_column(self):
+        """
+        Idempotent migration: add transactions.channel ('chat' | 'web')
+        so trades record which front door they came through. Historical
+        rows default to 'chat' — the only channel that existed before
+        website trading (WEBSITE_TRADING_DESIGN.md §0.3). Dividend and
+        free_share rows also carry 'chat'; they're bot-initiated and
+        the column is for debugging/stats, not money math.
+        """
+        cols: set = set()
+        async with self._db.execute(
+                "PRAGMA table_info(transactions)") as cur:
+            async for row in cur:
+                cols.add(row[1])
+        if "channel" not in cols:
+            await self._db.execute(
+                "ALTER TABLE transactions ADD COLUMN channel "
+                "TEXT NOT NULL DEFAULT 'chat'")
+            print("[Economy] Migration: added transactions.channel")
 
     async def _load_prices(self):
         """Load all god prices into memory cache."""

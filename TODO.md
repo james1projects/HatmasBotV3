@@ -36,7 +36,11 @@ highlights for the first time.
 
 ---
 
-## Phase 5 — Social Media Tabs on the public landing page
+## Phase 5 — Social Media Tabs on the public landing page — DONE 2026-06-10
+
+Built per Social_Tabs_Plan.md (see HatmasBot.md v2.7.1 section).
+Remaining manual step: paste new TikTok URLs into config_local.py
+as TIKTOK_LATEST_VIDEO_URL when posted.
 
 Design doc already complete at `Social_Tabs_Plan.md`. Estimated
 2–3 hours total.

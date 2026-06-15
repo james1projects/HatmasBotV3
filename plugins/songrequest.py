@@ -137,18 +137,30 @@ class SongRequestPlugin:
 
     def setup(self, bot):
         self.bot = bot
-        bot.register_command("sr", self.cmd_sr)
-        bot.register_command("skip", self.cmd_skip, mod_only=True)
-        bot.register_command("wrongsong", self.cmd_wrongsong)
-        bot.register_command("songlist", self.cmd_songlist)
-        bot.register_command("song", self.cmd_song)
-        bot.register_command("like", self.cmd_like)
-        bot.register_command("mysongs", self.cmd_mysongs)
-        bot.register_command("toprequester", self.cmd_toprequester)
-        bot.register_command("voteskip", self.cmd_voteskip)
-        bot.register_command("blacklistsong", self.cmd_blacklistsong, mod_only=True)
-        bot.register_command("songstatus", self.cmd_songstatus)
-        bot.register_command("topsongs", self.cmd_topsongs)
+        bot.register_command("sr", self.cmd_sr,
+                             description="Queue a song by name or URL", identity=True, plugin="songrequest")
+        bot.register_command("skip", self.cmd_skip,
+                             mod_only=True, description="Skip the current song", plugin="songrequest")
+        bot.register_command("wrongsong", self.cmd_wrongsong,
+                             description="Remove your most recent queued song", identity=True, plugin="songrequest")
+        bot.register_command("songlist", self.cmd_songlist,
+                             description="Top 5 queued songs", platforms=("twitch", "discord"), plugin="songrequest")
+        bot.register_command("song", self.cmd_song,
+                             description="Current song, requester, and likes", platforms=("twitch", "discord"), plugin="songrequest")
+        bot.register_command("like", self.cmd_like,
+                             description="Like the current song", identity=True, plugin="songrequest")
+        bot.register_command("mysongs", self.cmd_mysongs,
+                             description="Your total likes and most liked song", identity=True, plugin="songrequest")
+        bot.register_command("toprequester", self.cmd_toprequester,
+                             description="Top 3 requesters by likes received", platforms=("twitch", "discord"), plugin="songrequest")
+        bot.register_command("voteskip", self.cmd_voteskip,
+                             description="Vote to skip the current song", identity=True, plugin="songrequest")
+        bot.register_command("blacklistsong", self.cmd_blacklistsong,
+                             mod_only=True, description="Blacklist the current or a specific song", plugin="songrequest")
+        bot.register_command("songstatus", self.cmd_songstatus,
+                             description="Where your songs sit in the queue", identity=True, plugin="songrequest")
+        bot.register_command("topsongs", self.cmd_topsongs,
+                             description="Top 5 most liked songs", platforms=("twitch", "discord"), plugin="songrequest")
 
     async def on_ready(self):
         self.session = aiohttp.ClientSession()

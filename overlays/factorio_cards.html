@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Factorio Card Manager - HatmasBot</title>
+<style>
+  body { background:#1a1815; color:#e8e0d4; font-family:'Segoe UI',sans-serif;
+         margin:0; padding:24px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:#9a8f7d; font-size:12px; margin-bottom:20px; }
+  .grid { display:grid; grid-template-columns: 1fr 340px; gap:20px;
+          max-width:1100px; }
+  .card { background:#242019; border:1px solid #3a3328; border-radius:8px;
+          padding:16px; }
+  .card-title { font-size:13px; text-transform:uppercase; letter-spacing:1px;
+                color:#c9a227; margin-bottom:12px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; color:#9a8f7d; font-weight:normal; font-size:11px;
+       text-transform:uppercase; padding:4px 8px; }
+  td { padding:6px 8px; border-top:1px solid #3a3328; }
+  input, select { background:#1a1815; color:#e8e0d4; border:1px solid #4a4234;
+          border-radius:4px; padding:6px 8px; font-size:13px; width:100%;
+          box-sizing:border-box; }
+  input.cd { width:70px; }
+  button { background:#c9a227; color:#1a1815; border:none; border-radius:4px;
+           padding:6px 12px; font-size:12px; font-weight:600; cursor:pointer; }
+  button:hover { background:#e0b62e; }
+  button.ghost { background:transparent; color:#9a8f7d;
+                 border:1px solid #4a4234; }
+  button.ghost:hover { color:#e8e0d4; border-color:#9a8f7d; }
+  button.danger { background:transparent; color:#c0564a;
+                  border:1px solid #6a3a32; }
+  .row-actions { white-space:nowrap; }
+  .row-actions button { margin-right:4px; }
+  .status { font-size:12px; color:#9a8f7d; margin-bottom:16px; }
+  .status b { color:#e8e0d4; font-weight:600; }
+  .ok { color:#6dbf6d; } .bad { color:#c0564a; }
+  .recent-item { display:flex; align-items:center; justify-content:space-between;
+                 padding:8px; border-top:1px solid #3a3328; font-size:13px; }
+  .recent-item .meta { color:#9a8f7d; font-size:11px; }
+  .pill { font-size:10px; border-radius:8px; padding:2px 8px; margin-left:6px; }
+  .pill.mapped { background:#2c4a2c; color:#8fce8f; }
+  .pill.unmapped { background:#4a3232; color:#d49a92; }
+  .action-help { font-size:11px; color:#9a8f7d; margin-top:10px;
+                 line-height:1.5; }
+  #toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
+           background:#242019; border:1px solid #c9a227; border-radius:6px;
+           padding:10px 18px; font-size:13px; display:none; max-width:600px; }
+  .empty { color:#9a8f7d; font-size:12px; padding:10px 8px; }
+</style>
+</head>
+<body>
+<h1>Factorio Card Manager</h1>
+<div class="sub">Map Streamloots card names to in-game actions. Changes save to
+data/factorio_cards.json and apply immediately - no restart needed.</div>
+
+<div class="status" id="status">loading...</div>
+
+<div class="grid">
+  <div class="card">
+    <div class="card-title">Card mappings</div>
+    <table>
+      <thead><tr><th>Streamloots card name</th><th>Action</th>
+        <th>Cooldown (s)</th><th></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div style="margin-top:14px">
+      <table><tbody>
+        <tr>
+          <td style="border:none"><input id="newCard" placeholder="New card name (must match Streamloots exactly)"></td>
+          <td style="border:none;width:160px"><select id="newAction"></select></td>
+          <td style="border:none;width:80px"><input id="newCd" class="cd" type="number" value="0" min="0"></td>
+          <td style="border:none;width:60px"><button onclick="addCard()">ADD</button></td>
+        </tr>
+      </tbody></table>
+    </div>
+    <div class="action-help" id="actionHelp"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Recently played cards</div>
+    <div class="sub" style="margin-bottom:8px">Play any card on your
+      Streamloots page and it appears here. Click MAP to prefill the form
+      with the exact name.</div>
+    <div id="recent"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const API = '';
+let state = null;
+let editing = new Set();   // card names with unsaved row edits
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g,
+    c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function load() {
+  const r = await fetch(`${API}/api/factorio/cards`);
+  state = await r.json();
+  render();
+}
+
+async function post(body) {
+  const r = await fetch(`${API}/api/factorio/cards`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body)});
+  const data = await r.json();
+  if (data.state) { state = data.state; render(); }
+  return data;
+}
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.style.display = 'block';
+  clearTimeout(t._h); t._h = setTimeout(() => t.style.display='none', 4000);
+}
+
+function actionOptions(selected) {
+  return Object.keys(state.actions).map(a =>
+    `<option value="${a}" ${a===selected?'selected':''}>${a}</option>`).join('');
+}
+
+function render() {
+  // status line
+  const st = state.status, sl = state.streamloots;
+  const rcon = st.rcon_connected ? '<span class="ok">connected</span>'
+    : (st.configured ? '<span class="bad">down</span>'
+                     : '<span class="bad">not configured</span>');
+  const sls = sl ? (sl.connected ? '<span class="ok">connected</span>'
+    : (sl.configured ? '<span class="bad">disconnected</span>'
+                     : '<span class="bad">not configured</span>')) : '?';
+  document.getElementById('status').innerHTML =
+    `Factorio RCON: <b>${rcon}</b> &nbsp;|&nbsp; Streamloots: <b>${sls}</b>` +
+    ` &nbsp;|&nbsp; cards handled: <b>${st.cards_handled}</b>` +
+    ` &nbsp;|&nbsp; outbox events: <b>${st.outbox_events}</b>`;
+
+  // mappings table (skip re-render of rows being edited)
+  const rows = document.getElementById('rows');
+  rows.innerHTML = state.mappings.map(m => {
+    const key = esc(m.card);
+    return `<tr data-card="${key}">
+      <td><input value="${key}" onchange="markEdit('${key}')"></td>
+      <td><select onchange="markEdit('${key}')">${actionOptions(m.action)}</select></td>
+      <td><input class="cd" type="number" min="0" value="${m.cooldown}" onchange="markEdit('${key}')"></td>
+      <td class="row-actions">
+        <button class="ghost" onclick="saveRow('${key}')">SAVE</button>
+        <button class="ghost" onclick="testRow('${key}')">TEST</button>
+        <button class="danger" onclick="removeRow('${key}')">DEL</button>
+      </td></tr>`;
+  }).join('') || '<tr><td colspan="4" class="empty">No mappings yet.</td></tr>';
+
+  // new-mapping action dropdown + help text
+  document.getElementById('newAction').innerHTML = actionOptions('adopt_pet');
+  document.getElementById('actionHelp').innerHTML =
+    Object.entries(state.actions).map(([k,v]) =>
+      `<b>${k}</b> - ${esc(v)}`).join('<br>');
+
+  // recent cards
+  document.getElementById('recent').innerHTML = state.recent_cards.map(c => `
+    <div class="recent-item">
+      <div>${esc(c.card_name)}
+        <span class="pill ${c.mapped?'mapped':'unmapped'}">${c.mapped?'mapped':'unmapped'}</span>
+        <div class="meta">played by ${esc(c.username)} - ${fmtAgo(c.seconds_ago)}</div>
+      </div>
+      <button class="ghost" onclick="prefill('${esc(c.card_name)}')">MAP</button>
+    </div>`).join('')
+    || '<div class="empty">Nothing yet. Play a card on your Streamloots page.</div>';
+}
+
+function fmtAgo(s) {
+  if (s < 60) return s + 's ago';
+  if (s < 3600) return Math.floor(s/60) + 'm ago';
+  return Math.floor(s/3600) + 'h ago';
+}
+
+function markEdit(card) { editing.add(card); }
+
+function rowInputs(card) {
+  const tr = document.querySelector(`tr[data-card="${CSS.escape(card)}"]`);
+  if (!tr) return null;
+  const [nameEl, actionEl, cdEl] =
+    [tr.cells[0].firstChild, tr.cells[1].firstChild, tr.cells[2].firstChild];
+  return {name: nameEl.value.trim(), action: actionEl.value,
+          cooldown: parseFloat(cdEl.value) || 0};
+}
+
+async function saveRow(card) {
+  const v = rowInputs(card); if (!v) return;
+  if (v.name.toLowerCase() !== card.toLowerCase()) {
+    await post({op:'remove', card});           // renamed: drop old key
+  }
+  const r = await post({op:'set', card:v.name, action:v.action, cooldown:v.cooldown});
+  toast(r.ok ? `Saved ${v.name}.` : `Error: ${r.error}`);
+  editing.delete(card);
+}
+
+async function testRow(card) {
+  const v = rowInputs(card);
+  toast(`Testing ${v ? v.name : card}...`);
+  const r = await post({op:'test', card: v ? v.name : card,
+                        user:'TestViewer', message:'Test'});
+  toast(`Test result: ${r.result}`);
+}
+
+async function removeRow(card) {
+  if (!confirm(`Remove mapping for "${card}"?`)) return;
+  const r = await post({op:'remove', card});
+  toast(r.ok ? `Removed ${card}.` : `Error: ${r.error}`);
+}
+
+async function addCard() {
+  const card = document.getElementById('newCard').value.trim();
+  const action = document.getElementById('newAction').value;
+  const cd = parseFloat(document.getElementById('newCd').value) || 0;
+  if (!card) { toast('Card name is required.'); return; }
+  const r = await post({op:'set', card, action, cooldown:cd});
+  if (r.ok) { document.getElementById('newCard').value=''; toast(`Added ${card}.`); }
+  else toast(`Error: ${r.error}`);
+}
+
+function prefill(name) {
+  document.getElementById('newCard').value = name;
+  document.getElementById('newCard').scrollIntoView({behavior:'smooth'});
+  document.getElementById('newCard').focus();
+}
+
+load();
+setInterval(async () => {
+  // poll for recent cards/status, but never clobber in-progress edits
+  if (editing.size > 0) return;
+  try { await load(); } catch(e) {}
+}, 5000);
+</script>
+</body>
+</html>

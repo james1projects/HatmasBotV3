@@ -16,6 +16,8 @@
 <meta name="twitter:title" content="{{OG_TITLE}}">
 <meta name="twitter:description" content="{{OG_DESCRIPTION}}">
 <meta name="twitter:image" content="https://hatmaster.tv/og-image.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="stylesheet" href="/theme.css">
 <style>
   .wrap {
@@ -81,11 +83,13 @@
   }
   .head .info { flex: 1; min-width: 0; }
   .head h1 {
-    margin: 0 0 8px;
-    font-size: 36px;
-    line-height: 1.0;
-    letter-spacing: -0.025em;
-    font-weight: 700;
+    margin: 0 0 4px;
+    font-family: var(--font-display);
+    font-size: 46px;
+    font-weight: 400;
+    letter-spacing: 0.02em;
+    line-height: 0.95;
+    text-transform: uppercase;
   }
   .price-row {
     display: flex;
@@ -123,6 +127,7 @@
 
   /* ─── chart ──────────────────────────────────────────────────── */
   .chart-card {
+    position: relative;
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -130,6 +135,23 @@
     margin: 14px 0;
     overflow: hidden;
   }
+  .chart-tip {
+    position: absolute;
+    display: none;
+    pointer-events: none;
+    background: #151E28;
+    border: 1px solid var(--border-hi);
+    padding: 6px 9px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.5;
+    white-space: nowrap;
+    z-index: 5;
+  }
+  .chart-tip .tip-price { color: var(--text); font-weight: 700; }
+  .chart-tip .tip-time  { color: var(--text-dim); }
+  .chart-tip .tip-match.win  { color: var(--green); }
+  .chart-tip .tip-match.loss { color: var(--red); }
   svg.chart {
     width: 100%;
     height: 240px;
@@ -296,7 +318,7 @@
 <body>
   <div class="wrap">
     <div class="brand-band">
-      <a class="left" href="/">// HATMASTER.TV</a>
+      <a class="left" href="/"><img class="brand-hat" src="/hat.png" alt="">// HATMASTER.TV</a>
       <div class="right-cluster">
         <div class="status"><span class="dot" id="live-dot"></span><span id="status">connecting…</span></div>
       </div>
@@ -318,6 +340,11 @@
     <div class="chart-card">
       <div class="section-title">Price history</div>
       <svg class="chart" id="chart" viewBox="0 0 800 240" preserveAspectRatio="none"></svg>
+    </div>
+
+    <div class="card" id="trade-card" style="display:none">
+      <div class="section-title">Trade</div>
+      <div id="trade-body"></div>
     </div>
 
     <div class="card">
@@ -347,7 +374,7 @@
 
     <div class="footer-brand">
       <div class="footer-build">
-        <span class="dot"></span><span id="last-ping">DATA · &lt;1s</span> &nbsp;·&nbsp; HATMASBOT v2.5
+        <span class="dot"></span><span id="last-ping">DATA · &lt;1s</span> &nbsp;·&nbsp; HATMASBOT v2.7
       </div>
       <div>Made by <a href="https://twitch.tv/hatmaster" target="_blank">Hatmaster</a> &amp; Claude</div>
       <div class="footer-controls">
@@ -359,6 +386,7 @@
     </div>
   </div>
 
+<script src="/auth.js"></script>
 <script>
   // ─── icon style toggle (persisted in localStorage) ───────────────
   const ICON_PREF_KEY = 'hatmas:icon-style';
@@ -430,6 +458,8 @@
   const $status = document.getElementById('status');
 
   let priceHistory = [];
+  let historyStamps = [];   // ISO-ish timestamps parallel to priceHistory
+  let chartMatches = [];    // settled matches for W/L chart markers
 
   loadGod();
   async function loadGod() {
@@ -476,6 +506,8 @@
     addStat($statsGrid, 'Avg KDA', lt.kda_avg || 0);
 
     priceHistory = (data.history || []).map(h => h.price);
+    historyStamps = (data.history || []).map(h => h.timestamp || '');
+    chartMatches = data.recent_matches || [];
     drawChart(priceHistory);
 
     // top_holders is now {all, twitch, youtube} so a single tabbed
@@ -658,11 +690,24 @@
     // brand palette (no green in the 5-color system).
     const color = last >= first ? '#DFA06E' : '#DF2935';
 
-    // Area fill
+    // Area fill — vertical gradient fading to transparent for depth
+    // (replaces the old flat 10%-opacity polygon).
+    const defs = svg('defs', {});
+    const grad = svg('linearGradient', {
+      id: 'chartFill', x1: '0', y1: '0', x2: '0', y2: '1',
+    });
+    const s0 = svg('stop', { offset: '0%', 'stop-color': color,
+                             'stop-opacity': '0.30' });
+    const s1 = svg('stop', { offset: '100%', 'stop-color': color,
+                             'stop-opacity': '0' });
+    grad.appendChild(s0);
+    grad.appendChild(s1);
+    defs.appendChild(grad);
+    $chart.appendChild(defs);
     const areaPoints = `${pad},${h - pad} ${points} ${w - pad},${h - pad}`;
     $chart.appendChild(svg('polygon', {
       points: areaPoints,
-      fill: color, 'fill-opacity': '0.10',
+      fill: 'url(#chartFill)',
     }));
 
     $chart.appendChild(svg('polyline', {
@@ -681,6 +726,111 @@
       cx: lx, cy: ly, r: 3, fill: color,
       stroke: '#202C39', 'stroke-width': '2',
     }));
+
+    // ─── W/L settlement markers ────────────────────────────────────
+    // Each settled match maps to the nearest history point at or
+    // after its processed_at timestamp. Bronze dot = win, scarlet =
+    // loss — the price story made visible.
+    const yAt = i => h - pad - ((values[i] - min) / range) * innerH;
+    chartMarkers = {};
+    if (historyStamps.length === values.length) {
+      for (const m of chartMatches) {
+        const mt = parseTs(m.timestamp);
+        if (!mt) continue;
+        let idx = -1;
+        for (let i = 0; i < historyStamps.length; i++) {
+          const ht = parseTs(historyStamps[i]);
+          if (ht && ht >= mt) { idx = i; break; }
+        }
+        if (idx < 0) idx = values.length - 1;
+        chartMarkers[idx] = m;
+        const win = (m.outcome === 'win');
+        $chart.appendChild(svg('circle', {
+          cx: pad + idx * step, cy: yAt(idx), r: 3.5,
+          fill: win ? '#DFA06E' : '#DF2935',
+          stroke: '#151E28', 'stroke-width': '1.5',
+        }));
+      }
+    }
+
+    // ─── crosshair + tooltip ───────────────────────────────────────
+    const xline = svg('line', {
+      x1: 0, y1: pad, x2: 0, y2: h - pad,
+      stroke: '#7D98A1', 'stroke-width': '1',
+      'stroke-dasharray': '3,3', visibility: 'hidden',
+    });
+    const xdot = svg('circle', {
+      cx: 0, cy: 0, r: 3, fill: '#F5F3BB',
+      stroke: '#151E28', 'stroke-width': '1.5', visibility: 'hidden',
+    });
+    $chart.appendChild(xline);
+    $chart.appendChild(xdot);
+
+    $chart.onmousemove = (ev) => {
+      const rect = $chart.getBoundingClientRect();
+      const sx = (ev.clientX - rect.left) * (w / rect.width);
+      let idx = Math.round((sx - pad) / step);
+      idx = Math.max(0, Math.min(values.length - 1, idx));
+      const cx = pad + idx * step;
+      const cy = yAt(idx);
+      xline.setAttribute('x1', cx);
+      xline.setAttribute('x2', cx);
+      xline.setAttribute('visibility', 'visible');
+      xdot.setAttribute('cx', cx);
+      xdot.setAttribute('cy', cy);
+      xdot.setAttribute('visibility', 'visible');
+
+      let html = '<span class="tip-price">' + Math.round(values[idx])
+        + ' hats</span><br><span class="tip-time">'
+        + fmtTs(historyStamps[idx]) + '</span>';
+      const m = chartMarkers[idx];
+      if (m) {
+        const win = m.outcome === 'win';
+        const delta = (m.price_change > 0 ? '+' : '')
+          + Number(m.price_change).toFixed(1);
+        html += '<br><span class="tip-match ' + (win ? 'win' : 'loss')
+          + '">' + (win ? 'WIN' : 'LOSS') + ' ' + m.kills + '/'
+          + m.deaths + '/' + m.assists + ' (' + delta + ')</span>';
+      }
+      $tip.innerHTML = html;
+      $tip.style.display = 'block';
+      const cardRect = $chart.parentElement.getBoundingClientRect();
+      const pxX = rect.left - cardRect.left + (cx / w) * rect.width;
+      const flip = pxX > cardRect.width - 150;
+      $tip.style.left = flip ? '' : (pxX + 12) + 'px';
+      $tip.style.right = flip ? (cardRect.width - pxX + 12) + 'px' : '';
+      $tip.style.top = (rect.top - cardRect.top
+        + (cy / h) * rect.height - 14) + 'px';
+    };
+    $chart.onmouseleave = () => {
+      xline.setAttribute('visibility', 'hidden');
+      xdot.setAttribute('visibility', 'hidden');
+      $tip.style.display = 'none';
+    };
+  }
+
+  let chartMarkers = {};
+  const $tip = document.createElement('div');
+  $tip.className = 'chart-tip';
+  document.querySelector('.chart-card').appendChild($tip);
+
+  function parseTs(ts) {
+    if (!ts) return null;
+    let s = String(ts);
+    if (!s.includes('T')) s = s.replace(' ', 'T');
+    if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(s)) s += 'Z';
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? null : d.getTime();
+  }
+
+  function fmtTs(ts) {
+    const t = parseTs(ts);
+    if (!t) return '';
+    const d = new Date(t);
+    return d.toLocaleDateString(undefined,
+        { month: 'short', day: 'numeric' })
+      + ' ' + d.toLocaleTimeString(undefined,
+        { hour: '2-digit', minute: '2-digit' });
   }
   function svg(name, attrs) {
     const el = document.createElementNS('http://www.w3.org/2000/svg', name);
@@ -738,7 +888,11 @@
       $price.classList.add('flash');
       setTimeout(() => $price.classList.remove('flash'), 500);
       priceHistory.push(newPrice);
-      if (priceHistory.length > 500) priceHistory.shift();
+      historyStamps.push(new Date().toISOString());
+      if (priceHistory.length > 500) {
+        priceHistory.shift();
+        historyStamps.shift();
+      }
       drawChart(priceHistory);
     } else if (name === 'dividend_paid') {
       $price.classList.remove('flash');
@@ -766,6 +920,91 @@
     if (sec < 86400) return Math.floor(sec / 3600) + 'h';
     return Math.floor(sec / 86400) + 'd';
   }
+
+  // ─── website trading (auth.js) ────────────────────────────────────
+  // Trade box for THIS god. Logged out, it renders the login link —
+  // every page sells the login (WEBSITE_TRADING_DESIGN.md §5). All
+  // money math happens server-side in /api/trade.
+  (function () {
+    if (!window.HatmasAuth) return;
+
+    HatmasAuth.ready.then(function (me) {
+      if (!me || !me.trading_enabled) return;
+      var card = document.getElementById('trade-card');
+      var body = document.getElementById('trade-body');
+      card.style.display = '';
+
+      if (!me.logged_in) {
+        body.innerHTML =
+          '<div class="trade-login-note">' +
+          '<a href="/auth/login">[LOG IN WITH TWITCH]</a> ' +
+          'to buy and sell shares from this page.</div>';
+        return;
+      }
+
+      body.innerHTML =
+        '<div class="trade-row">' +
+        '  <input class="t-amount" id="trade-amount"' +
+        '         placeholder="Hats (or \'all\')" autocomplete="off">' +
+        '  <button class="trade-btn buy" id="trade-buy">BUY</button>' +
+        '  <button class="trade-btn sell" id="trade-sell">SELL</button>' +
+        '</div>' +
+        '<div class="trade-sub">' +
+        '  <span id="trade-balance">BALANCE: --</span>' +
+        '  <span id="trade-market"></span>' +
+        '</div>' +
+        '<div class="trade-msg" id="trade-msg"></div>';
+
+      var $amount = document.getElementById('trade-amount');
+      var $buy = document.getElementById('trade-buy');
+      var $sell = document.getElementById('trade-sell');
+      var $msg = document.getElementById('trade-msg');
+      var $bal = document.getElementById('trade-balance');
+      var $mkt = document.getElementById('trade-market');
+
+      async function refreshBalance() {
+        var b = await HatmasAuth.balance();
+        $bal.textContent = (b && b.balance != null)
+          ? 'BALANCE: ' + Math.floor(b.balance).toLocaleString() + ' HATS'
+          : 'BALANCE: --';
+        $mkt.textContent = (b && b.market_open)
+          ? 'MARKET OPEN' : 'MARKET CLOSED';
+      }
+
+      async function doTrade(action) {
+        var amt = $amount.value.trim().toLowerCase();
+        if (!amt) {
+          $msg.className = 'trade-msg err';
+          $msg.textContent = 'Enter an amount in hats, or all.';
+          return;
+        }
+        $buy.disabled = true;
+        $sell.disabled = true;
+        $msg.className = 'trade-msg';
+        $msg.textContent = 'Working...';
+        var god = canonicalName || godNameRaw;
+        var res = await HatmasAuth.trade(action, god, amt);
+        $buy.disabled = false;
+        $sell.disabled = false;
+        if (res.ok) {
+          $msg.className = 'trade-msg ok';
+          $msg.textContent = (action === 'buy' ? 'Bought ' : 'Sold ')
+            + Number(res.shares).toFixed(2) + ' shares of ' + res.god
+            + ' at ' + Math.round(res.price) + ' hats/share.';
+          $amount.value = '';
+          loadGod();
+          refreshBalance();
+        } else {
+          $msg.className = 'trade-msg err';
+          $msg.textContent = res.error || 'Trade failed.';
+        }
+      }
+
+      refreshBalance();
+      $buy.addEventListener('click', function () { doTrade('buy'); });
+      $sell.addEventListener('click', function () { doTrade('sell'); });
+    });
+  })();
 </script>
 </body>
 </html>

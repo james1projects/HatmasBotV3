@@ -1,22 +1,33 @@
 """
 YouTube Schema
 ==============
-Shared CREATE TABLE definitions for the YouTube portfolio system.
+**Single source of truth** for the YouTube portfolio system's
+CREATE TABLE statements. Every consumer of these tables imports from
+this module — the bot's economy plugin (plugins/economy/db.py runs
+YOUTUBE_SCHEMA_SQL inside its _init_schema callback), plugins/youtube_rewards.py
+(defense-in-depth in case EconomyPlugin is disabled), and standalone
+CLI tools like tools/mark_youtube_video.py that connect to the DB
+without going through the bot at all.
 
-The same schema is also embedded inside plugins/economy.py's _init_db()
-so the bot can boot from a fresh `economy.db`. Standalone tools
-(tools/mark_youtube_video.py) that connect to the DB without going
-through the EconomyPlugin call ensure_youtube_schema() to make sure the
-tables exist before they query them — this lets the CLI run BEFORE
-the bot has ever been launched against the new schema.
+Standalone tools call ensure_youtube_schema() to make sure the tables
+exist before they query them — this lets the CLI run BEFORE the bot
+has ever been launched against the new schema.
 
 All CREATE statements use IF NOT EXISTS, so calling this function on a
 DB where the tables already exist is a no-op.
 
-If you change the schema, change it in BOTH places (here and economy.py)
-to keep them in sync. A schema mismatch will manifest as either missing
-columns at runtime or sqlite refusing to use a column the test suite
-expected.
+To change the schema, edit this file. If the change is a new column on
+an existing table, add a corresponding idempotent migration in
+plugins/economy/db.py:_migrate_god_prices_kda_columns() so existing
+databases pick up the column too — the IF NOT EXISTS CREATE here only
+runs on fresh databases.
+
+The FOREIGN KEY clauses on youtube_holdings.god_name and
+youtube_video_gods.god_name referencing god_prices(god_name) are
+intentionally omitted — the standalone CLIs may run before god_prices
+has been created, and FK enforcement on those columns was advisory
+only (god_prices rows are never deleted and every YouTube-side insert
+in the economy plugin path is preceded by _ensure_god_exists).
 """
 
 import aiosqlite
@@ -78,10 +89,8 @@ async def ensure_youtube_schema(db: "aiosqlite.Connection") -> None:
     Create the YouTube tables if they don't exist. Safe to call
     repeatedly (every CREATE has IF NOT EXISTS). Cheap on a hot DB.
 
-    Note: the FOREIGN KEY references to god_prices that economy.py uses
-    are intentionally omitted here — the CLI has to be runnable before
-    god_prices has any rows, and the FK enforcement (with foreign_keys
-    pragma off by default in aiosqlite) is essentially advisory anyway.
+    See the module docstring for the rationale on the omitted FOREIGN KEY
+    clauses on youtube_holdings.god_name and youtube_video_gods.god_name.
     """
     await db.executescript(YOUTUBE_SCHEMA_SQL)
     await db.commit()

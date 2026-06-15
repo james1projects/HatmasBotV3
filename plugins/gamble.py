@@ -68,8 +68,10 @@ class GamblePlugin:
 
     def setup(self, bot):
         self.bot = bot
-        bot.register_command("gamble", self.cmd_gamble)
-        bot.register_command("jackpot", self.cmd_jackpot)
+        bot.register_command("gamble", self.cmd_gamble,
+                             description="Wager Hats: amount, all, half, or quarter", identity=True, plugin="gamble")
+        bot.register_command("jackpot", self.cmd_jackpot,
+                             description="Current jackpot pool", platforms=("twitch", "discord"), plugin="gamble")
 
     async def on_ready(self):
         self.session = aiohttp.ClientSession()

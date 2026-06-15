@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#202C39">
+<title>Payment received — Hatmas Market</title>
+<meta name="robots" content="noindex">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="stylesheet" href="/theme.css">
+<style>
+  /* Standalone Stripe-redirect landing. Kept minimal on purpose —
+     the webhook is the source of truth for whether the request was
+     actually queued, so this page is just a confirmation that the
+     viewer was successfully bounced back from Stripe. We do NOT
+     poll for queue state here; if Stripe's webhook is delayed by a
+     few seconds the user would otherwise see a flicker of "not
+     queued" before it appears. */
+  .wrap {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 48px 16px 60px;
+    text-align: center;
+  }
+  .brand-band {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 1px solid var(--border);
+    padding: 8px 0 12px;
+    margin-bottom: 32px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--text-dim);
+  }
+  .brand-band a.left {
+    color: var(--accent);
+    font-weight: 700;
+  }
+  .success-mark {
+    width: 64px;
+    height: 64px;
+    margin: 8px auto 20px;
+    border-radius: 50%;
+    background: rgba(255, 166, 87, 0.10);
+    border: 1px solid rgba(255, 166, 87, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px;
+    color: var(--accent);
+  }
+  h1 {
+    margin: 0 0 12px;
+    font-size: 32px;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+  }
+  .lede {
+    color: var(--text-dim);
+    font-size: 15px;
+    line-height: 1.55;
+    margin: 0 0 28px;
+  }
+  .session-pill {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-fade);
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 6px 10px;
+    letter-spacing: 0.08em;
+    word-break: break-all;
+    max-width: 100%;
+  }
+  .actions {
+    margin-top: 32px;
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .actions a {
+    display: inline-block;
+    padding: 10px 18px;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    text-decoration: none;
+    transition: filter 0.1s;
+  }
+  .actions a.primary {
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    color: #1a1a1a;
+  }
+  .actions a.secondary {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  .actions a:hover { filter: brightness(1.1); }
+  .footer-brand {
+    margin-top: 48px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-fade);
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand-band">
+      <a class="left" href="/"><img class="brand-hat" src="/hat.png" alt="">// HATMASTER.TV</a>
+      <div>PRIORITY REQUEST</div>
+    </div>
+
+    <div class="success-mark">✓</div>
+    <h1>Payment received</h1>
+    <p class="lede">
+      Your god has been pushed to the head of the queue. Hatmaster
+      plays them next. Thanks for the support!
+    </p>
+
+    <div id="session-pill" class="session-pill" style="display:none"></div>
+
+    <div class="actions">
+      <a class="primary" href="/community">Back to community</a>
+      <a class="secondary" href="https://twitch.tv/hatmaster"
+         target="_blank" rel="noopener">Watch live ↗</a>
+    </div>
+
+    <div class="footer-brand">
+      Hatmasbot v2.5 · made by Hatmaster &amp; Claude
+    </div>
+  </div>
+
+<script>
+  // Stripe appends ?session_id=cs_test_... to the success URL. We
+  // don't validate it here (the webhook already did) — we just
+  // surface it in tiny mono text so the user has a reference they
+  // can mention if a payment dispute comes up. Hidden if absent.
+  const params = new URLSearchParams(window.location.search);
+  const sid = params.get('session_id');
+  if (sid) {
+    const el = document.getElementById('session-pill');
+    el.textContent = 'Receipt: ' + sid;
+    el.style.display = 'inline-block';
+  }
+</script>
+</body>
+</html>

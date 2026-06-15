@@ -16,6 +16,8 @@
 <meta name="twitter:title" content="Community: Hatmas Market">
 <meta name="twitter:description" content="Vote on which gods Hatmaster plays next. Live from chat.">
 <meta name="twitter:image" content="https://hatmaster.tv/og-image.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="stylesheet" href="/theme.css">
 <style>
   .wrap {
@@ -143,6 +145,35 @@
     text-transform: uppercase;
     letter-spacing: 0.08em;
     flex-shrink: 0;
+  }
+  /* PRIORITY pill — shown on $5 paid_priority queue entries.
+     Same shape as .token but louder (filled accent, gold glow) so
+     the value-prop of the $5 feature is visible to free viewers. */
+  .queue-row .priority {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    padding: 2px 6px;
+    background: var(--accent);
+    color: #1a1a1a;
+    border: 1px solid var(--accent);
+    border-radius: 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.10em;
+    font-weight: 700;
+    flex-shrink: 0;
+    box-shadow: 0 0 8px rgba(255, 166, 87, 0.45);
+  }
+  .queue-row.is-priority {
+    border-color: rgba(255, 166, 87, 0.45);
+    background: rgba(255, 166, 87, 0.06);
+  }
+  .queue-row .message {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--accent);
+    font-style: italic;
+    margin-top: 3px;
+    line-height: 1.3;
   }
 
   /* ─── God pool ────────────────────────────────────────────────── */
@@ -331,12 +362,150 @@
     opacity: 0.4;
     cursor: wait;
   }
+
+  /* ─── Priority request card ─────────────────────────────────────── */
+  /* The $5 skip-the-line card. Visually distinct from the read-only
+     cards below — gold accent border + glow so it reads as a CTA
+     even when the page is full of other content. */
+  .priority-card {
+    background: var(--panel);
+    border: 1px solid rgba(255, 166, 87, 0.45);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    margin-bottom: 16px;
+    position: relative;
+    box-shadow: 0 0 0 1px rgba(255, 166, 87, 0.08) inset,
+                0 4px 24px rgba(0, 0, 0, 0.35);
+  }
+  .priority-card .pc-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 4px;
+  }
+  .priority-card .pc-title {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--text);
+  }
+  .priority-card .pc-price {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.04em;
+  }
+  .priority-card .pc-sub {
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.5;
+    margin-bottom: 14px;
+  }
+  .priority-card .pc-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  @media (max-width: 540px) {
+    .priority-card .pc-grid { grid-template-columns: 1fr; }
+  }
+  .priority-card label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    margin-bottom: 4px;
+  }
+  .priority-card input,
+  .priority-card select,
+  .priority-card textarea {
+    width: 100%;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 14px;
+    padding: 9px 11px;
+    box-sizing: border-box;
+  }
+  .priority-card textarea {
+    resize: vertical;
+    min-height: 64px;
+    font-family: inherit;
+  }
+  .priority-card input:focus,
+  .priority-card select:focus,
+  .priority-card textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .priority-card .pc-message-wrap { margin-bottom: 12px; }
+  .priority-card .pc-message-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 4px;
+  }
+  .priority-card .pc-charcount {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-fade);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .priority-card button.pc-pay {
+    width: 100%;
+    padding: 12px 16px;
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+    color: #1a1a1a;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: filter 0.1s;
+  }
+  .priority-card button.pc-pay:hover { filter: brightness(1.08); }
+  .priority-card button.pc-pay[disabled] {
+    opacity: 0.5;
+    cursor: wait;
+    filter: none;
+  }
+  .priority-card .pc-error {
+    margin-top: 10px;
+    padding: 8px 12px;
+    background: var(--red-bg, rgba(239, 68, 68, 0.10));
+    border: 1px solid var(--red, #ef4444);
+    border-radius: var(--radius-sm);
+    color: var(--red, #ef4444);
+    font-size: 12px;
+    display: none;
+  }
+  .priority-card .pc-error.shown { display: block; }
+  .priority-card .pc-disabled-note {
+    margin-top: 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-fade);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    text-align: center;
+  }
 </style>
 </head>
 <body>
   <div class="wrap">
     <div class="brand-band">
-      <a class="left" href="/">// HATMASTER.TV</a>
+      <a class="left" href="/"><img class="brand-hat" src="/hat.png" alt="">// HATMASTER.TV</a>
       <div>COMMUNITY</div>
     </div>
 
@@ -353,6 +522,57 @@
       <code>!nominate &lt;god&gt;</code> adds to the spin pool, once per
       viewer per day. Hatmaster runs <code>!spin</code> to randomly pick
       one (weighted by votes).
+    </div>
+
+    <!-- Priority god request: $5 via Stripe Checkout to push a god
+         to the head of the queue. Form fields are sent to
+         /api/priority-request/create which returns a Stripe-hosted
+         checkout URL we redirect to. Payment confirmation arrives
+         via webhook server-side; this page just shows the form. -->
+    <div class="priority-card" id="priority-card">
+      <div class="pc-head">
+        <div class="pc-title">Priority God Request</div>
+        <div class="pc-price">$5.00</div>
+      </div>
+      <div class="pc-sub">
+        Skip the line. Your god gets dropped at the head of the queue
+        and Hatmaster plays them next. Secure payment via Stripe.
+      </div>
+
+      <form id="priority-form" autocomplete="off">
+        <div class="pc-grid">
+          <div>
+            <label for="pc-god">God</label>
+            <select id="pc-god" name="god" required>
+              <option value="">Loading gods…</option>
+            </select>
+          </div>
+          <div>
+            <label for="pc-twitch">Your Twitch username</label>
+            <input id="pc-twitch" name="twitch_username" type="text"
+                   placeholder="e.g. hatmaster"
+                   maxlength="25" required>
+          </div>
+        </div>
+
+        <div class="pc-message-wrap">
+          <div class="pc-message-meta">
+            <label for="pc-message">Message (optional)</label>
+            <span class="pc-charcount" id="pc-charcount">0 / 200</span>
+          </div>
+          <textarea id="pc-message" name="message" maxlength="200"
+                    placeholder="Shoutout, dedication, anything…"></textarea>
+        </div>
+
+        <button type="submit" class="pc-pay" id="pc-pay">
+          Pay $5 — Skip the Line
+        </button>
+        <div class="pc-error" id="pc-error"></div>
+        <div class="pc-disabled-note" id="pc-disabled-note"
+             style="display:none">
+          Priority requests are currently unavailable.
+        </div>
+      </form>
     </div>
 
     <div class="card mod-card" id="mod-card">
@@ -386,12 +606,13 @@
 
     <div class="footer-brand">
       <div class="footer-build">
-        <span class="dot"></span><span id="last-ping">DATA · &lt;1s</span> &nbsp;·&nbsp; HATMASBOT v2.5
+        <span class="dot"></span><span id="last-ping">DATA · &lt;1s</span> &nbsp;·&nbsp; HATMASBOT v2.7
       </div>
       <div>Made by <a href="https://twitch.tv/hatmaster" target="_blank">Hatmaster</a> &amp; Claude</div>
     </div>
   </div>
 
+<script src="/auth.js"></script>
 <script>
   const $queue = document.getElementById('queue');
   const $queueCount = document.getElementById('queue-count');
@@ -449,12 +670,25 @@
     $queue.innerHTML = '';
     for (const it of items) {
       const row = document.createElement('div');
-      row.className = 'queue-row';
-      const tokenBadge = it.token_spent ? '<div class="token">TOKEN</div>' : '';
+      const isPriority = it.source === 'paid_priority';
+      row.className = 'queue-row' + (isPriority ? ' is-priority' : '');
+      // Priority pill outranks the token pill — same row only ever
+      // gets one. paid_priority entries didn't spend a god token
+      // (they spent real money) so token_spent is False anyway, but
+      // we short-circuit explicitly for clarity.
+      let badge = '';
+      if (isPriority) {
+        badge = '<div class="priority">Priority</div>';
+      } else if (it.token_spent) {
+        badge = '<div class="token">TOKEN</div>';
+      }
       // Spin entries store an empty requester so they render as just
       // the god name. Paid / manual entries show "<requester>".
       const reqLine = it.requester
         ? `  <div class="requester">${escapeHtml(it.requester)}</div>`
+        : '';
+      const msgLine = (isPriority && it.message)
+        ? `  <div class="message">"${escapeHtml(it.message)}"</div>`
         : '';
       row.innerHTML =
         `<div class="pos">#${String(it.position).padStart(2, '0')}</div>` +
@@ -462,8 +696,8 @@
         `     onerror="this.style.opacity=0.3">` +
         `<div class="info">` +
         `  <div class="god">${escapeHtml(it.god || '?')}</div>` +
-        reqLine +
-        `</div>` + tokenBadge;
+        reqLine + msgLine +
+        `</div>` + badge;
       $queue.appendChild(row);
     }
   }
@@ -626,6 +860,153 @@
 
   refreshNominations();
   setInterval(refreshNominations, 30 * 1000);
+
+  // ─── priority request form ───────────────────────────────────────
+  // Populates the god dropdown from /api/gods, handles the submit by
+  // POSTing to /api/priority-request/create and redirecting to the
+  // Stripe-hosted checkout URL the server returns. Payment confirm
+  // happens server-side via Stripe webhook — this script is purely
+  // form-collection and redirect.
+
+  const $pcForm    = document.getElementById('priority-form');
+  const $pcGod     = document.getElementById('pc-god');
+  const $pcTwitch  = document.getElementById('pc-twitch');
+  const $pcMessage = document.getElementById('pc-message');
+  const $pcChar    = document.getElementById('pc-charcount');
+  const $pcPay     = document.getElementById('pc-pay');
+  const $pcError   = document.getElementById('pc-error');
+  const $pcNote    = document.getElementById('pc-disabled-note');
+
+  function pcShowError(msg) {
+    $pcError.textContent = msg;
+    $pcError.classList.add('shown');
+  }
+  function pcClearError() {
+    $pcError.textContent = '';
+    $pcError.classList.remove('shown');
+  }
+
+  $pcMessage.addEventListener('input', () => {
+    $pcChar.textContent = `${$pcMessage.value.length} / 200`;
+  });
+
+  // Populate the god dropdown from /api/gods (live god prices list —
+  // names are the same canonical set godrequest.py validates against).
+  // Falls back to a disabled "couldn't load" option so the form still
+  // renders even if the API is down.
+  async function loadGods() {
+    try {
+      const r = await fetch('/api/gods');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      const gods = (data.gods || data || [])
+        .map(g => (typeof g === 'string') ? g : g.name)
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b));
+      if (!gods.length) throw new Error('empty list');
+      $pcGod.innerHTML = '<option value="">Select a god…</option>'
+        + gods.map(g => `<option value="${escapeHtml(g)}">`
+                        + `${escapeHtml(g)}</option>`).join('');
+    } catch (err) {
+      $pcGod.innerHTML = '<option value="">Couldn\'t load god list</option>';
+      $pcGod.disabled = true;
+    }
+  }
+  loadGods();
+
+  $pcForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    pcClearError();
+
+    const god     = $pcGod.value.trim();
+    const twitch  = $pcTwitch.value.trim().replace(/^@/, '');
+    const message = $pcMessage.value.trim();
+
+    if (!god) { pcShowError('Pick a god first.'); return; }
+    if (!twitch) { pcShowError('Twitch username required so we can shout you out.'); return; }
+    if (!/^[A-Za-z0-9_]{4,25}$/.test(twitch)) {
+      pcShowError('Twitch username must be 4–25 letters, numbers, or underscores.');
+      return;
+    }
+
+    $pcPay.disabled = true;
+    $pcPay.textContent = 'Creating checkout…';
+
+    try {
+      const r = await fetch('/api/priority-request/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          god, twitch_username: twitch, message,
+        }),
+      });
+
+      if (r.status === 503) {
+        // Feature disabled or Stripe config missing — surface
+        // the dedicated note instead of a generic error so it's
+        // clear nothing the user did caused this.
+        $pcNote.style.display = 'block';
+        $pcForm.style.opacity = '0.5';
+        $pcGod.disabled = true;
+        $pcTwitch.disabled = true;
+        $pcMessage.disabled = true;
+        return;
+      }
+
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const err = data.error || ('HTTP ' + r.status);
+        if (err.startsWith('unknown_god:')) {
+          pcShowError('That god name didn\'t match the SMITE 2 roster.');
+        } else if (err === 'bad_twitch_username') {
+          pcShowError('Twitch username is invalid.');
+        } else if (err === 'upstream_failed') {
+          pcShowError('Stripe is having trouble. Try again in a minute.');
+        } else {
+          pcShowError('Couldn\'t start checkout: ' + err);
+        }
+        return;
+      }
+
+      if (data.checkout_url) {
+        // Hard redirect — leave the page entirely so Stripe owns the
+        // checkout UX. They'll redirect back to /priority-success on
+        // completion.
+        window.location.href = data.checkout_url;
+      } else {
+        pcShowError('Checkout URL missing from response.');
+      }
+    } catch (err) {
+      pcShowError('Network error. Try again.');
+    } finally {
+      // Only re-enable if we didn't redirect (which we do on success).
+      // If the page is still here a moment later, the user can retry.
+      setTimeout(() => {
+        if (!document.hidden) {
+          $pcPay.disabled = false;
+          $pcPay.textContent = 'Pay $5 — Skip the Line';
+        }
+      }, 800);
+    }
+  });
+
+  // ─── website login: lock the priority-request username field ─────
+  // When the viewer is logged in with Twitch, the $5 form's username
+  // is locked to their session login. Kills the typo'd-username
+  // failure mode in the Stripe metadata path — the webhook queues
+  // whatever name was typed, so a locked field means the paid request
+  // always lands on the right account.
+  if (window.HatmasAuth) {
+    HatmasAuth.ready.then(function (me) {
+      if (!me || !me.logged_in) return;
+      var f = document.getElementById('pc-twitch');
+      if (f) {
+        f.value = me.login;
+        f.readOnly = true;
+        f.title = 'Locked to your logged-in Twitch account';
+      }
+    });
+  }
 </script>
 </body>
 </html>

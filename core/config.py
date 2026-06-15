@@ -186,6 +186,79 @@ OBS_SOURCE_GODREQ_TEXT = "GodReqText"         # OBS text source for god name / "
 OBS_GODREQ_SCENE = ""                        # Scene containing the god request sources
 OBS_GODREQ_GROUP = ""                        # Group name if sources are in a group
 
+# === PRIORITY GOD REQUEST (Stripe) ===
+# Lets viewers pay $5 on hatmaster.tv/community to push a god request
+# to the head of the queue. Stripe handles the card form on their
+# hosted Checkout page; our server gets a signed webhook on success
+# and calls godrequest.queue_add(..., source="paid_priority",
+# position="head"). Webhook signature verification is the only thing
+# preventing a malicious POST from queuing for free, so the secret
+# MUST come from Stripe's dashboard, not a guess.
+#
+# Setup:
+#   1. stripe.com → Products → create "Priority God Request" at $5.00.
+#   2. Developers → API keys → copy Secret key (sk_test_... for dev,
+#      sk_live_... when going live). Drop into config_local.py as
+#      STRIPE_SECRET_KEY.
+#   3. Developers → Webhooks → Add endpoint pointed at
+#      https://hatmaster.tv/api/stripe-webhook listening for
+#      "checkout.session.completed". Copy the Signing secret
+#      (whsec_...) into config_local.py as STRIPE_WEBHOOK_SECRET.
+#   4. For local testing: `stripe listen --forward-to
+#      http://localhost:8070/api/stripe-webhook` and use that CLI
+#      session's whsec_... in config_local.py while developing.
+#
+# PRIORITY_REQUEST_ENABLED gates the whole feature — flip to False
+# to hide the card on the website and 503 the API endpoints.
+STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+PRIORITY_REQUEST_ENABLED = True
+PRIORITY_REQUEST_PRICE_CENTS = 500              # $5.00 USD
+PRIORITY_REQUEST_CURRENCY = "usd"
+PRIORITY_REQUEST_PRODUCT_NAME = "Priority God Request"
+# Public URL viewers land on after successful payment. Stripe appends
+# ?session_id=... so the success page can read it from the query.
+# Override in config_local.py if you serve community at a different host.
+PRIORITY_REQUEST_SUCCESS_URL = (
+    "https://hatmaster.tv/priority-success?session_id={CHECKOUT_SESSION_ID}"
+)
+PRIORITY_REQUEST_CANCEL_URL = "https://hatmaster.tv/community"
+# Truncate user-supplied messages to this length before persisting +
+# displaying. Stripe's metadata values are capped at 500 chars total
+# per key, so keep this comfortably under that.
+PRIORITY_REQUEST_MAX_MESSAGE_LEN = 200
+
+# === WEBSITE LOGIN + TRADING (hatmaster.tv) ===
+# See WEBSITE_TRADING_DESIGN.md. Twitch OAuth reuses TWITCH_CLIENT_ID /
+# TWITCH_CLIENT_SECRET — add https://hatmaster.tv/auth/twitch/callback
+# (and the localhost variant for dev) to the app's OAuth Redirect URLs
+# in the Twitch dev console.
+#
+# WEB_SESSION_SECRET: 64+ random chars, config_local.py only. Generate:
+#   python -c "import secrets; print(secrets.token_urlsafe(64))"
+# Empty secret = login AND web trading disabled (fail closed). Rotating
+# it logs every viewer out (sessions are stateless signed cookies).
+WEB_SESSION_SECRET = os.environ.get("WEB_SESSION_SECRET", "")
+WEB_TRADING_ENABLED = False     # master switch — flip after first live test
+WEB_TRADE_COOLDOWN = 3          # seconds between trades per user (mirrors chat TRADE_COOLDOWN)
+WEB_TRADE_MAX_PER_MIN = 30      # per-IP fixed-window cap on /api/trade + /auth/*
+WEB_OAUTH_REDIRECT_URI = "https://hatmaster.tv/auth/twitch/callback"
+# Dev override for config_local.py:
+#   WEB_OAUTH_REDIRECT_URI = "http://localhost:8070/auth/twitch/callback"
+
+# === SOCIAL TABS (hatmaster.tv landing page) ===
+# See Social_Tabs_Plan.md. YouTube uses the existing YOUTUBE_API_KEY +
+# YOUTUBE_CHANNEL_ID. TikTok has no usable public API — paste the URL
+# of your latest TikTok into config_local.py whenever you post one.
+TIKTOK_USERNAME = "awfulmasterhat"
+TIKTOK_LATEST_VIDEO_URL = ""
+BLUESKY_HANDLE = "hatmasteryt.bsky.social"
+SOCIAL_FEED_CACHE_TTL = 900   # 15 min — generous for Bluesky, and keeps
+                              # YouTube quota at ~96 units/day via the
+                              # 1-unit playlistItems call (NOT the
+                              # 100-unit search.list the plan warned
+                              # about).
+
 # === GAMBLE ===
 GAMBLE_CURRENCY_NAME = "Hats"                # Must match the currency name in MixItUp
 GAMBLE_MIN_BET = 10                          # Minimum wager
@@ -317,6 +390,40 @@ YOUTUBE_DIVIDEND_AS_SHARES = True      # Dividends compound as fractional shares
 # to approve from your phone, switch to Cloudflare Access (Zero Trust)
 # in front of /community/* and the endpoints, or a Twitch-OAuth login.
 
+# === STREAMLOOTS ===
+# Alert overlay ID from the Streamloots dashboard -> Alerts -> "Click
+# here to show URL": https://widgets.streamloots.com/alerts/<THIS-GUID>
+# Treat it like a password: anyone with it can read your alert feed.
+# Empty = StreamlootsPlugin disables itself (fail closed). Set it in
+# config_local.py.
+STREAMLOOTS_ALERT_ID = os.environ.get("STREAMLOOTS_ALERT_ID", "")
+
+# === FACTORIO INTEGRATION ===
+# Pairs with the factorio_mod/hatmas-events/ game mod. RCON requires
+# launching Factorio with --rcon-port/--rcon-password and hosting the
+# save as multiplayer. Empty password = FactorioPlugin disabled
+# (fail closed). Set the password in config_local.py.
+FACTORIO_RCON_HOST = "127.0.0.1"
+FACTORIO_RCON_PORT = 27015
+FACTORIO_RCON_PASSWORD = os.environ.get("FACTORIO_RCON_PASSWORD", "")
+# Folder Factorio writes script output to. Empty = auto-detect
+# %APPDATA%\Factorio\script-output. The mod's event outbox lives at
+# <script-output>/hatmas/events.jsonl.
+FACTORIO_SCRIPT_OUTPUT = ""
+# Announce mod outbox events (pet deaths, boss kills, ...) in chat.
+FACTORIO_ANNOUNCE_EVENTS = True
+# SEED ONLY: copied into data/factorio_cards.json on first run, then
+# never read again — manage live mappings at /factorio/cards on the
+# dashboard webserver instead. Card-name matching is case-insensitive
+# and whitespace-trimmed. Actions: adopt_pet, grow_pet, pet_say,
+# boss_attack. Cooldowns are per-card, in seconds, enforced bot-side.
+FACTORIO_CARD_MAP = {
+    "Adopt a Pet":  {"action": "adopt_pet",  "cooldown": 0},
+    "Grow My Pet":  {"action": "grow_pet",   "cooldown": 0},
+    "Pet Speaks":   {"action": "pet_say",    "cooldown": 5},
+    "Boss Attack":  {"action": "boss_attack", "cooldown": 120},
+}
+
 # === FEATURE TOGGLES ===
 DEFAULT_FEATURES = {
     "song_requests": True, "predictions": False, "snap": True,
@@ -328,7 +435,25 @@ DEFAULT_FEATURES = {
     "voicelines": True,
     "economy": True,
     "youtube_rewards": True,
+    "web_trading": True,   # dashboard kill-switch; WEB_TRADING_ENABLED still gates
+    "streamloots": True,   # gates event dispatch; connection stays up
+    "factorio": True,      # gates card handling + chat announcements
 }
+
+# === DISCORD (plugins/discord_bridge.py) ===
+# See Discord_Integration_Plan.md. Overridden in config_local.py; the
+# bridge stays inert unless DISCORD_ENABLED is True and a token is set.
+DISCORD_ENABLED = False
+DISCORD_BOT_TOKEN = ""             # Bot token from the Discord dev portal
+DISCORD_GUILD_ID = 0               # Server ID (right-click server, Copy Server ID)
+DISCORD_DEFAULT_CHANNEL_ID = 0     # Default channel for send_message()/!discordtest
+
+# Phase 2 go-live announcements. Max ONE per calendar day (persisted
+# in data/discord_announce.json), so bot/stream restarts never
+# double-announce. Second announcements are manual-only.
+DISCORD_ANNOUNCE_ENABLED = False
+DISCORD_ANNOUNCE_CHANNEL_ID = 0    # falls back to DISCORD_DEFAULT_CHANNEL_ID
+DISCORD_ANNOUNCE_ROLE_ID = 0       # optional @role to ping (0 = no ping)
 
 # === MODERATORS ===
 MODERATORS = []

@@ -29,7 +29,11 @@ events to any WebSocket clients viewing the relevant portfolio.
 
 import asyncio
 import json
+import time
+from datetime import datetime
+from collections import defaultdict
 from pathlib import Path
+from urllib.parse import urlencode, urlsplit
 from typing import Any, Dict, List, Optional, Set
 
 import aiohttp
@@ -42,9 +46,17 @@ except ImportError:
 
 from core import db as _shared_db
 from core.config import (
-    BASE_DIR, ECONOMY_DB_PATH, ECONOMY_STARTING_PRICE, WEB_HOST,
+    BASE_DIR, DATA_DIR, ECONOMY_DB_PATH, ECONOMY_STARTING_PRICE, WEB_HOST,
     ECONOMY_EXCLUDED_USERNAMES, TWITCH_BOT_USERNAME,
+    TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET,
+    WEB_SESSION_SECRET, WEB_TRADING_ENABLED, WEB_TRADE_COOLDOWN,
+    WEB_TRADE_MAX_PER_MIN, WEB_OAUTH_REDIRECT_URI,
+    YOUTUBE_API_KEY, YOUTUBE_CHANNEL_ID,
+    TIKTOK_USERNAME, TIKTOK_LATEST_VIDEO_URL, BLUESKY_HANDLE,
+    SOCIAL_FEED_CACHE_TTL,
 )
+from core import web_session as _ws
+from core import config as _config
 
 
 def _excluded_usernames_lower():
@@ -101,12 +113,56 @@ async def _custom_404_middleware(request, handler):
 class PublicWebServer:
     """Read-only public aiohttp app on port 8070."""
 
-    def __init__(self, overlay_manager=None, stream_status=None):
+    def __init__(self, overlay_manager=None, stream_status=None,
+                 priority_request=None, economy=None, bot=None):
         self.app = web.Application(middlewares=[_custom_404_middleware])
+        # HatmasBot or None — the /mod page reads/writes the command
+        # registry through bot.get_command_catalog() /
+        # set_command_platform(). Same process, no IPC.
+        self.bot = bot
+        self._helix_mod_cache = (0.0, set())  # (fetched_at, lowercase logins)
         self.runner: Optional[web.AppRunner] = None
         self.overlay_manager = overlay_manager  # used for live event forwarding
         self.stream_status = stream_status      # StreamStatusPlugin or None
+        # PriorityRequestPlugin or None — owns Stripe Checkout Session
+        # creation + webhook handling. We just expose the HTTP routes
+        # and delegate; this server keeps the http-only concerns
+        # (request parsing, status codes) while business logic lives
+        # in the plugin.
+        self.priority_request = priority_request
+        # EconomyPlugin or None — website trading delegates to its
+        # execute_buy/execute_sell so web + chat share ONE money path
+        # (WEBSITE_TRADING_DESIGN.md §2.1). Read paths still hit the
+        # DB directly; only trades go through the plugin.
+        self.economy = economy
         self._db: Optional["aiosqlite.Connection"] = None
+
+        # ── website login + trading state ──
+        # Fail closed: no session secret (or placeholder Twitch app
+        # creds) disables login AND trading, loudly.
+        self._login_enabled = bool(
+            WEB_SESSION_SECRET
+            and TWITCH_CLIENT_ID not in ("", "YOUR_CLIENT_ID")
+            and TWITCH_CLIENT_SECRET not in ("", "YOUR_CLIENT_SECRET"))
+        # Secure cookies only when the site is served over https —
+        # keeps the localhost dev flow working over plain http.
+        self._cookie_secure = WEB_OAUTH_REDIRECT_URI.startswith("https://")
+        _parts = urlsplit(WEB_OAUTH_REDIRECT_URI)
+        self._allowed_origin = f"{_parts.scheme}://{_parts.netloc}"
+        # Per-user trade locks: serialize each viewer's trades so two
+        # browser tabs can't race the balance-check/deduct sequence in
+        # execute_buy (chat never races — one message at a time).
+        self._trade_locks = defaultdict(asyncio.Lock)
+        # Social-feed cache: {key: (fetched_at, payload)}. Stale data
+        # is served on upstream failure — a dead YouTube call should
+        # never blank the tab for visitors.
+        self._social_cache: Dict[str, tuple] = {}
+        self._web_trade_cooldowns: Dict[str, float] = {}
+        self._ip_window: Dict[tuple, int] = {}
+        if not self._login_enabled:
+            print("[PublicWebServer] website login disabled — set "
+                  "WEB_SESSION_SECRET in config_local.py (and Twitch "
+                  "client id/secret) to enable")
 
         # Per-portfolio WebSocket client sets, keyed on yt_channel_id.
         self._ws_clients: Dict[str, Set[web.WebSocketResponse]] = {}
@@ -170,6 +226,69 @@ class PublicWebServer:
             "/api/community/nominations/{nid}/reject",
             self._handle_api_nomination_reject)
 
+        # Priority god request — viewer pays $5 on hatmaster.tv/community
+        # to push a god request to the head of the queue. Three routes:
+        #
+        #   POST /api/priority-request/create — creates a Stripe
+        #     Checkout Session and returns its URL for the browser
+        #     to redirect to. Body: {god, twitch_username, message}.
+        #
+        #   POST /api/stripe-webhook — Stripe's signed callback after
+        #     payment. Verified via webhook secret; on success the
+        #     plugin pushes to the godrequest queue head.
+        #
+        #   GET /priority-success — static thank-you page Stripe
+        #     redirects to after payment. Served from public/.
+        #
+        # All three 503 cleanly if the plugin isn't wired up or its
+        # config is missing, so the website's "Pay $5" button just
+        # returns a clear error rather than hanging.
+        self.app.router.add_post("/api/priority-request/create",
+                                 self._handle_priority_create)
+        self.app.router.add_post("/api/stripe-webhook",
+                                 self._handle_stripe_webhook)
+        self.app.router.add_get("/priority-success",
+                                 self._handle_priority_success_page)
+
+        # Website login + trading — WEBSITE_TRADING_DESIGN.md. The
+        # ONLY state-changing routes besides Stripe + admin-gated
+        # nominations: OAuth callback (sets a cookie), logout (clears
+        # it), and /api/trade (delegates to the economy plugin behind
+        # nine guards). Everything else on this server stays GET.
+        # ── hidden mod page (Crossplatform_Commands_Plan.md) ──
+        # Every unauthorized state (logged out, non-mod) gets the same
+        # 404 as a wrong URL — the page's existence is never revealed.
+        self.app.router.add_get("/mod", self._handle_mod_page)
+        self.app.router.add_get("/api/mod/commands",
+                                self._handle_api_mod_commands_get)
+        self.app.router.add_post("/api/mod/commands",
+                                 self._handle_api_mod_commands_post)
+        self.app.router.add_post("/api/mod/custom-commands",
+                                 self._handle_api_mod_custom_post)
+        self.app.router.add_delete("/api/mod/custom-commands/{name}",
+                                   self._handle_api_mod_custom_delete)
+
+        self.app.router.add_get("/auth/login", self._handle_auth_login)
+        self.app.router.add_get("/auth/twitch/callback",
+                                self._handle_auth_callback)
+        self.app.router.add_post("/auth/logout", self._handle_auth_logout)
+        self.app.router.add_get("/api/me", self._handle_api_me)
+        self.app.router.add_get("/api/me/balance",
+                                self._handle_api_me_balance)
+        self.app.router.add_get("/api/me/settings",
+                                self._handle_api_me_settings)
+        self.app.router.add_post("/api/me/visibility",
+                                 self._handle_api_me_visibility)
+        self.app.router.add_post("/api/trade", self._handle_api_trade)
+
+        # Social tabs (Social_Tabs_Plan.md) — read-only, cached 15 min.
+        self.app.router.add_get("/api/social/youtube",
+                                self._handle_social_youtube)
+        self.app.router.add_get("/api/social/tiktok",
+                                self._handle_social_tiktok)
+        self.app.router.add_get("/api/social/bluesky",
+                                self._handle_social_bluesky)
+
         # Serve god portrait icons from data/god_icons/ — we already
         # have a clean kebab-case .png for every god, more reliable
         # than tracker.gg's CDN which 404s on some slugs.
@@ -184,6 +303,15 @@ class PublicWebServer:
 
         # Shared CSS theme.
         self.app.router.add_get("/theme.css", self._handle_theme_css)
+        self.app.router.add_get("/auth.js", self._handle_auth_js)
+
+        # Static brand assets (generated by tools/build_site_meta.py).
+        # favicon.ico is requested automatically by every browser; the
+        # og-image is what Discord/Bluesky/Twitter render for links.
+        for fname in ("og-image.png", "favicon.ico", "favicon-32.png",
+                      "apple-touch-icon.png", "hat.png"):
+            self.app.router.add_get(
+                f"/{fname}", self._make_static_handler(fname))
 
         # WebSocket for live updates.
         self.app.router.add_get("/ws/yt/{channel_id}", self._handle_ws)
@@ -603,13 +731,17 @@ class PublicWebServer:
             return web.json_response({
                 "is_live": False,
                 "channel": None,
+                "market_open": self._market_open(),
                 "reason": "stream_status plugin not registered",
             })
         try:
-            return web.json_response(self.stream_status.get_status())
+            status = dict(self.stream_status.get_status())
+            status["market_open"] = self._market_open()
+            return web.json_response(status)
         except Exception as e:
             return web.json_response({
                 "is_live": False,
+                "market_open": False,
                 "error": str(e),
             }, status=200)
 
@@ -1038,6 +1170,11 @@ class PublicWebServer:
                             "requester": item.get("requester"),
                             "requested_at": item.get("requested_at"),
                             "token_spent": bool(item.get("token_spent")),
+                            # source: "paid"|"manual"|"spin"|"paid_priority"
+                            # — used by the community.html renderer to
+                            # show the PRIORITY pill on $5 entries.
+                            "source": item.get("source"),
+                            "message": item.get("message"),
                         })
         except Exception as e:
             print(f"[PublicWebServer] god queue read failed: {e}")
@@ -1506,6 +1643,878 @@ class PublicWebServer:
                 {"error": "not found or already decided"}, status=404)
 
         return web.json_response({"ok": True, "id": nid})
+
+    # ──────────────────────────────────────────────────────────────────
+    #   WEBSITE LOGIN + TRADING (WEBSITE_TRADING_DESIGN.md)
+    # ──────────────────────────────────────────────────────────────────
+    # Twitch OAuth proves identity (zero scopes, token used once for
+    # /helix/users then discarded). Sessions are stateless HMAC-signed
+    # cookies (core/web_session.py). /api/trade delegates to the
+    # economy plugin's execute_buy/execute_sell — the same money path
+    # chat commands use.
+
+    _NO_STORE = {"Cache-Control": "private, no-store"}
+
+    # ──────────────────────────────────────────────────────────────
+    #   MOD PAGE (hidden command matrix, Crossplatform_Commands_Plan.md)
+    # ──────────────────────────────────────────────────────────────
+
+    async def _effective_mods(self) -> Set[str]:
+        """Lowercase logins allowed on /mod: MODERATORS config plus
+        broadcaster plus Helix Get Moderators (cached 5 min). Helix
+        failures (commonly a missing moderation:read scope) degrade to
+        the config list with a console warning, never an exception."""
+        mods = {m.lower() for m in getattr(_config, "MODERATORS", []) if m}
+        channel = getattr(_config, "TWITCH_CHANNEL", "") or ""
+        if channel and channel != "YOUR_CHANNEL":
+            mods.add(channel.lower())
+
+        now = time.time()
+        fetched_at, helix_mods = self._helix_mod_cache
+        if now - fetched_at >= 300:
+            helix_mods = set()
+            tm = getattr(self.bot, "token_manager", None) if self.bot else None
+            owner_id = getattr(_config, "TWITCH_OWNER_ID", "") or ""
+            if tm and owner_id:
+                try:
+                    headers = await tm.get_broadcaster_headers()
+                    url = ("https://api.twitch.tv/helix/moderation/moderators"
+                           f"?broadcaster_id={owner_id}&first=100")
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(url, headers=headers) as resp:
+                            if resp.status == 200:
+                                data = await resp.json()
+                                helix_mods = {
+                                    (d.get("user_login") or "").lower()
+                                    for d in data.get("data", [])
+                                } - {""}
+                            else:
+                                print(f"[ModPage] Helix moderators lookup "
+                                      f"HTTP {resp.status}, falling back to "
+                                      f"MODERATORS config (check the "
+                                      f"moderation:read scope)")
+                except Exception as e:
+                    print(f"[ModPage] Helix moderators lookup failed: {e}")
+            self._helix_mod_cache = (now, helix_mods)
+        return mods | helix_mods
+
+    async def _mod_identity(self, request: web.Request) -> Optional[dict]:
+        """Session identity IF the logged-in user is a mod, else None."""
+        ident = self._session_identity(request)
+        if ident is None:
+            return None
+        login = (ident.get("login") or "").lower()
+        if not login:
+            return None
+        return ident if login in await self._effective_mods() else None
+
+    def _mod_audit(self, login: str, name: str, platform: str,
+                   old: bool, new: bool):
+        line = (f"{datetime.now().isoformat(timespec='seconds')} | {login} | "
+                f"{name} | {platform} | {old} -> {new}\n")
+        print(f"[ModPage] {line.strip()}")
+        try:
+            with open(DATA_DIR / "mod_audit.log", "a", encoding="utf-8") as f:
+                f.write(line)
+        except Exception as e:
+            print(f"[ModPage] audit write failed: {e}")
+
+    async def _handle_mod_page(self, request: web.Request):
+        if await self._mod_identity(request) is None:
+            raise web.HTTPNotFound()  # styled by the 404 middleware
+        path = PUBLIC_DIR / "mod.html"
+        if not path.exists():
+            return web.Response(text="Mod page missing.", status=500)
+        return web.FileResponse(path, headers={"Cache-Control": "no-store"})
+
+    async def _handle_api_mod_commands_get(self, request: web.Request):
+        ident = await self._mod_identity(request)
+        if ident is None:
+            raise web.HTTPNotFound()
+        if self.bot is None:
+            return web.json_response({"ok": False, "error": "Bot unavailable."},
+                                     status=503, headers=self._NO_STORE)
+        catalog = self.bot.get_command_catalog()
+        customs = self.bot.plugins.get("custom_commands") if self.bot.plugins else None
+        if customs is not None:
+            for entry in catalog:
+                if entry["custom"]:
+                    entry["response"] = customs.get_response(entry["name"])
+        discord_plugin = (self.bot.plugins or {}).get("discord")
+        status = {
+            "uptime": self.bot.get_uptime() if hasattr(self.bot, "get_uptime") else "?",
+            "discord_connected": bool(getattr(discord_plugin, "is_ready", False)),
+            "command_count": getattr(self.bot, "command_count", 0),
+        }
+        return web.json_response(
+            {"ok": True, "user": ident.get("login"),
+             "status": status, "commands": catalog},
+            headers=self._NO_STORE)
+
+    async def _handle_api_mod_commands_post(self, request: web.Request):
+        """POST /api/mod/commands. Two body shapes:
+        {name, platform, enabled} flips availability;
+        {name, cooldown} sets per-user cooldown seconds (0 = off).
+        Guard order mirrors /api/trade: session+mod -> origin -> rate
+        limit -> body -> write -> audit."""
+        ident = await self._mod_identity(request)
+        if ident is None:
+            raise web.HTTPNotFound()
+        if not self._origin_ok(request):
+            return web.json_response({"ok": False, "error": "Bad origin."},
+                                     status=403, headers=self._NO_STORE)
+        if not self._ip_rate_ok(request):
+            return web.json_response({"ok": False, "error": "Too many requests."},
+                                     status=429, headers=self._NO_STORE)
+        if self.bot is None:
+            return web.json_response({"ok": False, "error": "Bot unavailable."},
+                                     status=503, headers=self._NO_STORE)
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return web.json_response({"ok": False, "error": "Bad JSON."},
+                                     status=400, headers=self._NO_STORE)
+        name = str(body.get("name") or "").lower().strip()
+        login = ident.get("login") or "?"
+
+        if "cooldown" in body:
+            cooldown = body.get("cooldown")
+            if (not isinstance(cooldown, (int, float)) or isinstance(cooldown, bool)
+                    or not (0 <= cooldown <= 3600)):
+                return web.json_response(
+                    {"ok": False, "error": "Cooldown must be 0-3600 seconds."},
+                    status=400, headers=self._NO_STORE)
+            old_cd = self.bot.get_command_cooldown(name)
+            entry = await self.bot.set_command_cooldown(name, cooldown)
+            if entry is None:
+                return web.json_response({"ok": False, "error": "Unknown command."},
+                                         status=400, headers=self._NO_STORE)
+            self._mod_audit(login, name, "cooldown", old_cd, float(cooldown))
+            return web.json_response({"ok": True, "command": entry},
+                                     headers=self._NO_STORE)
+
+        platform = str(body.get("platform") or "").lower().strip()
+        enabled = body.get("enabled")
+        if platform not in ("twitch", "discord") or not isinstance(enabled, bool):
+            return web.json_response({"ok": False, "error": "Bad request body."},
+                                     status=400, headers=self._NO_STORE)
+        old_state = self.bot.is_command_enabled(name, platform)
+        entry = await self.bot.set_command_platform(name, platform, enabled)
+        if entry is None:
+            return web.json_response({"ok": False, "error": "Unknown command."},
+                                     status=400, headers=self._NO_STORE)
+        self._mod_audit(login, name, platform, old_state, enabled)
+        return web.json_response({"ok": True, "command": entry},
+                                 headers=self._NO_STORE)
+
+    def _custom_plugin(self):
+        return (self.bot.plugins or {}).get("custom_commands") if self.bot else None
+
+    async def _mod_guards(self, request):
+        """Shared guards for custom-command writes. Returns (ident, err)."""
+        ident = await self._mod_identity(request)
+        if ident is None:
+            raise web.HTTPNotFound()
+        if not self._origin_ok(request):
+            return None, web.json_response(
+                {"ok": False, "error": "Bad origin."},
+                status=403, headers=self._NO_STORE)
+        if not self._ip_rate_ok(request):
+            return None, web.json_response(
+                {"ok": False, "error": "Too many requests."},
+                status=429, headers=self._NO_STORE)
+        if self._custom_plugin() is None:
+            return None, web.json_response(
+                {"ok": False, "error": "Custom commands unavailable."},
+                status=503, headers=self._NO_STORE)
+        return ident, None
+
+    async def _handle_api_mod_custom_post(self, request: web.Request):
+        """POST /api/mod/custom-commands, body {name, response}. Upserts
+        a mod-created text command."""
+        ident, err = await self._mod_guards(request)
+        if err is not None:
+            return err
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return web.json_response({"ok": False, "error": "Bad JSON."},
+                                     status=400, headers=self._NO_STORE)
+        name = str(body.get("name") or "").lower().strip()
+        response = str(body.get("response") or "")
+        login = ident.get("login") or "?"
+        ok, result = await self._custom_plugin().add_or_update(
+            name, response, created_by=login)
+        if not ok:
+            return web.json_response({"ok": False, "error": result},
+                                     status=400, headers=self._NO_STORE)
+        self._mod_audit(login, name, f"custom:{result}", "", response[:80])
+        for entry in self.bot.get_command_catalog():
+            if entry["name"] == name:
+                entry["response"] = response
+                return web.json_response(
+                    {"ok": True, "action": result, "command": entry},
+                    headers=self._NO_STORE)
+        return web.json_response({"ok": True, "action": result},
+                                 headers=self._NO_STORE)
+
+    async def _handle_api_mod_custom_delete(self, request: web.Request):
+        """DELETE /api/mod/custom-commands/{name}."""
+        ident, err = await self._mod_guards(request)
+        if err is not None:
+            return err
+        name = str(request.match_info.get("name") or "").lower().strip()
+        login = ident.get("login") or "?"
+        ok, result = await self._custom_plugin().delete(name)
+        if not ok:
+            return web.json_response({"ok": False, "error": result},
+                                     status=400, headers=self._NO_STORE)
+        self._mod_audit(login, name, "custom:deleted", "", "")
+        return web.json_response({"ok": True, "action": "deleted"},
+                                 headers=self._NO_STORE)
+
+    def _session_identity(self, request: web.Request) -> Optional[dict]:
+        """Verified session payload, or None (= logged out)."""
+        if not self._login_enabled:
+            return None
+        return _ws.verify(request.cookies.get(_ws.SESSION_COOKIE),
+                          WEB_SESSION_SECRET)
+
+    @staticmethod
+    def _client_ip(request: web.Request) -> str:
+        """Real client IP. Behind the Cloudflare tunnel every socket
+        is localhost, so trust CF-Connecting-IP first."""
+        return (request.headers.get("CF-Connecting-IP")
+                or request.headers.get(
+                    "X-Forwarded-For", "").split(",")[0].strip()
+                or request.remote or "unknown")
+
+    def _ip_rate_ok(self, request: web.Request) -> bool:
+        """Fixed-window per-IP limiter for /api/trade + /auth/*.
+        Defense in depth behind the Cloudflare WAF edge rule."""
+        window = int(time.time() // 60)
+        if len(self._ip_window) > 4096:
+            self._ip_window = {k: v for k, v in self._ip_window.items()
+                               if k[1] == window}
+        key = (self._client_ip(request), window)
+        self._ip_window[key] = self._ip_window.get(key, 0) + 1
+        return self._ip_window[key] <= WEB_TRADE_MAX_PER_MIN
+
+    def _origin_ok(self, request: web.Request) -> bool:
+        """CSRF backstop: state-changing requests must carry an Origin
+        header matching the site. SameSite=Strict on the session
+        cookie already blocks cross-site sends in modern browsers."""
+        return request.headers.get("Origin", "") == self._allowed_origin
+
+    def _set_session_cookie(self, response, token: str):
+        response.set_cookie(
+            _ws.SESSION_COOKIE, token, max_age=_ws.DEFAULT_MAX_AGE,
+            httponly=True, secure=self._cookie_secure,
+            samesite="Strict", path="/")
+
+    def _trading_allowed(self) -> bool:
+        """Config master switch AND dashboard feature toggle."""
+        if not (WEB_TRADING_ENABLED and self._login_enabled
+                and self.economy is not None):
+            return False
+        bot = getattr(self.economy, "bot", None)
+        if bot is not None and hasattr(bot, "is_feature_enabled"):
+            return bool(bot.is_feature_enabled("web_trading"))
+        return True
+
+    def _market_open(self) -> bool:
+        """Trades need the economy DB AND MixItUp (hats live there).
+        Surfaced via /api/stream-status as market_open."""
+        eco = self.economy
+        return bool(self._trading_allowed()
+                    and getattr(eco, "_db", None) is not None
+                    and getattr(eco, "_connected", False))
+
+    async def _handle_auth_login(self, request: web.Request):
+        """GET /auth/login — redirect to Twitch authorize with a
+        state nonce bound to a short-lived cookie."""
+        if not self._login_enabled:
+            return web.Response(
+                status=503, text="Login is not configured on this site.")
+        if not self._ip_rate_ok(request):
+            return web.Response(status=429, text="Too many requests.")
+        state = _ws.make_state()
+        params = urlencode({
+            "response_type": "code",
+            "client_id": TWITCH_CLIENT_ID,
+            "redirect_uri": WEB_OAUTH_REDIRECT_URI,
+            "scope": "",  # identity only — deliberately zero scopes
+            "state": state,
+        })
+        resp = web.HTTPFound(
+            f"https://id.twitch.tv/oauth2/authorize?{params}")
+        resp.set_cookie(
+            _ws.OAUTH_STATE_COOKIE, state, max_age=600, httponly=True,
+            secure=self._cookie_secure, samesite="Lax", path="/")
+        return resp
+
+    async def _handle_auth_callback(self, request: web.Request):
+        """GET /auth/twitch/callback — verify state, exchange the code
+        server-side, fetch identity, drop the token, issue session."""
+        if not self._login_enabled:
+            return web.Response(
+                status=503, text="Login is not configured on this site.")
+        if not self._ip_rate_ok(request):
+            return web.Response(status=429, text="Too many requests.")
+
+        state = request.query.get("state", "")
+        cookie_state = request.cookies.get(_ws.OAUTH_STATE_COOKIE, "")
+        code = request.query.get("code", "")
+        if not state or not cookie_state or state != cookie_state \
+                or not code:
+            # Stale bookmark or replayed login URL. No retry logic on
+            # purpose — the user just clicks Log in again.
+            return web.Response(
+                status=403,
+                text="Login state mismatch. Return to hatmaster.tv "
+                     "and try logging in again.")
+
+        try:
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession(timeout=timeout) as http:
+                async with http.post(
+                    "https://id.twitch.tv/oauth2/token",
+                    data={
+                        "client_id": TWITCH_CLIENT_ID,
+                        "client_secret": TWITCH_CLIENT_SECRET,
+                        "code": code,
+                        "grant_type": "authorization_code",
+                        "redirect_uri": WEB_OAUTH_REDIRECT_URI,
+                    },
+                ) as r:
+                    tok = await r.json()
+                access_token = tok.get("access_token")
+                if not access_token:
+                    print(f"[PublicWebServer] OAuth exchange failed: "
+                          f"{tok.get('message', 'no access_token')}")
+                    return web.HTTPFound("/?login=failed")
+                async with http.get(
+                    "https://api.twitch.tv/helix/users",
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "Client-Id": TWITCH_CLIENT_ID,
+                    },
+                ) as r:
+                    users = await r.json()
+        except Exception as e:
+            print(f"[PublicWebServer] OAuth callback error: {e}")
+            return web.HTTPFound("/?login=failed")
+        # access_token goes out of scope here — never persisted.
+
+        data = (users or {}).get("data") or []
+        if not data:
+            return web.HTTPFound("/?login=failed")
+        u = data[0]
+        token = _ws.issue(
+            u.get("id", ""), u.get("login", ""),
+            u.get("display_name", ""), u.get("profile_image_url", ""),
+            secret=WEB_SESSION_SECRET)
+        resp = web.HTTPFound(f"/twitch/{u.get('login', '')}")
+        self._set_session_cookie(resp, token)
+        resp.del_cookie(_ws.OAUTH_STATE_COOKIE, path="/")
+        print(f"[PublicWebServer] website login: {u.get('login')}")
+        return resp
+
+    async def _handle_auth_logout(self, request: web.Request):
+        """POST /auth/logout — POST (not GET) so a hostile <img> tag
+        cannot log viewers out."""
+        resp = web.json_response({"ok": True}, headers=self._NO_STORE)
+        resp.del_cookie(_ws.SESSION_COOKIE, path="/")
+        return resp
+
+    async def _handle_api_me(self, request: web.Request):
+        """GET /api/me — session identity for JS hydration. 401 when
+        logged out (body still says whether login is even possible)."""
+        ident = self._session_identity(request)
+        if ident is None:
+            return web.json_response(
+                {"logged_in": False,
+                 "login_available": self._login_enabled,
+                 "trading_enabled": self._trading_allowed(),
+                 "market_open": self._market_open()},
+                status=401, headers=self._NO_STORE)
+        return web.json_response({
+            "logged_in": True,
+            "uid": ident.get("uid"),
+            "login": ident.get("login"),
+            "name": ident.get("name"),
+            "img": ident.get("img"),
+            "trading_enabled": self._trading_allowed(),
+            "market_open": self._market_open(),
+        }, headers=self._NO_STORE)
+
+    async def _handle_api_me_balance(self, request: web.Request):
+        """GET /api/me/balance — current hat balance from MixItUp."""
+        ident = self._session_identity(request)
+        if ident is None:
+            return web.json_response(
+                {"error": "not_logged_in"}, status=401,
+                headers=self._NO_STORE)
+        balance = None
+        eco = self.economy
+        if eco is not None and getattr(eco, "_connected", False):
+            try:
+                balance = await eco._get_balance(ident.get("login", ""))
+            except Exception as e:
+                print(f"[PublicWebServer] balance read error: {e}")
+        return web.json_response({
+            "login": ident.get("login"),
+            "balance": balance,
+            "market_open": self._market_open(),
+        }, headers=self._NO_STORE)
+
+    async def _handle_api_me_settings(self, request: web.Request):
+        """GET /api/me/settings — logged-in viewer's account flags."""
+        ident = self._session_identity(request)
+        if ident is None:
+            return web.json_response(
+                {"error": "not_logged_in"}, status=401,
+                headers=self._NO_STORE)
+        hidden = False
+        eco = self.economy
+        if eco is not None and getattr(eco, "_db", None) is not None:
+            try:
+                hidden = await eco.get_leaderboard_hidden(
+                    ident.get("login", ""))
+            except Exception as e:
+                print(f"[PublicWebServer] settings read error: {e}")
+        return web.json_response(
+            {"login": ident.get("login"),
+             "leaderboard_hidden": hidden},
+            headers=self._NO_STORE)
+
+    async def _handle_api_me_visibility(self, request: web.Request):
+        """POST /api/me/visibility — body {"hidden": true|false}.
+
+        The self-serve replacement for the never-implemented !hideme
+        chat command. Same guard structure as /api/trade minus the
+        trading switches (privacy control should work even when the
+        market is closed): session -> origin -> rate limit -> write.
+        """
+        ident = self._session_identity(request)
+        if ident is None:
+            return web.json_response(
+                {"ok": False, "error": "Log in with Twitch first."},
+                status=401, headers=self._NO_STORE)
+        if not self._origin_ok(request):
+            return web.json_response(
+                {"ok": False, "error": "Bad origin."},
+                status=403, headers=self._NO_STORE)
+        if not self._ip_rate_ok(request):
+            return web.json_response(
+                {"ok": False, "error": "Too many requests."},
+                status=429, headers=self._NO_STORE)
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return web.json_response(
+                {"ok": False, "error": "Bad JSON."},
+                status=400, headers=self._NO_STORE)
+        hidden = body.get("hidden")
+        if not isinstance(hidden, bool):
+            return web.json_response(
+                {"ok": False, "error": "hidden must be true or false."},
+                status=400, headers=self._NO_STORE)
+        eco = self.economy
+        if eco is None or getattr(eco, "_db", None) is None:
+            return web.json_response(
+                {"ok": False, "error": "Economy offline - try later."},
+                status=503, headers=self._NO_STORE)
+        try:
+            await eco.set_leaderboard_hidden(ident.get("login", ""),
+                                             hidden)
+        except Exception as e:
+            print(f"[PublicWebServer] visibility write error: {e}")
+            return web.json_response(
+                {"ok": False, "error": "Write failed."},
+                status=500, headers=self._NO_STORE)
+        print(f"[PublicWebServer] leaderboard visibility: "
+              f"{ident.get('login')} -> "
+              f"{'hidden' if hidden else 'visible'}")
+        return web.json_response(
+            {"ok": True, "leaderboard_hidden": hidden},
+            headers=self._NO_STORE)
+
+    async def _handle_api_trade(self, request: web.Request):
+        """POST /api/trade — body {action, god, amount|"all"}.
+
+        Guards run in the order documented in WEBSITE_TRADING_DESIGN.md
+        §4.2. The trade itself is the SAME execute_buy / execute_sell
+        path chat commands use — this handler never touches balances,
+        shares, or prices directly.
+        """
+        def err(status, message, **extra_headers):
+            return web.json_response(
+                {"ok": False, "error": message}, status=status,
+                headers={**self._NO_STORE, **extra_headers})
+
+        # 1. master switches (config + dashboard toggle)
+        if not self._trading_allowed():
+            return err(503, "Trading is disabled.")
+        # 2. session
+        ident = self._session_identity(request)
+        if ident is None:
+            return err(401, "Log in with Twitch first.")
+        login = (ident.get("login") or "").lower()
+        # 3. origin allowlist (CSRF backstop)
+        if not self._origin_ok(request):
+            return err(403, "Bad origin.")
+        # 4. excluded bot accounts
+        if not login or login in EXCLUDED_USERS_LOWER:
+            return err(403, "This account cannot trade.")
+        # 5. per-user cooldown (mirrors chat)
+        now = time.time()
+        elapsed = now - self._web_trade_cooldowns.get(login, 0)
+        if elapsed < WEB_TRADE_COOLDOWN:
+            retry = max(1, int(WEB_TRADE_COOLDOWN - elapsed) + 1)
+            return err(429, f"Trade cooldown: {retry}s",
+                       **{"Retry-After": str(retry)})
+        # 6. per-IP bucket
+        if not self._ip_rate_ok(request):
+            return err(429, "Too many requests.")
+        # 7. body shape + god resolution
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return err(400, "Bad JSON.")
+        action = (str(body.get("action") or "")).strip().lower()
+        god_input = (str(body.get("god") or "")).strip()
+        amount_raw = body.get("amount")
+        if action not in ("buy", "sell") or not god_input:
+            return err(400, "action must be buy or sell, "
+                            "and god is required.")
+        eco = self.economy
+        god_name = eco._resolve_god_name(god_input)
+        if not god_name:
+            return err(400, f"Unknown god: {god_input}")
+        # 9 (checked before amount math so "all" can read balances).
+        # economy DB + MixItUp must both be up — hats live in MixItUp.
+        if getattr(eco, "_db", None) is None \
+                or not getattr(eco, "_connected", False):
+            return err(503, "Market closed — the bot or MixItUp "
+                            "is offline.")
+
+        # 8. per-user lock serializes balance-check → deduct
+        async with self._trade_locks[login]:
+            try:
+                if isinstance(amount_raw, str) \
+                        and amount_raw.strip().lower() == "all":
+                    if action == "buy":
+                        balance = await eco._get_balance(login)
+                        if not balance or balance <= 0:
+                            return err(400, "You have no hats.")
+                        hat_amount = int(balance)
+                    else:
+                        holding = await eco._get_holding(login, god_name)
+                        if not holding or holding["shares"] <= 0:
+                            return err(400, f"You do not own any "
+                                            f"{god_name} shares.")
+                        hat_amount = int(
+                            holding["shares"]
+                            * eco._prices.get(god_name, 0))
+                else:
+                    hat_amount = int(str(amount_raw).replace(",", ""))
+            except (TypeError, ValueError):
+                return err(400, "Amount must be a whole number of "
+                                "hats or 'all'.")
+            if hat_amount < 1:
+                return err(400, "Minimum trade is 1 hat.")
+
+            if action == "buy":
+                result = await eco.execute_buy(
+                    login, god_name, hat_amount, channel="web")
+            else:
+                result = await eco.execute_sell(
+                    login, god_name, hat_amount, channel="web")
+
+        if not result.get("success"):
+            return err(400, result.get("error", "Trade failed."))
+
+        self._web_trade_cooldowns[login] = time.time()
+        balance = None
+        try:
+            balance = await eco._get_balance(login)
+        except Exception:
+            pass
+        print(f"[PublicWebServer] WEB TRADE: {login} {action} "
+              f"{result.get('god_name', god_name)} for {hat_amount} hats")
+        return web.json_response({
+            "ok": True,
+            "action": action,
+            "god": result.get("god_name", god_name),
+            "shares": round(float(result.get("shares", 0)), 4),
+            "price": result.get("price"),
+            "total": result.get("total_cost",
+                                result.get("net_received")),
+            "balance": balance,
+        }, headers=self._NO_STORE)
+
+    # ──────────────────────────────────────────────────────────────────
+    #   SOCIAL TABS (Social_Tabs_Plan.md)
+    # ──────────────────────────────────────────────────────────────────
+    # Three cached read-only feeds for the landing-page tab strip.
+    # Cache serves stale data on upstream failure so a dead API call
+    # never blanks a tab.
+
+    def _social_cache_get(self, key):
+        hit = self._social_cache.get(key)
+        if hit and time.time() - hit[0] < SOCIAL_FEED_CACHE_TTL:
+            return hit[1]
+        return None
+
+    def _social_cache_stale(self, key):
+        hit = self._social_cache.get(key)
+        return hit[1] if hit else None
+
+    async def _handle_social_youtube(self, request: web.Request):
+        """Latest uploads via playlistItems (1 quota unit/call — NOT
+        the 100-unit search.list). Uploads playlist id = channel id
+        with the UC prefix swapped to UU."""
+        cached = self._social_cache_get("youtube")
+        if cached is not None:
+            return web.json_response(cached)
+        if not YOUTUBE_API_KEY or not YOUTUBE_CHANNEL_ID:
+            return web.json_response(
+                {"videos": [], "error": "not_configured"})
+        uploads = "UU" + YOUTUBE_CHANNEL_ID[2:] \
+            if YOUTUBE_CHANNEL_ID.startswith("UC") else YOUTUBE_CHANNEL_ID
+        try:
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession(timeout=timeout) as http:
+                async with http.get(
+                    "https://www.googleapis.com/youtube/v3/playlistItems",
+                    params={"part": "snippet", "playlistId": uploads,
+                            "maxResults": "12", "key": YOUTUBE_API_KEY},
+                ) as r:
+                    data = await r.json()
+            videos = []
+            for item in data.get("items", []):
+                sn = item.get("snippet") or {}
+                rid = (sn.get("resourceId") or {}).get("videoId")
+                if not rid:
+                    continue
+                thumbs = sn.get("thumbnails") or {}
+                thumb = (thumbs.get("medium") or thumbs.get("default")
+                         or {}).get("url", "")
+                videos.append({
+                    "video_id": rid,
+                    "title": sn.get("title", ""),
+                    "thumbnail_url": thumb,
+                    "published_at": sn.get("publishedAt", ""),
+                })
+            payload = {"videos": videos}
+            self._social_cache["youtube"] = (time.time(), payload)
+            return web.json_response(payload)
+        except Exception as e:
+            print(f"[PublicWebServer] youtube feed error: {e}")
+            stale = self._social_cache_stale("youtube")
+            return web.json_response(
+                stale or {"videos": [], "error": "fetch_failed"})
+
+    async def _handle_social_bluesky(self, request: web.Request):
+        """Author feed via Bluesky's public AT Protocol API (no auth).
+
+        Skips reposts + replies. Supports cursor pagination
+        (?cursor=...) for the landing page's load-more / infinite
+        scroll. Response includes the author profile (avatar, display
+        name) captured from the feed so the tab can render a real
+        Bluesky-style header without a second API call.
+        """
+        cursor = (request.query.get("cursor") or "").strip()
+        cache_key = f"bluesky:{cursor}" if cursor else "bluesky"
+        cached = self._social_cache_get(cache_key)
+        if cached is not None:
+            return web.json_response(cached)
+        if not BLUESKY_HANDLE:
+            return web.json_response(
+                {"posts": [], "error": "not_configured"})
+        try:
+            params = {"actor": BLUESKY_HANDLE, "limit": "30"}
+            if cursor:
+                params["cursor"] = cursor
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession(timeout=timeout) as http:
+                async with http.get(
+                    "https://public.api.bsky.app/xrpc/"
+                    "app.bsky.feed.getAuthorFeed",
+                    params=params,
+                ) as r:
+                    data = await r.json()
+            profile = None
+            posts = []
+            for item in data.get("feed", []):
+                if item.get("reason"):
+                    continue  # repost
+                post = item.get("post") or {}
+                record = post.get("record") or {}
+                if record.get("reply"):
+                    continue
+                author = post.get("author") or {}
+                if profile is None and author:
+                    profile = {
+                        "handle": author.get("handle", BLUESKY_HANDLE),
+                        "display_name": (author.get("displayName")
+                                         or author.get("handle", "")),
+                        "avatar": author.get("avatar", ""),
+                        "url": (f"https://bsky.app/profile/"
+                                f"{author.get('handle', BLUESKY_HANDLE)}"),
+                    }
+                uri = post.get("uri", "")
+                rkey = uri.rsplit("/", 1)[-1] if uri else ""
+                image = ""
+                embed = post.get("embed") or {}
+                images = embed.get("images") or []
+                if images:
+                    image = images[0].get("thumb", "")
+                posts.append({
+                    "text": record.get("text", ""),
+                    "created_at": record.get("createdAt", ""),
+                    "like_count": post.get("likeCount", 0),
+                    "reply_count": post.get("replyCount", 0),
+                    "repost_count": post.get("repostCount", 0),
+                    "image": image,
+                    "url": (f"https://bsky.app/profile/"
+                            f"{BLUESKY_HANDLE}/post/{rkey}"),
+                })
+            payload = {
+                "posts": posts,
+                "handle": BLUESKY_HANDLE,
+                "profile": profile,
+                "cursor": data.get("cursor", ""),
+            }
+            self._social_cache[cache_key] = (time.time(), payload)
+            return web.json_response(payload)
+        except Exception as e:
+            print(f"[PublicWebServer] bluesky feed error: {e}")
+            stale = self._social_cache_stale(cache_key)
+            return web.json_response(
+                stale or {"posts": [], "error": "fetch_failed"})
+
+    async def _handle_social_tiktok(self, request: web.Request):
+        """Manual config passthrough — TikTok has no usable public
+        API. Paste the latest video URL into config_local.py."""
+        return web.json_response({
+            "profile_url": f"https://www.tiktok.com/@{TIKTOK_USERNAME}",
+            "latest_video_url": TIKTOK_LATEST_VIDEO_URL or "",
+        })
+
+    # ──────────────────────────────────────────────────────────────────
+    #   PRIORITY GOD REQUEST (Stripe)
+    # ──────────────────────────────────────────────────────────────────
+    #
+    # Thin HTTP layer over PriorityRequestPlugin. We translate body
+    # parsing + Stripe signature header → plugin call → HTTP status.
+    # Business logic (idempotency, queueing, message persistence) all
+    # lives in the plugin so it stays testable without an aiohttp
+    # request object on hand.
+
+    async def _handle_priority_create(
+            self, request: web.Request) -> web.Response:
+        """POST /api/priority-request/create
+        Body: {god: str, twitch_username: str, message: str}
+        Returns: {checkout_url: str, session_id: str}
+        """
+        plugin = self.priority_request
+        if plugin is None or not plugin.is_enabled():
+            return web.json_response(
+                {"error": "priority_requests_disabled"}, status=503)
+
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            return web.json_response(
+                {"error": "bad_json"}, status=400)
+
+        god = (body.get("god") or "").strip()
+        uname = (body.get("twitch_username") or "").strip()
+        msg = body.get("message") or ""
+
+        try:
+            result = await plugin.create_session(god, uname, msg)
+        except ValueError as e:
+            # bad_twitch_username | unknown_god:<raw>
+            return web.json_response(
+                {"error": str(e)}, status=400)
+        except RuntimeError as e:
+            # Stripe API failure — upstream issue, not client's fault.
+            print(f"[PublicWebServer] priority create upstream "
+                  f"error: {e}")
+            return web.json_response(
+                {"error": "upstream_failed"}, status=502)
+        except Exception as e:
+            print(f"[PublicWebServer] priority create error: {e}")
+            return web.json_response(
+                {"error": "internal_error"}, status=500)
+
+        return web.json_response(result)
+
+    async def _handle_stripe_webhook(
+            self, request: web.Request) -> web.Response:
+        """POST /api/stripe-webhook
+        Body: raw Stripe event JSON.
+        Header: Stripe-Signature: t=...,v1=...  (signature verify
+                requires the RAW bytes, NOT request.json()).
+        """
+        plugin = self.priority_request
+        if plugin is None or not plugin.is_enabled():
+            # 200 anyway so Stripe doesn't keep retrying when the
+            # feature is intentionally off. The plugin would just
+            # reject every retry as disabled.
+            return web.json_response(
+                {"ok": False, "reason": "disabled"}, status=200)
+
+        # Signature verification requires the unparsed request body —
+        # any whitespace or key-order normalization breaks the HMAC.
+        raw = await request.read()
+        sig = request.headers.get("Stripe-Signature", "")
+
+        result = await plugin.handle_webhook(raw, sig)
+
+        if not result.get("ok"):
+            reason = result.get("reason", "")
+            # Bad signatures are client errors (someone POSTing
+            # without the right secret); everything else is a 200 so
+            # Stripe stops retrying once we've made a decision.
+            status = 400 if reason in ("bad_signature", "bad_payload",
+                                       "no_webhook_secret") else 200
+            return web.json_response(result, status=status)
+
+        return web.json_response(result)
+
+    async def _handle_priority_success_page(
+            self, request: web.Request) -> web.Response:
+        """GET /priority-success — Stripe redirects here after a
+        successful payment. The page itself doesn't grant anything
+        (the webhook is the source of truth); it just confirms the
+        purchase to the user."""
+        path = PUBLIC_DIR / "priority-success.html"
+        if not path.exists():
+            return web.Response(text="Success page missing.", status=500)
+        return web.FileResponse(
+            path, headers={"Cache-Control": "no-cache"})
+
+    @staticmethod
+    def _make_static_handler(fname: str):
+        async def handler(request: web.Request) -> web.Response:
+            path = PUBLIC_DIR / fname
+            if path.exists():
+                return web.FileResponse(
+                    path,
+                    headers={"Cache-Control": "public, max-age=86400"})
+            raise web.HTTPNotFound()
+        return handler
+
+    async def _handle_auth_js(self, request: web.Request) -> web.Response:
+        path = PUBLIC_DIR / "auth.js"
+        if path.exists():
+            return web.FileResponse(
+                path, headers={"Cache-Control": "no-cache"})
+        raise web.HTTPNotFound()
 
     async def _handle_theme_css(self, request: web.Request) -> web.Response:
         path = PUBLIC_DIR / "theme.css"

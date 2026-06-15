@@ -591,6 +591,57 @@ async def check_smite_process():
 # DRIVER
 # ============================================================
 
+async def check_web_login():
+    """Website login + trading readiness (WEBSITE_TRADING_DESIGN.md).
+
+    Three states:
+      - trading disabled by config       -> OK (deliberate)
+      - enabled but secret/creds missing -> FAIL (viewers see a dead
+                                            login button)
+      - enabled + configured             -> probe /api/me end-to-end
+                                            (expects 401 + JSON when
+                                            logged out)
+    """
+    name = "Website login (hatmaster.tv)"
+    t0 = time.time()
+    try:
+        import sys as _sys
+        _sys.path.insert(0, str(REPO_ROOT))
+        from core.config import (WEB_SESSION_SECRET, WEB_TRADING_ENABLED,
+                                 TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET)
+    except Exception as exc:
+        return fail(name, f"could not import core.config: {exc}")
+
+    if not WEB_TRADING_ENABLED:
+        return ok(name, "web trading disabled by config (WEB_TRADING_ENABLED=False)")
+
+    missing = []
+    if not WEB_SESSION_SECRET:
+        missing.append("WEB_SESSION_SECRET")
+    if TWITCH_CLIENT_ID in ("", "YOUR_CLIENT_ID"):
+        missing.append("TWITCH_CLIENT_ID")
+    if TWITCH_CLIENT_SECRET in ("", "YOUR_CLIENT_SECRET"):
+        missing.append("TWITCH_CLIENT_SECRET")
+    if missing:
+        return fail(
+            name, f"trading enabled but missing: {', '.join(missing)}",
+            hint="Set them in core/config_local.py. Generate a secret: "
+                 "python -c \"import secrets; print(secrets.token_urlsafe(64))\"",
+        )
+
+    status, body = await _http_get_json(
+        f"http://localhost:{PUBLIC_PORT}/api/me")
+    elapsed = int((time.time() - t0) * 1000)
+    if status == 401:
+        return ok(name, "configured; /api/me responds (logged-out 401)",
+                  elapsed_ms=elapsed)
+    return warn(
+        name, f"/api/me returned {status} (expected 401 when logged out)",
+        hint="Bot not running, or the login routes failed to register.",
+        elapsed_ms=elapsed,
+    )
+
+
 ALL_CHECKS = [
     ("bot_dashboard",     check_bot_dashboard,             False),
     ("bot_token",         lambda: check_twitch_token(BOT_TOKEN_FILE, "bot"),                 False),
@@ -600,6 +651,7 @@ ALL_CHECKS = [
     ("mixitup",           check_mixitup,                   False),
     ("tracker_gg",        check_tracker_gg,                True),   # slow-ish
     ("public_local",      check_local_public_webserver,    False),
+    ("web_login",         check_web_login,                 False),
     ("public_external",   check_hatmaster_tv,              True),   # slow-ish (external)
     ("cloudflared",       check_cloudflared_service,       False),
     ("disk_space",        check_disk_space,                False),

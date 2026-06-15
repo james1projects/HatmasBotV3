@@ -2,7 +2,7 @@
 
 Complete reference for HatmasBot. This file is the single source of truth for Claude when working on this codebase across sessions.
 
-**v2.5 | May 2026 | Built by Hatmaster & Claude**
+**v2.8 | June 2026 | Built by Hatmaster & Claude**
 
 v2.5 adds the public-facing Hatmas Market website (`hatmaster.tv`),
 YouTube comment-based share rewards, periodic match backfill from
@@ -10,6 +10,50 @@ tracker.gg, the fair-value pricing formula, the replay tool, and
 several CLI tools for ops. See the **v2.5 Update — Hatmas Market
 Public Website** section near the bottom of this document for full
 details.
+
+v2.6 adds paid priority god requests: viewers pay $5 via Stripe
+Checkout on `hatmaster.tv/community` to jump the god request queue,
+with a crash-safe webhook lifecycle, refund/dispute handling, a
+reconciliation CLI, and a 16-test regression suite. See the **v2.6
+Update — Priority God Requests (Stripe)** section at the bottom.
+
+v2.7 adds Twitch login + trading on hatmaster.tv: viewers log in with
+Twitch (zero scopes, identity only) and buy/sell god shares from the
+portfolio and god pages — same execute_buy/execute_sell path as chat.
+See the **v2.7 Update — Website Login + Trading** section at the
+bottom and `WEBSITE_TRADING_DESIGN.md`.
+
+v2.8 adds the Streamloots event hub (SSE listener on the alert
+overlay stream with listener-list dispatch of card redemptions,
+chest purchases, and gifts) and the game half of the Factorio
+integration: the `hatmas-events` Factorio mod with viewer pets and
+boss biters, a `hatmas` remote interface for future RCON control,
+and a JSONL event outbox. See the **v2.8 Update — Streamloots Hub +
+Factorio Mod** section at the bottom.
+
+---
+
+## Working in this repo (read first if you are Claude)
+
+This repo has an observed file-tool desync: `Edit` and `Write` on files
+inside `C:\Users\james\HatmasBot` can silently leave the on-disk file
+truncated mid-statement or with NUL bytes injected, even when the tool
+reports success and a post-edit `Read` shows clean content. Verify every
+non-trivial edit from bash, not from `Read`:
+
+```bash
+file <path>                       # expect "Python script, Unicode text"; "data" means NUL bytes
+wc -l <path>                      # should match expected line count
+tail -5 <path>                    # should end on a complete statement
+python3 -m py_compile <path>      # for .py files
+```
+
+For edits longer than a few lines, multi-line strings, or anything touching
+docstrings, skip `Edit`/`Write` and apply the change via a small Python
+script in bash (read, assert exact `old` block matches once, write
+replacement, verify on disk). The `hatmasbot-safe-edits` skill has the full
+playbook including recovery (`tr -d '\0'` for NUL bytes, bash heredoc
+rewrite for truncation). Install it if it isn't already loaded.
 
 ---
 
@@ -60,6 +104,10 @@ KillDeathDetector so the kill detector's `on_death` callback can call
 14. YouTubeLiveBadgePlugin - listens for stream_live / stream_offline and shells out to tools/youtube_live_badge.py to apply/revert LIVE badges on the last 8 YouTube thumbnails
 15. BackupManagerPlugin - daily gzipped snapshots of economy.db to data/backups/ (configurable via BACKUP_INTERVAL_HOURS / BACKUP_RETENTION_DAYS)
 16. GodPoolPlugin - viewer-driven god voting (!nominate / !pool / !spin / !poolclear) with the current pool exposed via /api/community for the website's /community page
+17. PriorityRequestPlugin - Stripe-paid priority god requests ($5 queue jump bought on hatmaster.tv/community). Registered after GodRequestPlugin so it can resolve the godrequest plugin. No chat commands — the entire surface is HTTP on the public webserver. See the v2.6 section at the bottom.
+
+18. StreamlootsPlugin - SSE listener on the Streamloots alert overlay stream. Event hub: other plugins subscribe via add_redemption_listener / add_purchase_listener / add_gift_listener in main.py. No-op until STREAMLOOTS_ALERT_ID is set in config_local.py.
+19. FactorioPlugin - bot half of the hatmas-events Factorio mod. RCON commands into the game, outbox tailer out of it (chat announcements). Registered after StreamlootsPlugin; main.py wires streamloots.add_redemption_listener(factorio.on_streamloots_redemption) and factorio.register_api_routes(web.app). No chat commands - the control surface is the card manager page at /factorio/cards (mappings persist to data/factorio_cards.json; FACTORIO_CARD_MAP only seeds it once). RCON disabled until FACTORIO_RCON_PASSWORD is set in config_local.py; the card manager works regardless.
 
 SnapPlugin exists but is commented out in main.py.
 
@@ -90,12 +138,14 @@ core/
   nsfw_check.py             Album art NSFW classification.
   god_matcher.py            Portrait-based god identification via HSV histogram matching.
   digit_matcher.py          Template-based digit recognition for KDA numbers. XOR distance + hole-count pre-filter.
+  web_session.py            Stateless HMAC-signed session tokens for hatmaster.tv login (stdlib only). Rotating WEB_SESSION_SECRET logs everyone out.
 plugins/
   basic.py                  !hello, !uptime, !socials, !suggest, !suggestions, !clearsuggestions
   smite.py                  Match tracking, god detection, predictions, title, record, commands.
   songrequest.py            Spotify/YouTube queue, likes, now playing overlay, blacklist.
   obs.py                    OBS WebSocket control, scene switching, fade effects.
-  godrequest.py             God request queue, token economy, MixItUp integration, auto-complete.
+  godrequest.py             God request queue, token economy, MixItUp integration, auto-complete. Exposes add_history_listener for resolved entries (played/skipped/removed).
+  priority_request.py       Stripe-paid priority god requests. Two-phase webhook lifecycle (paid -> fulfilled), refund/dispute handling, played_at stamping via godrequest history listener.
   claude_chat.py            Claude API responses for @mentions. Per-user history, safety prompt.
   gamble.py                 Dice roll gambling with Hats currency, jackpot pool, sound/visual alerts.
   killdetector.py           Real-time kill/death detection via OBS screenshot analysis + template matching (Tesseract OCR fallback).
@@ -103,6 +153,8 @@ plugins/
   deathcounter.py           Daily death tally with auto-reset at midnight. Hooks killdetector on_death, powers /overlay/deaths.
   economy.py                Stock market economy: god share prices, live ticks, dividends, trading, 7 overlay events.
   snap.py                   Thanos snap. Times out random half of chat.
+  streamloots.py            Streamloots event hub. SSE listener + listener-list dispatch of card redemptions, chest purchases, gifts.
+  factorio/                 Factorio integration package. plugin.py (lifecycle, card handling, manager API), rcon.py (asyncio Source-RCON client, no deps), catalog.py (action defs, Lua escaping, outbox->chat formatting), cards.py (CardStore: persisted card->action mappings), events.py (JSONL outbox tailer).
 overlays/
   control_panel.html        Dashboard for stream management (includes economy sim/test controls).
   nowplaying.html           Now Playing overlay (450x120).
@@ -120,6 +172,7 @@ overlays/
   economy_leaderboard.html  260x360 top investors board. Shows on leaderboard_update.
   economy_tradefeed.html    320x340 live trade/dividend feed. Shows on trade_executed/dividend_paid.
   economy_portfolio.html    420x670 viewer portfolio card. Shows on portfolio_requested.
+  factorio_cards.html       Card manager page (/factorio/cards). Map Streamloots card names to Factorio actions, test buttons, recently-played card list.
   overlay_client.js         Shared JS client library. WebSocket auto-reconnect, show/hide/update callbacks, hatPrice() helper, getColor() canvas helper.
   hatmas_theme.css          Shared CSS theme. Warm neutral palette, hat-icon utility classes, component styles.
   hat.png                   Hat currency icon used by hatPrice() helper across all overlays.
@@ -151,6 +204,8 @@ data/
   killdetect_debug/         Debug frame archives (timestamped subfolders, preserved for regression testing).
   test_fixtures/kda/        Canned KDA reader fixtures: <name>.png is a full 1920x1080 frame, sibling <name>.json declares expected (kda, per-group digits, verdicts, distance/margin bounds). Consumed by tools/test_kda_fixture.py — see "KDA fixture regression check" below for the format. Seeded with atlas_4_0_0_live_1080p (clean early-game Atlas frame, KDA=4/0/0).
   economy.db                SQLite database for god economy (WAL mode, async via aiosqlite).
+  factorio_cards.json       Persisted card->action mappings (source of truth; seeded once from FACTORIO_CARD_MAP, edited via /factorio/cards).
+  streamloots_events.jsonl  Raw Streamloots event log (appended by the hub for debugging/card mapping).
 tools/
   obs_screenshot.py         Captures OBS "Smite 2" source screenshot for calibration. Saves full frame + KDA crop.
   download_voicelines.py    Downloads all god voice lines from the Smite fandom wiki. Uses curl_cffi for Cloudflare bypass.
@@ -168,10 +223,18 @@ tools/
   build_thumbnail.py        Preset-driven Pillow compositor that builds a 1280x720 YouTube thumbnail from a JSON preset + CLI inputs. Outputs flat composite PNG, per-layer transparent PNGs (drag-import into Paint.NET for layered editing), and optional layered PSD (if psd-tools is installed). Auto-launches Paint.NET on the result. Presets: thumbnail_presets/{1v1,1v2,2matches,2gods,single}.json.
   import_god_icons.py       Auto-imports candidate images from Custom_Icons_Inbox/ into Custom God Icons/. Smart-crops to 1:1 (top-biased), resizes to 512x512 PNG, and names per the build_thumbnail.py convention (<God>.png primary, <God>-1.png variants). Fuzzy-matches god names from filenames. Use --list-missing to see which gods lack a primary icon.
   youtube_live_badge.py     Apply/revert "LIVE NOW" badge on the last N YouTube thumbnails. Subcommands: apply (stream start), revert (stream end), status, auth. Caches originals locally at data/youtube_thumbnails/<video_id>.png. Requires one-time OAuth setup (downloads google-auth-oauthlib + google-api-python-client). Stream Deck pair: go_live.bat / go_offline.bat.
+  test_web_session.py       11-test suite for core/web_session.py (tamper, expiry, forgery).
+  discord_test.py           Standalone Discord send tester. Connects with DISCORD_BOT_TOKEN WITHOUT starting the bot, lists visible channels (--list), and sends a test message to a given channel id (defaults to DISCORD_DEFAULT_CHANNEL_ID). Exit 0 = sent. Use it to confirm the bot can post to a specific (e.g. private) channel. Wrapper: discord_test.bat.
+  test_web_trade.py         19-test suite for website login + /api/trade (every guard, lock serialization, OAuth redirect).
+  check_factorio_rcon.py    Standalone probe for the Factorio bridge: connects RCON, pings the hatmas-events mod, verifies remote calls round-trip. Run after hosting the save; exit 0 = bridge working.
+  reconcile_stripe.py       Audit/repair CLI for priority-request payments. Subcommands: audit (diff Stripe vs priority_payments), unplayed (refund candidates), refund <session_id>.
+  test_priority_request.py  16-test regression suite for the Stripe webhook money path. Run before touching priority_request.py; exits non-zero on any failure.
   check_stream_ready.py     Pre-stream readiness check. Runs ~12 concurrent end-to-end probes (bot dashboard, both Twitch tokens, OBS WebSocket + Smite 2 source, MixItUp, tracker.gg, public webserver, hatmaster.tv, cloudflared service, disk space, asset library, Spotify token, SMITE 2 process). ~400ms full / ~150ms with --quick. Exit 0 = ready, 1 = at least one FAIL. Use check_stream.bat for one-press Stream Deck workflow.
 go_live.bat                 Stream Deck: apply LIVE NOW badge on last 8 YouTube thumbnails. Pair with go_offline.bat at end of stream.
 go_offline.bat              Stream Deck: revert LIVE badges. Idempotent and partial-failure tolerant.
+start_factorio.bat          Stream Deck: launch Factorio with RCON bound to 127.0.0.1:27015. Reads FACTORIO_RCON_PASSWORD from core/config_local.py (single source of truth). After launch: Multiplayer -> Host saved game (RCON is NOT active in single player).
 check_stream.bat            Stream Deck-friendly wrapper around tools/check_stream_ready.py. Runs the readiness check, prints colored report with hints, pauses 8s on success / 30s on failure so you can read it. Drop onto a Stream Deck "System: Open" button and press ~30s before going live.
+discord_test.bat            Stream Deck-friendly wrapper around tools/discord_test.py. Passes its args straight through (e.g. `discord_test.bat --list`, `discord_test.bat <channel_id> "hello"`) and pauses at the end so you can read the OK/FAIL line.
 Custom_Icons_Inbox/         Inbox folder for tools/import_god_icons.py. Drop candidate images here (any of .png/.jpg/.jpeg/.gif/.webp/.bmp/.tiff). Auto-created as needed. Successfully-processed files move to _processed/ subfolder.
 thumbnail_presets/          JSON presets for build_thumbnail.py. Schema mirrors the .tune.json approach: layers[] rendered bottom-to-top with types solid/gradient/image/icon/text. Placeholders: {my_god}, {my_god2}, {vs_god}, {vs2_god}, {my_god_card}, {my_god2_card}, {vs_god_card}, {vs2_god_card}, {my_god_icon}, {my_god2_icon}, {vs_god_icon}, {vs2_god_icon}, {text}, {subtext}, {result}, {result2}, {kda}.
 thumbnail_presets/_assets/  Background images / supporting PNGs referenced by presets. Drop joust_map.png here for the 2matches preset; auto-fallback to the brand gradient if a referenced file is missing.
@@ -179,6 +242,8 @@ thumbnails/                 Output landing zone for build_thumbnail.py. Each ren
 build_thumbnail.bat         Stream Deck-friendly wrapper around tools/build_thumbnail.py. Interactive prompt flow that adapts to the chosen preset: always asks for my god + skin variant + headline + subtext + KDA + flip toggle; conditionally asks for opposing god(s), second player god, second skin variant, and a second result based on which of 1v1 / 1v2 / 2matches / 2gods / single was picked. Pressing Enter on any optional field skips the corresponding --flag entirely (so blank result/kda just don't render). Flip toggles invert whatever the preset already does — type y to flip a god's card when its splash art is facing the wrong way. Drop the path into a Stream Deck "System: Open" button for one-press end-of-stream thumbnail creation.
 process_recordings.bat      Stream Deck-friendly wrapper around tools/process_recordings.py. pushd's to repo root, runs the orchestrator, tees stdout+stderr to data/process_recordings.log, brief pause at the end so the summary stays on screen. Point a Stream Deck "System: Open" button at this file for one-click end-of-stream cleanup.
 recordings/                 Drop-folder for new OBS recordings. Anything sitting in the root is treated as unprocessed. After process_recordings.py runs, files are sorted into per-god subfolders (recordings\Ymir\Ymir-3.mp4 etc.), recordings\mixed\ for multi-game sessions, and recordings\unknown\ for clips with no god identified. The .events.json travels with each .mp4 with a matching basename.
+factorio_mod/
+  hatmas-events/            Factorio 2.x mod (Lua). Viewer pets + boss biters, "hatmas" remote interface (future RCON surface for the bot), JSONL event outbox to script-output. Install via folder junction into %APPDATA%\Factorio\mods. See its README.md + the v2.8 section.
 vegas_scripts/
   HighlightBuilder.cs       Sony Vegas Pro script that reads a *.events.json and auto-cuts a vertical highlight reel. Recurses from EVENTS_FOLDER (default C:\Users\james\Videos) so the newest .events.json across every god subfolder gets pre-selected in the file picker. Hand-rolled JSON parser (no Newtonsoft dependency) — only requires source_video and events fields, ignores any extras like gods_seen.
 ```
@@ -331,7 +396,7 @@ Starts automatically on bot launch and runs continuously — does not depend on 
 
 **Primary method — template matching (core/digit_matcher.py):** Each digit component is extracted, resized to 60x80, pre-filtered by hole count (0=must be 1/2/3/5/7, 1=must be 0/4/6/9, 2=must be 8), then XOR distance matched against reference templates in data/digit_templates/ (197 templates as of April 2026). Rejects if distance > 0.30 or margin < 0.02. Typically completes in 4-7ms per frame.
 
-**Fallback method — per-component Tesseract OCR:** If template matching fails for any individual component, that component falls back to Tesseract PSM 10 (single character) with dilated and original image variants. Other components that matched templates keep their results. This handles double-digit numbers where the "1" in the tens place may not match any template.
+**Fallback method — per-component Tesseract OCR:** If template matching fails for any individual component, that component falls back to Tesseract PSM 10 (single character) with dilated and original image variants. Other components that matched templates keep their results. This handles double-digit numbers where the "1" in the tens place may not match any template. pytesseract is fully optional: all `import pytesseract` statements in core/kda_reader.py are guarded by `self._ocr_available`, so template-only matching works when it isn't installed. (June 2026 fix — an unconditional import inside `read_kda()`'s try block made every live read raise ImportError and silently return None whenever pytesseract was missing, killing the whole session's KDA tracking with nothing in the log.)
 
 **Auto-collection:** After sanity checks pass, confirmed digit crops are saved as new templates (max 20 per digit). The template library grows automatically over time.
 
@@ -346,6 +411,8 @@ Starts automatically on bot launch and runs continuously — does not depend on 
 **Chat announcements:** Optional toggle sends Twitch chat message on each kill, death, or assist with updated KDA line.
 
 **Callbacks:** on_kill, on_multikill, on_death, on_assist — set in main.py to push events to the webserver overlay queue.
+
+**Sustained-failure alerting (June 2026):** when the god is identified and gameplay is active but KDA reads keep failing, every `READ_FAILURE_ALERT_EVERY` (25) consecutive failures the detector logs a non-debug WARNING with the reader's `failure_reason` (from `read_kda_with_details`) and saves a full-frame snapshot to `data/detector_snapshots/readfail_<ts>/fullframe.png` + `reason.txt` (rate-limited to one per `READ_FAILURE_SNAPSHOT_MIN_INTERVAL` = 300s). Snapshots use the same layout fixtures are built from, so a failing frame can be promoted straight into `data/test_fixtures/kda/`. Previously a fully-broken reader looked identical to lobby idling in the logs.
 
 **Debug:** set_debug(True) saves crops to data/killdetect_debug/ (archived into timestamped subfolders on each session start). File logging writes all [KillDetector] output to data/killdetect.log (overwritten per session, flushed on every write).
 
@@ -411,6 +478,13 @@ Stock-market-style system where viewers invest Hats in Smite 2 gods as shares. G
 Tracks total deaths per day across every gameplay session the kill detector sees (practice, custom, ranked, all count). State lives in `data/death_count.json` as `{count, date}`. The `_check_day_reset()` helper compares the stored date against today's date on every increment and getter, so the counter auto-resets at midnight without needing a background task. `main.py` wires the existing `kd.on_death` callback to also call `death_counter.increment()`, meaning the counter stays in lockstep with the kill detector. The overlay at `/overlay/deaths` is a transparent text widget (red "Deaths Today" label + large white number) that polls `/api/death_count` every 1 second. Drop the URL into OBS as a browser source and position it anywhere — no dashboard configuration needed.
 
 ---
+
+### Streamloots Card Events (plugins/streamloots.py)
+Event hub for Streamloots card redemptions, chest purchases, and gifts. Streamloots has no official developer API; the plugin listens to the alert overlay's Server-Sent Events stream at `https://widgets.streamloots.com/alerts/<STREAMLOOTS_ALERT_ID>/media-stream` - the same unofficial-but-stable surface MixItUp and Firebot use. One JSON event arrives per SSE `data:` block. Card fields are read BY NAME ("username", "message", "longMessage", "rarity", "quantity", "giftee"), never positionally - field order is not guaranteed. A gift is a purchase event whose fields include "giftee". The listen loop auto-reconnects with exponential backoff (5s doubling to 120s cap, reset on successful connect). Every raw event is appended to `data/streamloots_events.jsonl` for debugging and for building card maps from real payloads.
+
+Consumers subscribe in main.py via the listener-list pattern (`streamloots.add_redemption_listener(cb)` etc.) and receive normalized dicts - shapes documented in the plugin docstring. The `streamloots` feature toggle gates dispatch only (the connection stays up; events are dropped while toggled off). Empty STREAMLOOTS_ALERT_ID disables the plugin at on_ready (fail closed). Dashboard testing without spending real cards: POST /api/action with `action=test_streamloots` (optional card/user/message/rarity params) pushes a fake redemption through the real dispatch path via `simulate_redemption()`. The control panel has a TEST STREAMLOOTS button plus a status line fed by `/api/state` (the state payload includes `streamloots: get_status()` — configured / connected / config_error / events_received / last_event_at / listener counts). Robustness: a 15-minute `sock_read` deadline acts as a dead-connection watchdog (a half-open socket otherwise looks connected forever while cards go missing; idle reconnects are routine and skip backoff growth), and 4xx responses other than 429 set `config_error` and stop retrying (wrong/revoked alert ID), while 5xx/429 keep exponential backoff.
+
+First consumer: the Factorio integration. The game-side mod lives at `factorio_mod/hatmas-events/` (viewer pets, boss biters - see its README); the bot side is `plugins/factorio/` (registered as plugin 19), which subscribes to redemptions in main.py and maps card names to mod remote calls via FACTORIO_CARD_MAP.
 
 ## Offline VOD Highlight Pipeline (tools/extract_events.py + tools/vod_detector.py)
 
@@ -938,6 +1012,7 @@ The presets use **Big Noodle Titling**, the same condensed display face used by 
 | /overlay/economy_leaderboard | Economy top investors (260x360) |
 | /overlay/economy_tradefeed | Economy live trade feed (320x340) |
 | /overlay/economy_portfolio | Economy viewer portfolio (420x670) |
+| /factorio/cards | Factorio card manager (map Streamloots cards to in-game actions, test buttons, recent cards) |
 
 ### API
 | Endpoint | Method | Description |
@@ -959,9 +1034,11 @@ The presets use **Big Noodle Titling**, the same condensed display face used by 
 | /api/economy/portfolio?user= | GET | User portfolio with holdings, P&L, net worth |
 | /api/economy/leaderboard | GET | Top 20 investors by portfolio value |
 | /api/economy/price/{god} | GET | Single god price data with history |
+| /api/factorio/cards | GET | Card mappings + action catalog + recently played cards + status |
+| /api/factorio/cards | POST | {op: set\|remove\|test, card, action?, cooldown?, user?, message?} |
 
 ### Actions (POST /api/action)
-toggle_feature, skip_song, youtube_ended, youtube_started, youtube_progress, snap, go_live, stop_stream, resolve_prediction, set_title_templates, update_title_now, record_result, test_sound, test_kill, test_death, test_tts, add_rotation_command, remove_rotation_command, send_chat, god_donation, god_skip, god_clear, clear_suggestions, start_kill_detect, stop_kill_detect, kd_toggle_debug, kd_toggle_announce, sim_economy (with optional force + god/outcome/kills/deaths/assists params), test_overlay (overlay param: ticker/dividend/leaderboard/portfolio/tradefeed/match_end), reload_prices
+toggle_feature, skip_song, youtube_ended, youtube_started, youtube_progress, snap, go_live, stop_stream, resolve_prediction, set_title_templates, update_title_now, record_result, test_sound, test_kill, test_death, test_tts, test_streamloots (card/user/message/rarity params), add_rotation_command, remove_rotation_command, send_chat, god_donation, god_skip, god_clear, clear_suggestions, start_kill_detect, stop_kill_detect, kd_toggle_debug, kd_toggle_announce, sim_economy (with optional force + god/outcome/kills/deaths/assists params), test_overlay (overlay param: ticker/dividend/leaderboard/portfolio/tradefeed/match_end), reload_prices
 
 ---
 
@@ -969,7 +1046,7 @@ toggle_feature, skip_song, youtube_ended, youtube_started, youtube_progress, sna
 
 All controllable via dashboard or API. Default: all enabled.
 
-song_requests, predictions, snap, claude_chat, smite_tracking, gamble, now_playing_overlay, auto_scene_switch, auto_title, god_requests, auto_shoutout, tts_highlights, kill_detection, voicelines, economy
+song_requests, predictions, snap, claude_chat, smite_tracking, gamble, now_playing_overlay, auto_scene_switch, auto_title, god_requests, auto_shoutout, tts_highlights, kill_detection, voicelines, economy, streamloots, factorio
 
 ---
 
@@ -1040,6 +1117,19 @@ channel:manage:broadcast, channel:manage:predictions, channel:read:subscriptions
 | SMITE2_GAMEMODES_TO_TRACK | List of gamemode keys queried by replay tool's per-mode profile fetcher. |
 | SMITE2_BACKFILL_INTERVAL | Seconds between periodic match backfills (default: 300 = 5 min). |
 | SMITE2_BACKFILL_BOOT_DELAY | Seconds before the first backfill runs after on_ready (default: 15). |
+| STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET | From env or config_local.py. BOTH required or priority requests disable themselves (accepting payments we can't verify would strand paid viewers). |
+| PRIORITY_REQUEST_* | Price (500 cents), currency, product name, success/cancel URLs, max message length (200). See v2.6 section. |
+| WEB_SESSION_SECRET | 64+ random chars in config_local.py. Empty = website login + trading disabled (fail closed). Rotating it logs every viewer out. |
+| WEB_TRADING_ENABLED | Master switch for website trading (default False). Also gated by the `web_trading` feature toggle for mid-stream cutoff. |
+| WEB_TRADE_COOLDOWN / WEB_TRADE_MAX_PER_MIN | Per-user trade cooldown (3s, mirrors chat) / per-IP request cap on /api/trade + /auth/* (30/min). |
+| WEB_OAUTH_REDIRECT_URI | Twitch OAuth callback. Prod default https://hatmaster.tv/auth/twitch/callback; localhost override for dev. |
+| TIKTOK_USERNAME / TIKTOK_LATEST_VIDEO_URL | Social tab: profile handle + manually-pasted featured video URL (TikTok has no usable public API). |
+| BLUESKY_HANDLE / SOCIAL_FEED_CACHE_TTL | Social tab: Bluesky account + feed cache TTL (900s). |
+| STREAMLOOTS_ALERT_ID | Streamloots alert overlay GUID (config_local.py only - treat as a secret). Empty = StreamlootsPlugin disabled (fail closed). |
+| FACTORIO_RCON_HOST / PORT / PASSWORD | RCON target for the hatmas-events mod (default 127.0.0.1:27015). Empty password = FactorioPlugin disabled (fail closed). |
+| FACTORIO_SCRIPT_OUTPUT | Factorio script-output folder. Empty = auto-detect %APPDATA%\Factorio\script-output. |
+| FACTORIO_CARD_MAP | SEED ONLY for data/factorio_cards.json (first run). Live mappings are managed at /factorio/cards. Actions: adopt_pet, grow_pet, pet_say, boss_attack. |
+| FACTORIO_ANNOUNCE_EVENTS | Relay mod outbox events (pet deaths, boss kills) to Twitch chat (default True). |
 
 ---
 
@@ -1092,6 +1182,21 @@ access).
 | `GET /ws/twitch/{username}` | WebSocket: live price ticks for a Twitch portfolio |
 | `GET /ws/god/{name}` | WebSocket: live price ticks for a single god page |
 | `GET /healthz` | Health check (Cloudflare uses this) |
+| `POST /api/priority-request/create` | Create a Stripe Checkout Session for a $5 priority god request (form on /community) |
+| `POST /api/stripe-webhook` | Stripe signed webhook: checkout completed, refunds, disputes (see v2.6 section) |
+| `GET /priority-success` | Post-payment thank-you page Stripe redirects to |
+| `GET /auth/login` | Redirect to Twitch OAuth authorize (zero scopes, state nonce cookie) |
+| `GET /auth/twitch/callback` | Code exchange + identity fetch + session cookie issue (v2.7 section) |
+| `POST /auth/logout` | Clear the session cookie |
+| `GET /api/me` | Session identity for JS hydration (401 + capabilities when logged out) |
+| `GET /api/me/balance` | Logged-in viewer's hat balance from MixItUp |
+| `POST /api/trade` | Authenticated buy/sell — delegates to economy execute_buy/execute_sell behind nine guards (v2.7 section) |
+| `GET /auth.js` | Shared login/trading JS client injected into every page's brand-band |
+| `GET /api/me/settings` | Logged-in viewer's account flags (leaderboard_hidden) |
+| `POST /api/me/visibility` | Self-serve leaderboard hide/show (replaces the never-implemented !hideme) |
+| `GET /api/social/youtube` | Latest 12 uploads via playlistItems (1 quota unit, 15-min cache) |
+| `GET /api/social/bluesky` | Latest 10 posts via Bluesky public API (reposts/replies skipped, 15-min cache) |
+| `GET /api/social/tiktok` | Manual config passthrough (profile + featured video URL) |
 
 **Live updates:** the public webserver subscribes to the existing
 `OverlayManager` via a new `add_event_listener` API. When `economy.py`
@@ -1200,10 +1305,12 @@ tags (set_by='manual') even with `--overwrite`.
 **Schema:** `youtube_portfolios`, `youtube_holdings`, `youtube_video_gods`,
 `youtube_processed_comments`, `youtube_transactions`. All in `economy.db`,
 parallel to the Twitch-side `portfolios` / `transactions` tables.
-Schema definitions live in both `plugins/economy.py:_init_db()` (for
-the bot) and `core/youtube_schema.py` (for standalone CLI tools).
-`IF NOT EXISTS` everywhere so first launch on an existing DB just
-adds the new tables.
+Schema definitions live in `core/youtube_schema.py` as the single
+source of truth — `plugins/economy/db.py:_init_schema()` imports
+`YOUTUBE_SCHEMA_SQL` from there, and standalone CLI tools (e.g.
+`tools/mark_youtube_video.py`) call `ensure_youtube_schema()` from the
+same module. `IF NOT EXISTS` everywhere so first launch on an existing
+DB just adds the new tables.
 
 **Dividends compound for YouTube holders as fractional bonus shares.**
 A YouTube viewer with 3 shares of Sylvanus gets 0.15 extra shares
@@ -1366,3 +1473,411 @@ tools/
 core/config.py                 +YOUTUBE_*, +SMITE2_BACKFILL_*, +FAIR_VALUE_* constants
 main.py                        +YouTubeRewardsPlugin, +StreamStatusPlugin, +PublicWebServer
 ```
+---
+
+## v2.6 Update — Priority God Requests (Stripe)
+
+Viewers pay $5 on `hatmaster.tv/community` to push a god request to
+the head of the godrequest queue. Stripe hosts the card form (Checkout
+Session) — the bot never sees card data. Real money now flows through
+the bot, so this section also documents the audit/refund tooling and
+the regression tests that guard the path.
+
+### Plugin (`plugins/priority_request.py`)
+
+No chat commands — the entire surface is HTTP on the public webserver
+(port 8070): `POST /api/priority-request/create` builds the Checkout
+Session (god + twitch_username + message ride along as Stripe
+`metadata`, so the webhook gets them back without a DB round-trip and
+the signature proves Stripe vouches for them), `POST
+/api/stripe-webhook` receives Stripe's signed events, and `GET
+/priority-success` serves the thank-you page. The feature
+hard-disables unless BOTH `STRIPE_SECRET_KEY` and
+`STRIPE_WEBHOOK_SECRET` are set — accepting payments we can't verify
+on the webhook side would mean a viewer paid and nothing got queued.
+For local dev: `stripe listen --forward-to
+localhost:8070/api/stripe-webhook`.
+
+### Status lifecycle (two-phase, crash-safe)
+
+`priority_payments` table in economy.db, one row per Checkout Session:
+
+| Status | Meaning |
+|---|---|
+| pending | Session created, viewer never finished paying (abandoned checkouts stay here — expected noise) |
+| paid | Payment verified via webhook signature, god NOT yet queued |
+| fulfilled | queue_add succeeded — the god is (or was) in the queue |
+| refunded | Money returned: manual refund, `reconcile_stripe.py refund`, or chargeback |
+
+Timestamp columns: `paid_at`, `fulfilled_at`, `played_at`,
+`refunded_at`, plus `payment_intent` (required to issue refunds and to
+match `charge.refunded` events back to a session). Columns are added
+via PRAGMA-driven idempotent migrations, so pre-v2.6 DBs upgrade in
+place.
+
+**Why two-phase:** the original implementation marked the row
+`fulfilled` BEFORE calling `queue_add`, which silently broke webhook
+replay as a crash-recovery tool — a crash between the DB write and the
+queue insert left a payment that looked handled but never hit the
+queue, and Stripe's retry no-op'd on the `fulfilled` status. Now the
+webhook claims the row as `paid`, queues, and only then marks it
+`fulfilled`. Replaying a `paid` row re-attempts the queue insert with
+a queue-membership check on `stripe_session_id` (stored on the queue
+entry) so it can never double-queue. Anything stuck in `paid` is fixed
+by resending the webhook from the Stripe dashboard.
+
+**played_at vs fulfilled_at:** `fulfilled` only means "queued".
+`played_at` is stamped when the god is actually played, via
+godrequest's `add_history_listener` (the same append-only
+listener-list pattern as the kill detector hooks; `_save_history`
+fires each listener with the final history entry, which carries
+`stripe_session_id` for paid entries). Skipped/removed paid entries
+deliberately stay unplayed — they're the refund candidates
+`reconcile_stripe.py unplayed` lists.
+
+### Webhook events handled
+
+- `checkout.session.completed` — verify signature, payment status,
+  amount (underpaid sessions rejected), metadata; claim → queue at
+  head (source `paid_priority`) → fulfilled → plain-text chat
+  announcement (Tone rule: no emojis).
+- `charge.refunded` / `charge.dispute.created` — mark the row
+  `refunded` and pull the entry from the queue if it hasn't been
+  played yet. Matched via `payment_intent`; events for unrelated
+  Stripe products on the same account won't match a row and are
+  acknowledged. Disputes are treated like refunds so a disputed
+  payment can't ride the queue for free.
+
+Configure the Stripe webhook endpoint to send all three event types.
+A late `checkout.session.completed` retry arriving after a refund
+returns `already_refunded` and does not resurrect the queue entry.
+
+### Ops tooling (`tools/reconcile_stripe.py`)
+
+| Command | Purpose |
+|---|---|
+| `python tools/reconcile_stripe.py audit [--days 30]` | Diff Stripe's checkout sessions against `priority_payments`. Catches dropped webhooks (paid in Stripe, nothing local), crash-window `paid` rows, and refund mismatches. Exit 0 clean / 1 discrepancies. |
+| `python tools/reconcile_stripe.py unplayed` | List fulfilled-but-never-played payments — the refund candidates. Run at end of stream to settle up before viewers have to ask. |
+| `python tools/reconcile_stripe.py refund <session_id> [--yes]` | Issue a real Stripe refund and mark the local row. If the bot is running, its `charge.refunded` webhook also removes any still-queued entry. |
+
+Run `audit` after any stream where the bot crashed or restarted. Safe
+to run while the bot is up (WAL mode, single-row writes only).
+
+### Regression tests (`tools/test_priority_request.py`)
+
+16 tests covering the whole webhook path against an in-memory DB and
+a fake godrequest plugin, with only Stripe's signature verification
+stubbed: signature/payload rejection, idempotent replay, both crash
+windows (claimed-but-not-queued and queued-but-not-marked), refund +
+dispute handling, post-refund replay, played/skipped stamping, and
+the no-emoji chat rule. `python tools/test_priority_request.py` exits
+0 on full pass (optional name-substring filter argument). Run it
+before touching priority_request.py — same canary role as
+test_kda_fixture.py for the KDA pipeline.
+
+### Files added or significantly modified in v2.6
+
+```
+plugins/priority_request.py     Two-phase webhook lifecycle, refund/dispute handling, played_at stamping, payment_intent capture
+plugins/godrequest.py           +add_history_listener (fired from _save_history); PRIORITY OBS badge emoji removed per Tone rule
+tools/reconcile_stripe.py       NEW — audit / unplayed / refund CLI
+tools/test_priority_request.py  NEW — 16-test money-path regression suite
+public/community.html           Priority badge emoji removed per Tone rule
+```
+---
+
+## v2.7 Update — Website Login + Trading
+
+Twitch viewers can now log in on `hatmaster.tv` and buy/sell god
+shares from the website — phone, between streams, no chat needed.
+Full design + threat model in `WEBSITE_TRADING_DESIGN.md` (approved
+by Hatmaster June 2026); this section is the operational summary.
+
+### How it works
+
+- **Login:** `GET /auth/login` → Twitch OAuth authorize with ZERO
+  scopes (identity only) and a `state` nonce bound to a short-lived
+  cookie. The callback exchanges the code server-side, calls
+  `/helix/users`, then discards the token — viewer tokens are never
+  stored. Reuses the bot's Twitch application; the callback URLs
+  (prod + localhost) must be registered in the Twitch dev console.
+- **Session:** stateless HMAC-signed cookie (`core/web_session.py`,
+  stdlib only). 30-day expiry, HttpOnly + Secure + SameSite=Strict.
+  No session table; rotating `WEB_SESSION_SECRET` logs everyone out.
+- **Trading:** `POST /api/trade` delegates to the economy plugin's
+  `execute_buy` / `execute_sell` — the SAME money path as chat
+  commands, tagged `channel='web'` in `transactions`. The handler
+  never touches balances or prices itself.
+- **One front door, nine guards, in order:** master switch (config +
+  `web_trading` feature toggle) → session cookie → Origin allowlist
+  (CSRF backstop on top of SameSite=Strict) → excluded-bot filter →
+  per-user 3s cooldown → per-IP 30/min window → body validation →
+  per-user asyncio.Lock (closes the balance-check race two browser
+  tabs could hit; chat never races) → economy DB + MixItUp up.
+- **Market hours:** hats live in MixItUp, so trades need the bot PC
+  up. `/api/stream-status` now carries `market_open`; the site header
+  shows MARKET OPEN/CLOSED. Off-stream trading is allowed — prices
+  only move at tracker.gg settlement, so it is value-neutral.
+- **Web trades hit the stream trade feed** via the same
+  `trade_executed` overlay event as chat trades.
+
+### UI (public/)
+
+`public/auth.js` is included by all four pages and self-injects the
+login button / avatar chip + market pill into the brand-band, and
+exposes `HatmasAuth.trade()` / `HatmasAuth.balance()`. The portfolio
+page shows a Trade card when the logged-in viewer is looking at their
+OWN /twitch/ portfolio (god datalist, amount or 'all', click a
+holding to prefill). The god page has a trade box under the chart —
+logged out it renders the login link instead. The /community priority
+form locks `twitch_username` to the session login when logged in,
+which kills the typo'd-username failure mode in the Stripe metadata
+path. The dashboard side is untouched — port 8069 remains
+tunnel-invisible.
+
+### Going live checklist (one-time)
+
+1. Twitch dev console → the bot's application → add OAuth Redirect
+   URLs: `https://hatmaster.tv/auth/twitch/callback` and
+   `http://localhost:8070/auth/twitch/callback`.
+2. `config_local.py`: set `WEB_SESSION_SECRET` (generate with
+   `python -c "import secrets; print(secrets.token_urlsafe(64))"`).
+3. Test the flow on localhost (`WEB_OAUTH_REDIRECT_URI` localhost
+   override), then flip `WEB_TRADING_ENABLED = True`.
+4. Cloudflare dashboard → WAF rate rule on `/api/trade` + `/auth/*`
+   (e.g. 60 req/min/IP) for edge-level defense in depth.
+5. `check_stream.bat` now includes a "Website login" probe that
+   fails loudly if trading is enabled but secrets are missing.
+
+### Tests
+
+`python tools/test_web_session.py` — 11 tests on the token crypto
+(tamper, forgery, expiry, garbage). `python tools/test_web_trade.py`
+— 19 tests that boot the real PublicWebServer with a fake economy
+and hit every guard, the per-user lock serialization, /api/me,
+logout, the OAuth redirect, and `market_open`. Run both before
+touching web_session.py, the auth routes, or the trade handler.
+
+### Files added or significantly modified in v2.7
+
+```
+core/web_session.py             NEW — HMAC session tokens (stdlib only)
+core/public_webserver.py        +OAuth routes, /api/me, /api/me/balance, /api/trade (nine guards), /auth.js, market_open
+core/config.py                  +WEB_* keys, +web_trading feature toggle
+plugins/economy/trading.py      execute_buy/execute_sell accept channel= ('chat' default)
+plugins/economy/db.py           +transactions.channel migration
+public/auth.js                  NEW — shared login/trading client
+public/theme.css                +auth chip, market pill, trade panel styles
+public/landing.html             +auth.js include (brand-band chip)
+public/portfolio.html           +Trade card (own portfolio only)
+public/god.html                 +trade box under the price chart
+public/community.html           +priority form username lock-in
+tools/check_stream_ready.py     +web login readiness probe
+tools/test_web_session.py       NEW — 11-test token suite
+tools/test_web_trade.py         NEW — 19-test endpoint suite
+main.py                         PublicWebServer receives economy=
+```
+
+---
+
+## v2.7.1 Update — Social Tabs, Dashboard Refunds, Visibility Toggle
+
+Three smaller features shipped together (June 2026):
+
+**Social tabs (Phase 5 of TODO.md, design in `Social_Tabs_Plan.md` —
+now built).** The landing page's Twitch-only embed became a four-tab
+strip: Twitch (only visible while live; LIVE pill; auto-selected on
+go-live unless the visitor picked another tab that session), YouTube
+(latest 12 uploads as cards, click plays inline), TikTok (embed of the
+manually-configured `TIKTOK_LATEST_VIDEO_URL` + profile link), and
+Bluesky (latest 10 posts with images + like/reply counts). Last active
+tab persists in localStorage. Backend: three cached read-only
+endpoints in `core/public_webserver.py`; stale cache is served on
+upstream failure so a dead API never blanks a tab. YouTube uses the
+1-unit `playlistItems` call, NOT the 100-unit `search.list` —
+~96 quota units/day at the 15-min TTL. After posting a new TikTok,
+paste its URL into `config_local.py:TIKTOK_LATEST_VIDEO_URL`.
+
+**Priority-request panel (control panel, port 8069).** Full-width
+card listing the last 50 Stripe payments (status / PLAYED tag) with a
+REFUND button on paid/fulfilled rows. Refund flow: confirm dialog ->
+`POST /api/action {action: refund_priority, session_id}` ->
+`PriorityRequestPlugin.refund_session()` creates a REAL Stripe refund
+and applies the same local bookkeeping as the `charge.refunded`
+webhook (shared `_apply_refund_locally()` helper — the later webhook
+delivery no-ops on the already-refunded status). The CLI
+(`tools/reconcile_stripe.py refund`) remains for bot-down scenarios.
+
+**Leaderboard visibility toggle.** The `leaderboard_opt_out` column
+and its query filters existed since the airtight pass, but nothing
+ever flipped the flag (the documented `!hideme` chat command was never
+implemented). Now: logged-in viewers see a
+`[LEADERBOARD: VISIBLE/HIDDEN]` button on their own portfolio page —
+`POST /api/me/visibility` flips all their portfolio rows, and
+`_add_shares` inserts new rows inheriting the user's current setting
+so hidden users stay hidden when they buy a god they have never held.
+
+Tests: `tools/test_priority_request.py` grew to 18 (manual refund,
+list_payments); `tools/test_web_trade.py` to 20 (visibility round-trip
++ guards).
+
+---
+
+## v2.8 Update — Streamloots Hub + Factorio Mod (hatmas-events)
+
+Two halves of one goal (June 2026): Streamloots cards as interactive
+gameplay triggers, starting with Factorio. Same concept as the old
+Streamloots-cards-into-Minecraft setup, rebuilt natively on HatmasBot.
+
+### Streamloots event hub (`plugins/streamloots.py`)
+
+Full behavior documented in **Streamloots Card Events** under
+Automated Features. Summary: SSE listener on
+`https://widgets.streamloots.com/alerts/<STREAMLOOTS_ALERT_ID>/media-stream`
+(the unofficial-but-stable surface MixItUp/Firebot use), normalized
+listener-list dispatch (`add_redemption_listener` /
+`add_purchase_listener` / `add_gift_listener`), fields read by name,
+raw event log at `data/streamloots_events.jsonl`, 15-min sock_read
+dead-connection watchdog, 4xx fail-fast (config_error) vs 5xx/429
+backoff, `streamloots` feature toggle gating dispatch only.
+
+Going-live checklist (one-time):
+
+1. Streamloots dashboard -> Alerts -> "Click here to show URL" ->
+   copy the GUID at the end.
+2. `config_local.py`: `STREAMLOOTS_ALERT_ID = "<guid>"` (treat as a
+   secret — anyone with it can read the alert feed).
+3. Restart the bot; expect `[Streamloots] Stream connected`.
+4. Dashboard TEST STREAMLOOTS button (or play a real card) and watch
+   the `[Streamloots] Card played:` log + the jsonl file.
+
+The protocol was verified against three independent open-source
+clients (MixItUp dev's sample, streamloots-events, Firebot) but NOT
+yet against a live capture — the first real card play confirms it.
+If the live format differs, `data/streamloots_events.jsonl` contains
+exactly what the parser needs to adapt.
+
+### Factorio mod (`factorio_mod/hatmas-events/`)
+
+Standalone Factorio 2.x / Space Age mod, fully testable solo via
+console commands before any bot wiring. Architecture constraint:
+Factorio mods are sandboxed Lua (no sockets, no file reads), so the
+bridge is RCON in (bot -> `remote.call("hatmas", ...)`) and
+`helpers.write_file` out (mod appends JSON lines to
+`script-output/hatmas/events.jsonl`; bot tails it). RCON requires
+hosting the save as multiplayer (`--rcon-port 27015 --rcon-password
+<pw>`). Console commands and RCON permanently disable achievements on
+that save.
+
+**Viewer pets (`scripts/pets.lua`).** One pet biter per owner, owner's
+name floating above it. Follows the streamer (walks at >6 tiles,
+catch-up teleport at >60, respawns on the new surface after a planet
+hop — units cannot teleport cross-surface). Never seeks fights
+(`distraction.none`) but biters on the player force defend themselves.
+Friendly-fire immune via on_entity_damaged heal-back, with oversized
+HP pools (750/1500/3000/6000 across small/medium/big/behemoth
+`hatmas-pet-*` prototypes) so bursts don't one-shot them. Dies to
+enemies: death announced in game chat + outbox event with owner,
+lifetime, killer. Sizes upgrade via entity rebuild (grow path).
+
+**Boss biter (`scripts/boss.lua`).** `hatmas-boss-biter`: behemoth
+clone, 40k HP, 1.6x sprite scale, red tint, 2x damage modifier, 0.8x
+speed, drops raw fish. Spawns N/S/E/W of the streamer at a given
+distance (default 150 tiles, chunks force-generated), attack-moves to
+the streamer's position. Floating "<viewer>'s Boss" tag + scripted HP
+bar (LuaRenderObject rectangles, fill width rewritten on damage, red
+below 25%). Enrages at 25% HP (1.5x speed). Death announced with
+time-alive and final blow + outbox event.
+
+**Remote interface (`control.lua`):** ping, spawn_pet(owner, name,
+size), upgrade_pet(owner), remove_pet(owner), pet_say(owner, msg),
+list_pets(), spawn_boss(viewer, direction, distance). All return "ok"
+or a plain error string. Console test commands: /hatmas-pet,
+/hatmas-pet-grow, /hatmas-pet-say, /hatmas-pet-remove, /hatmas-boss.
+
+**Outbox events:** pet_spawned, pet_upgraded, pet_removed, pet_died,
+boss_spawned, boss_enraged, boss_died — one JSON object per line,
+every payload includes `event` + `tick`.
+
+The mod was written against the 2.0.x Lua API docs (verified:
+`storage` table object storage, `helpers.write_file`/`table_to_json`,
+`LuaCommandable.set_command`, `LuaRenderObject` mutability,
+ScriptRenderTarget entity+offset targets). One undocumented edge to
+playtest: whether the heal-back prevents a true one-shot (point-blank
+nuke) on a pet — if not, that stays as an accepted (funny) edge or
+gets a guard. Tuning knobs and a first-playtest checklist are in the
+mod's README.md.
+
+### Factorio bot plugin (`plugins/factorio/`)
+
+Bot half of the bridge. `rcon.py` is a dependency-free asyncio Source
+RCON client (auth handshake incl. the empty-RESPONSE_VALUE quirk,
+serialized commands, one transparent reconnect-and-retry per command —
+covers the game restarting between commands; tested against a fake
+RCON server). `catalog.py` builds `/silent-command
+rcon.print(tostring(remote.call("hatmas", ...) or 'ok'))` lines with
+proper Lua string escaping of untrusted viewer text (quotes,
+backslashes, newlines), and formats outbox events into plain chat
+lines. `events.py` tails `<script-output>/hatmas/events.jsonl`
+(1s poll, byte-offset tracking, starts at EOF so history never
+replays, partial-line safe, truncation-tolerant). `plugin.py` glues it
+together: card handling with per-card cooldowns (cooldown is NOT
+burned when Factorio is unreachable; viewers get one rate-limited
+"not reachable" chat notice), mod errors relayed to chat ("no pet for
+x"), successful plays silent in chat because the mod's outbox
+announcement covers them, `factorio` feature toggle, status in
+/api/state. No chat commands.
+
+**Card manager (`/factorio/cards` + `cards.py`).** One place to wire
+card names to actions. Mappings persist to `data/factorio_cards.json`
+(CardStore) - FACTORIO_CARD_MAP in config only seeds the file on
+first run, after that the JSON wins, so renaming a card in the
+Streamloots dashboard is a UI edit. Lookups are case-insensitive and
+whitespace-trimmed. The page lists mappings (edit/save/test/delete +
+add row), shows the action catalog with descriptions, and - the
+setup shortcut - a "recently played cards" panel fed by the
+Streamloots hub's recent_cards tracking: play any card on your own
+page, it appears with a mapped/unmapped pill, click MAP to prefill
+the exact name. TEST buttons fire the mapped action through the real
+RCON path (bypassing cooldowns) and show the mod's response.
+
+Going-live checklist (one-time):
+
+1. Install the mod (junction — see factorio_mod/hatmas-events/README.md).
+2. `config_local.py`: `FACTORIO_RCON_PASSWORD = "<password>"` (done June 2026).
+3. Launch via `start_factorio.bat` (finds factorio.exe, binds RCON to
+   127.0.0.1:27015 with the config password) and host the save as
+   multiplayer. Verify with `python tools/check_factorio_rcon.py`.
+4. Open http://localhost:8069/factorio/cards -> expect RCON
+   "connected". Use a TEST button -> pet/boss appears in-game; its
+   outbox events appear in Twitch chat.
+5. Create your Streamloots cards with whatever names you like, play
+   each once, then map them from the "recently played" panel on the
+   card manager page.
+
+### Files added or significantly modified in v2.8
+
+```
+plugins/streamloots.py               NEW - SSE listener + event hub
+core/config.py                       STREAMLOOTS_ALERT_ID + streamloots feature toggle
+core/webserver.py                    test_streamloots action; streamloots status in /api/state
+overlays/control_panel.html          TEST STREAMLOOTS button + status line
+main.py                              StreamlootsPlugin registration (plugin 18)
+factorio_mod/hatmas-events/          NEW - the Factorio mod (info.json, data.lua,
+                                     control.lua, scripts/{common,outbox,pets,boss}.lua,
+                                     locale/en/hatmas.cfg, README.md)
+plugins/factorio/                    NEW - bot half (plugin.py, rcon.py, catalog.py,
+                                     events.py). Config: FACTORIO_* in core/config.py,
+                                     factorio feature toggle, status in /api/state.
+```
+
+### Next steps (not yet built)
+
+- More mod events for the card collection: directional raid waves,
+  supply drops, sabotage events (see brainstorm in chat history /
+  mod README "next steps").
+- Per-card cooldowns currently live in FACTORIO_CARD_MAP; if more
+  consumers need cooldowns, promote a shared card router into the
+  Streamloots hub.
+- Streamloots card art/collection (rarity tiers map naturally to
+  event sizes: common = scout raid, legendary = boss).

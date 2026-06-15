@@ -35,8 +35,10 @@ class SnapPlugin:
 
     def setup(self, bot):
         self.bot = bot
-        bot.register_command("snap", self.cmd_snap, mod_only=True)
-        bot.register_command("snapstats", self.cmd_snapstats)
+        bot.register_command("snap", self.cmd_snap,
+                             mod_only=True, description="Trigger a snap", plugin="snap")
+        bot.register_command("snapstats", self.cmd_snapstats,
+                             description="Snap game stats", plugin="snap")
 
     async def cmd_snap(self, message, args, whisper=False):
         if not self.bot.is_feature_enabled("snap"):

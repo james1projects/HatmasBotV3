@@ -122,7 +122,30 @@ GOD_CARDS_DIR = REPO_ROOT / "data" / "god_cards"
 GOD_ICONS_DIR = REPO_ROOT / "data" / "god_icons"
 CUSTOM_ICONS_DIR = REPO_ROOT / "Custom God Icons"
 CUSTOM_CARDS_DIR = REPO_ROOT / "Custom God Cards"
+ITEM_ICONS_DIR = REPO_ROOT / "data" / "item_icons"
+CUSTOM_ITEM_ICONS_DIR = REPO_ROOT / "Custom Item Icons"
 OUT_DIR = REPO_ROOT / "thumbnails"
+
+# Per-god crop_source overrides for outlier card compositions. Loaded
+# once at import time from data/god_card_crops.json; the file is
+# optional (build_guide is the only preset that uses these today).
+# Schema: {"<God Display Name>": {"top": 0.0, "bottom": 0.55, ...}, ...}
+# Underscored keys (e.g. "_README") are ignored, so the file can
+# carry documentation inline.
+def _load_god_card_crop_overrides():
+    import json as _json
+    p = REPO_ROOT / "data" / "god_card_crops.json"
+    if not p.exists():
+        return {}
+    try:
+        raw = _json.loads(p.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"  [warn] god_card_crops.json failed to load: {e}")
+        return {}
+    return {k: v for k, v in raw.items()
+            if not k.startswith("_") and isinstance(v, dict)}
+
+_GOD_CARD_CROP_OVERRIDES = _load_god_card_crop_overrides()
 
 # Common Windows Paint.NET install locations. We try these in order;
 # fall back to `os.startfile` if none exist.
@@ -294,6 +317,45 @@ def resolve_god_icon(name):
     return p if p.exists() else None
 
 
+def _item_slug(name):
+    """'Bumba\'s Cudgel' -> 'bumbas-cudgel'. Matches download_item_icons.py."""
+    if not name:
+        return ""
+    import re as _re
+    s = name.lower().replace("'", "").replace("’", "")
+    s = s.replace("_", "-").replace(" ", "-")
+    return _re.sub(r"-+", "-", s).strip("-")
+
+
+def resolve_item_icon(name):
+    """
+    Resolve an item icon path by display name (e.g. "Bumba's Cudgel").
+
+    Lookup priority — mirrors resolve_god_icon's pattern:
+      1. Custom Item Icons/<Display Name>.png  (manual override folder)
+      2. data/item_icons/<slug>.png            (auto-downloaded base)
+      3. None (caller falls back to fallback_text on the layer)
+
+    Returns a Path or None. The slug rule matches download_item_icons.py
+    so the canonical wiki-downloaded icons resolve correctly.
+    """
+    if not name:
+        return None
+
+    # 1. Custom override — try a few common spelling variants the way
+    #    resolve_god_card does, so the user doesn't have to remember
+    #    exact capitalization for the file in Custom Item Icons/.
+    if CUSTOM_ITEM_ICONS_DIR.exists():
+        for variant in (name, name.title(), name.lower()):
+            candidate = CUSTOM_ITEM_ICONS_DIR / f"{variant}.png"
+            if candidate.exists():
+                return candidate
+
+    # 2. Auto-downloaded base art under data/item_icons/
+    slug_path = ITEM_ICONS_DIR / f"{_item_slug(name)}.png"
+    return slug_path if slug_path.exists() else None
+
+
 def resolve_color(value, default=(0, 0, 0, 255)):
     """
     Accept hex strings (#rgb, #rrggbb, #rrggbbaa), CSS color names, or
@@ -406,11 +468,27 @@ def build_placeholders(args):
     else:
         subtext_value = args.vs or ""
 
+    # Item icons for the build_guide preset. Each --itemN is a display
+    # name like "Bumba's Cudgel" or "Executioner"; resolve_item_icon
+    # walks the Custom Item Icons -> data/item_icons override chain.
+    item1_name = getattr(args, "item1", "") or ""
+    item2_name = getattr(args, "item2", "") or ""
+    item3_name = getattr(args, "item3", "") or ""
+    item1_icon = resolve_item_icon(item1_name) if item1_name else None
+    item2_icon = resolve_item_icon(item2_name) if item2_name else None
+    item3_icon = resolve_item_icon(item3_name) if item3_name else None
+
     return {
         "my_god": args.god or "",
         "my_god2": my_god2_name,
         "vs_god": args.vs or "",
         "vs2_god": vs2_name,
+        "item1": item1_name,
+        "item2": item2_name,
+        "item3": item3_name,
+        "item1_icon": str(item1_icon) if item1_icon else "",
+        "item2_icon": str(item2_icon) if item2_icon else "",
+        "item3_icon": str(item3_icon) if item3_icon else "",
         "my_god_card": str(my_card) if my_card else "",
         "my_god2_card": str(my_god2_card) if my_god2_card else "",
         "vs_god_card": str(vs_card) if vs_card else "",
@@ -911,6 +989,43 @@ def render_image(layer, canvas_size, placeholders):
         print(f"  [warn] could not open {src}: {exc}")
         return img
 
+    # Optional pre-fit source crop. Useful for zooming into a specific
+    # region of the source (e.g. the face on a god card) before the
+    # fit/cover step scales it onto the canvas. Coords are normalized
+    # to [0, 1]; preset key:
+    #   crop_source: {left: 0.0, top: 0.0, right: 1.0, bottom: 0.4}
+    # would keep only the top 40% of the source.
+    cs = layer.get("crop_source")
+    # Per-god override: if this layer's src is a *_god_card placeholder,
+    # look up that god in data/god_card_crops.json and use its override
+    # in place of the preset's default crop_source. Lets outliers like
+    # Ymir get dialed in without creating one preset variant per god.
+    raw_src = layer.get("src", "")
+    if isinstance(raw_src, str):
+        for key_god, key_card in (("my_god", "my_god_card"),
+                                   ("my_god2", "my_god2_card"),
+                                   ("vs_god",  "vs_god_card"),
+                                   ("vs2_god", "vs2_god_card")):
+            if "{" + key_card + "}" in raw_src:
+                gname = placeholders.get(key_god, "")
+                override = _GOD_CARD_CROP_OVERRIDES.get(gname)
+                if override:
+                    cs = override
+                break
+    if cs:
+        sw, sh = src_img.size
+        l = max(0.0, min(1.0, float(cs.get("left", 0.0))))
+        t = max(0.0, min(1.0, float(cs.get("top", 0.0))))
+        r = max(0.0, min(1.0, float(cs.get("right", 1.0))))
+        b = max(0.0, min(1.0, float(cs.get("bottom", 1.0))))
+        # Reject inverted boxes — keep at least 1px in each axis to
+        # avoid PIL exceptions; the preset author can fix the values.
+        x0 = int(l * sw)
+        y0 = int(t * sh)
+        x1 = max(x0 + 1, int(r * sw))
+        y1 = max(y0 + 1, int(b * sh))
+        src_img = src_img.crop((x0, y0, x1, y1))
+
     if layer.get("flip_h"):
         src_img = src_img.transpose(Image.FLIP_LEFT_RIGHT)
 
@@ -1327,6 +1442,13 @@ def main():
     parser.add_argument("--vs2", default="",
                         help="Second opposing god display name (1v2 / 2matches preset). "
                              "Empty for 1v1.")
+    parser.add_argument("--item1", default="",
+                        help="Item 1 display name (build_guide preset). "
+                             "Resolves via Custom Item Icons/ -> data/item_icons/.")
+    parser.add_argument("--item2", default="",
+                        help="Item 2 display name (build_guide preset).")
+    parser.add_argument("--item3", default="",
+                        help="Item 3 display name (build_guide preset).")
     parser.add_argument("--god2", default="",
                         help="My second god display name (2matches preset only — "
                              "for videos covering two matches where I switched gods "

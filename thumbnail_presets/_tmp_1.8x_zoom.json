@@ -1,0 +1,296 @@
+{
+  "schema_version": 1,
+  "name": "build_guide",
+  "description": "Build / guide thumbnail. God card fills the canvas top-anchored so the face stays visible; 3 item icons sit in a row across the bottom with gold borders. Optional headline top-left, optional result badge top-right. Driven by --god, --item1, --item2, --item3.",
+  "size": [
+    1280,
+    720
+  ],
+  "layers": [
+    {
+      "type": "solid",
+      "name": "Background",
+      "color": "#0a0e14"
+    },
+    {
+      "type": "image",
+      "name": "Hero god card (top-anchored)",
+      "src": "{my_god_card}",
+      "pos": [
+        0,
+        0
+      ],
+      "size": [
+        1280,
+        1296
+      ],
+      "fit": "cover",
+      "fit_anchor": "top",
+      "anchor": "topleft",
+      "fallback_text": "{my_god}"
+    },
+    {
+      "type": "gradient",
+      "name": "Bottom darkening band (gives items contrast)",
+      "pos": [
+        0,
+        460
+      ],
+      "size": [
+        1280,
+        260
+      ],
+      "direction": "vertical",
+      "stops": [
+        {
+          "at": 0.0,
+          "color": "#000000",
+          "opacity": 0.0
+        },
+        {
+          "at": 0.6,
+          "color": "#000000",
+          "opacity": 0.55
+        },
+        {
+          "at": 1.0,
+          "color": "#000000",
+          "opacity": 0.85
+        }
+      ]
+    },
+    {
+      "type": "gradient",
+      "name": "Top darkening band (legibility for headline + badges)",
+      "pos": [
+        0,
+        0
+      ],
+      "size": [
+        1280,
+        220
+      ],
+      "direction": "vertical",
+      "stops": [
+        {
+          "at": 0.0,
+          "color": "#000000",
+          "opacity": 0.75
+        },
+        {
+          "at": 1.0,
+          "color": "#000000",
+          "opacity": 0.0
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "name": "God name (top-left)",
+      "value": "{my_god}",
+      "pos": [
+        40,
+        40
+      ],
+      "anchor": "topleft",
+      "font": "Big Noodle Titling",
+      "size": 90,
+      "fill": "#ffd24d",
+      "stroke": {
+        "color": "#000000",
+        "width": 7
+      },
+      "shadow": {
+        "color": "#000000",
+        "offset": [
+          3,
+          3
+        ],
+        "blur": 8,
+        "opacity": 0.9
+      },
+      "max_width": 800
+    },
+    {
+      "type": "text",
+      "name": "Headline (under god name)",
+      "value": "{text}",
+      "pos": [
+        40,
+        140
+      ],
+      "anchor": "topleft",
+      "font": "Big Noodle Titling",
+      "size": 56,
+      "fill": "#ffffff",
+      "stroke": {
+        "color": "#000000",
+        "width": 5
+      },
+      "shadow": {
+        "color": "#000000",
+        "offset": [
+          3,
+          3
+        ],
+        "blur": 6,
+        "opacity": 0.85
+      },
+      "max_width": 800,
+      "skip_if_empty": true
+    },
+    {
+      "type": "text",
+      "name": "Result badge (top-right)",
+      "value": "{result}",
+      "pos": [
+        1240,
+        40
+      ],
+      "anchor": "topright",
+      "font": "Big Noodle Titling",
+      "size": 78,
+      "fill": "#39ff8c",
+      "stroke": {
+        "color": "#000000",
+        "width": 7
+      },
+      "shadow": {
+        "color": "#000000",
+        "offset": [
+          4,
+          4
+        ],
+        "blur": 8,
+        "opacity": 0.85
+      },
+      "skip_if_empty": true
+    },
+    {
+      "type": "solid",
+      "name": "Item 1 gold border backer",
+      "pos": [
+        424,
+        524
+      ],
+      "size": [
+        144,
+        144
+      ],
+      "color": "#ffd24d"
+    },
+    {
+      "type": "solid",
+      "name": "Item 2 gold border backer",
+      "pos": [
+        568,
+        524
+      ],
+      "size": [
+        144,
+        144
+      ],
+      "color": "#ffd24d"
+    },
+    {
+      "type": "solid",
+      "name": "Item 3 gold border backer",
+      "pos": [
+        712,
+        524
+      ],
+      "size": [
+        144,
+        144
+      ],
+      "color": "#ffd24d"
+    },
+    {
+      "type": "solid",
+      "name": "Item 1 dark inset",
+      "pos": [
+        430,
+        530
+      ],
+      "size": [
+        132,
+        132
+      ],
+      "color": "#0a0e14"
+    },
+    {
+      "type": "solid",
+      "name": "Item 2 dark inset",
+      "pos": [
+        574,
+        530
+      ],
+      "size": [
+        132,
+        132
+      ],
+      "color": "#0a0e14"
+    },
+    {
+      "type": "solid",
+      "name": "Item 3 dark inset",
+      "pos": [
+        718,
+        530
+      ],
+      "size": [
+        132,
+        132
+      ],
+      "color": "#0a0e14"
+    },
+    {
+      "type": "image",
+      "name": "Item 1 icon",
+      "src": "{item1_icon}",
+      "pos": [
+        434,
+        534
+      ],
+      "size": [
+        124,
+        124
+      ],
+      "fit": "cover",
+      "anchor": "topleft",
+      "fallback_text": "{item1}"
+    },
+    {
+      "type": "image",
+      "name": "Item 2 icon",
+      "src": "{item2_icon}",
+      "pos": [
+        578,
+        534
+      ],
+      "size": [
+        124,
+        124
+      ],
+      "fit": "cover",
+      "anchor": "topleft",
+      "fallback_text": "{item2}"
+    },
+    {
+      "type": "image",
+      "name": "Item 3 icon",
+      "src": "{item3_icon}",
+      "pos": [
+        722,
+        534
+      ],
+      "size": [
+        124,
+        124
+      ],
+      "fit": "cover",
+      "anchor": "topleft",
+      "fallback_text": "{item3}"
+    }
+  ]
+}

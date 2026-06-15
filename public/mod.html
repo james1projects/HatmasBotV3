@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#202C39">
+<meta name="robots" content="noindex, nofollow">
+<title>Mod Console</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="stylesheet" href="/theme.css">
+<style>
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 16px 60px; }
+  h1 { font-family: var(--font-display); letter-spacing: 1px; margin: 0; }
+  .sub { color: var(--text-dim); font-size: 14px; margin: 4px 0 24px; }
+  .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+  .toolbar input[type="search"] {
+    background: var(--panel); color: var(--text); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 8px 12px; font: 14px var(--font-sans);
+    min-width: 240px;
+  }
+  .toolbar input[type="search"]:focus { outline: none; border-color: var(--border-hi); }
+  .me { margin-left: auto; color: var(--text-dim); font-size: 13px; }
+  .plugin-group { margin-bottom: 22px; background: var(--panel);
+    border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+  .plugin-group h2 { font: 600 13px var(--font-mono); text-transform: uppercase;
+    letter-spacing: 1.5px; color: var(--accent); margin: 0;
+    padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td { padding: 9px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr.hidden { display: none; }
+  .cmd { font-family: var(--font-mono); white-space: nowrap; }
+  .desc { color: var(--text-dim); }
+  .badge { display: inline-block; font: 600 10px var(--font-mono); text-transform: uppercase;
+    letter-spacing: 1px; border-radius: var(--radius-sm); padding: 2px 6px; margin-left: 6px; }
+  .badge.mod { background: var(--red-bg); color: var(--red); }
+  .badge.identity { background: var(--green-bg); color: var(--accent); }
+  .tcell { white-space: nowrap; text-align: right; width: 1%; }
+  .toggle { position: relative; display: inline-block; width: 38px; height: 20px;
+    vertical-align: middle; margin-left: 8px; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .slider { position: absolute; inset: 0; background: var(--bg-2);
+    border: 1px solid var(--border); border-radius: 20px; cursor: pointer; transition: .15s; }
+  .slider::before { content: ""; position: absolute; height: 14px; width: 14px;
+    left: 2px; top: 2px; background: var(--text-dim); border-radius: 50%; transition: .15s; }
+  .toggle input:checked + .slider { background: var(--green-bg); border-color: var(--accent); }
+  .toggle input:checked + .slider::before { transform: translateX(18px); background: var(--accent); }
+  .toggle input:disabled + .slider { opacity: .35; cursor: not-allowed; }
+  .plat { font: 500 11px var(--font-mono); color: var(--text-fade); text-transform: uppercase; }
+  .cd input { width: 64px; background: var(--bg-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 4px 6px; font: 13px var(--font-mono); text-align: right; }
+  .cd input:focus { outline: none; border-color: var(--border-hi); }
+  .cd .unit { color: var(--text-fade); font: 11px var(--font-mono); margin-left: 4px; }
+  .status { display: flex; gap: 18px; margin-bottom: 18px; flex-wrap: wrap;
+    font: 12px var(--font-mono); color: var(--text-dim); }
+  .status .ok { color: var(--accent); }
+  .status .bad { color: var(--red); }
+  .addbox { background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 14px; margin-bottom: 22px;
+    display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .addbox input[type="text"] { background: var(--bg-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 8px 10px; font: 13px var(--font-mono); }
+  .addbox .name { width: 140px; }
+  .addbox .resp { flex: 1; min-width: 260px; }
+  .addbox button, .delbtn { background: var(--green-bg); color: var(--accent);
+    border: 1px solid var(--accent); border-radius: var(--radius);
+    padding: 7px 14px; font: 600 12px var(--font-mono); cursor: pointer;
+    text-transform: uppercase; letter-spacing: 1px; }
+  .addbox .hint { width: 100%; font-size: 11px; color: var(--text-fade); }
+  .delbtn { background: var(--red-bg); color: var(--red); border-color: var(--red);
+    padding: 4px 8px; }
+  .respedit { width: 100%; background: var(--bg-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 5px 8px; font: 13px var(--font-sans); }
+  .respedit:focus { outline: none; border-color: var(--border-hi); }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: var(--panel-hi); border: 1px solid var(--border-hi); color: var(--text);
+    border-radius: var(--radius); padding: 10px 18px; font-size: 14px;
+    opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+  .toast.err { border-color: var(--red); color: var(--red); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>MOD CONSOLE</h1>
+  <p class="sub">Command availability and per-user cooldowns. Changes apply
+  live; Discord slash commands re-sync within seconds. 0s = no cooldown.
+  Every change is audit-logged. Mods skip cooldowns on Twitch.</p>
+
+  <div class="status" id="status"></div>
+
+  <div class="addbox">
+    <input type="text" class="name" id="newName" placeholder="!name" maxlength="33" autocomplete="off">
+    <input type="text" class="resp" id="newResp" placeholder="Response text" maxlength="450" autocomplete="off">
+    <button id="addBtn">Add command</button>
+    <span class="hint">Custom text commands. Placeholders: {user} = who ran it,
+    {args} = text after the command. Name: a-z 0-9 _ - only.</span>
+  </div>
+
+  <div class="toolbar">
+    <input type="search" id="filter" placeholder="Filter commands…" autocomplete="off">
+    <span class="me" id="me"></span>
+  </div>
+
+  <div id="groups"><p class="sub">Loading…</p></div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  const groupsEl = document.getElementById("groups");
+  const toastEl  = document.getElementById("toast");
+  let toastTimer = null;
+
+  function toast(msg, isErr) {
+    toastEl.textContent = msg;
+    toastEl.className = "toast show" + (isErr ? " err" : "");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.className = "toast", 2500);
+  }
+
+  async function api(method, url, body) {
+    const r = await fetch(url, {
+      method,
+      headers: body ? { "Content-Type": "application/json" } : {},
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.ok) throw new Error(data.error || ("HTTP " + r.status));
+    return data;
+  }
+
+  function renderStatus(s) {
+    const el = document.getElementById("status");
+    el.innerHTML = "";
+    const bits = [
+      ["uptime " + (s.uptime || "?"), ""],
+      ["discord " + (s.discord_connected ? "connected" : "offline"),
+       s.discord_connected ? "ok" : "bad"],
+      [s.command_count + " commands run", ""],
+    ];
+    for (const [text, cls] of bits) {
+      const span = document.createElement("span");
+      span.textContent = text;
+      if (cls) span.className = cls;
+      el.appendChild(span);
+    }
+  }
+
+  function toggleCell(cmd, platform) {
+    const label = document.createElement("label");
+    label.className = "toggle";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = cmd[platform + "_enabled"];
+    if (platform === "discord" && !cmd.discord_eligible) {
+      input.disabled = true;
+      label.title = cmd.mod_only
+        ? "Mod-only commands stay Twitch-only (until account linking)"
+        : cmd.identity
+          ? "Needs Twitch identity (account linking, Phase 5)"
+          : "No description set in register_command()";
+    }
+    const slider = document.createElement("span");
+    slider.className = "slider";
+    label.append(input, slider);
+
+    input.addEventListener("change", async () => {
+      const want = input.checked;
+      input.disabled = true;
+      try {
+        const r = await fetch("/api/mod/commands", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: cmd.name, platform, enabled: want }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || !data.ok) throw new Error(data.error || ("HTTP " + r.status));
+        toast(`!${cmd.name} ${platform}: ${want ? "enabled" : "disabled"}`);
+      } catch (e) {
+        input.checked = !want;          // revert optimistic change
+        toast(`Failed: ${e.message}`, true);
+      } finally {
+        input.disabled = platform === "discord" && !cmd.discord_eligible;
+        if (!(platform === "discord" && !cmd.discord_eligible)) input.disabled = false;
+      }
+    });
+    return label;
+  }
+
+  function cooldownCell(cmd) {
+    const td = document.createElement("td");
+    td.className = "tcell cd";
+    const input = document.createElement("input");
+    input.type = "number";
+    input.min = 0; input.max = 3600; input.step = 1;
+    input.value = Math.round(cmd.cooldown || 0);
+    input.title = "Per-user cooldown in seconds. 0 disables it.";
+    input.addEventListener("change", async () => {
+      const want = Math.max(0, Math.min(3600, Number(input.value) || 0));
+      input.value = want;
+      input.disabled = true;
+      try {
+        const r = await fetch("/api/mod/commands", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: cmd.name, cooldown: want }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || !data.ok) throw new Error(data.error || ("HTTP " + r.status));
+        cmd.cooldown = want;
+        toast(`!${cmd.name} cooldown: ${want}s`);
+      } catch (e) {
+        input.value = Math.round(cmd.cooldown || 0);
+        toast(`Failed: ${e.message}`, true);
+      } finally {
+        input.disabled = false;
+      }
+    });
+    const unit = document.createElement("span");
+    unit.className = "unit";
+    unit.textContent = "s";
+    td.append(input, unit);
+    return td;
+  }
+
+  function render(commands) {
+    groupsEl.textContent = "";
+    const byPlugin = new Map();
+    for (const c of commands) {
+      if (!byPlugin.has(c.plugin)) byPlugin.set(c.plugin, []);
+      byPlugin.get(c.plugin).push(c);
+    }
+    for (const [plugin, cmds] of [...byPlugin.entries()].sort()) {
+      const box = document.createElement("div");
+      box.className = "plugin-group";
+      const h = document.createElement("h2");
+      h.textContent = plugin;
+      const table = document.createElement("table");
+      for (const cmd of cmds) {
+        const tr = document.createElement("tr");
+        tr.dataset.search = cmd.name + " " + (cmd.description || "");
+
+        const tdName = document.createElement("td");
+        tdName.className = "cmd";
+        tdName.textContent = "!" + cmd.name;
+        if (cmd.mod_only)  tdName.insertAdjacentHTML("beforeend", '<span class="badge mod">mod</span>');
+        if (cmd.identity)  tdName.insertAdjacentHTML("beforeend", '<span class="badge identity">identity</span>');
+
+        const tdDesc = document.createElement("td");
+        tdDesc.className = "desc";
+        if (cmd.custom) {
+          const edit = document.createElement("input");
+          edit.type = "text"; edit.className = "respedit";
+          edit.maxLength = 450;
+          edit.value = cmd.response || "";
+          edit.title = "Edit the response. Saves on change.";
+          edit.addEventListener("change", async () => {
+            edit.disabled = true;
+            try {
+              await api("POST", "/api/mod/custom-commands",
+                        { name: cmd.name, response: edit.value });
+              cmd.response = edit.value;
+              toast(`!${cmd.name} updated`);
+            } catch (e) {
+              edit.value = cmd.response || "";
+              toast(`Failed: ${e.message}`, true);
+            } finally { edit.disabled = false; }
+          });
+          tdDesc.appendChild(edit);
+        } else {
+          tdDesc.textContent = cmd.description || "-";
+        }
+
+        const tdT = document.createElement("td");
+        tdT.className = "tcell";
+        tdT.innerHTML = '<span class="plat">twitch</span>';
+        tdT.appendChild(toggleCell(cmd, "twitch"));
+
+        const tdD = document.createElement("td");
+        tdD.className = "tcell";
+        tdD.innerHTML = '<span class="plat">discord</span>';
+        tdD.appendChild(toggleCell(cmd, "discord"));
+
+        const tdDel = document.createElement("td");
+        tdDel.className = "tcell";
+        if (cmd.custom) {
+          const del = document.createElement("button");
+          del.className = "delbtn"; del.textContent = "delete";
+          del.addEventListener("click", async () => {
+            if (!confirm(`Delete !${cmd.name}?`)) return;
+            try {
+              await api("DELETE", "/api/mod/custom-commands/" +
+                        encodeURIComponent(cmd.name));
+              toast(`!${cmd.name} deleted`);
+              load();
+            } catch (e) { toast(`Failed: ${e.message}`, true); }
+          });
+          tdDel.appendChild(del);
+        }
+        tr.append(tdName, tdDesc, cooldownCell(cmd), tdT, tdD, tdDel);
+        table.appendChild(tr);
+      }
+      box.append(h, table);
+      groupsEl.appendChild(box);
+    }
+  }
+
+  document.getElementById("filter").addEventListener("input", (e) => {
+    const q = e.target.value.toLowerCase().trim();
+    for (const tr of groupsEl.querySelectorAll("tr")) {
+      tr.classList.toggle("hidden", q && !tr.dataset.search.includes(q));
+    }
+  });
+
+  async function load() {
+    try {
+      const data = await api("GET", "/api/mod/commands");
+      document.getElementById("me").textContent = "logged in as " + (data.user || "?");
+      renderStatus(data.status || {});
+      render(data.commands || []);
+    } catch (e) {
+      groupsEl.innerHTML = '<p class="sub">Could not load commands: ' + e.message + "</p>";
+    }
+  }
+
+  document.getElementById("addBtn").addEventListener("click", async () => {
+    const name = document.getElementById("newName").value
+      .toLowerCase().replace(/^!/, "").trim();
+    const response = document.getElementById("newResp").value.trim();
+    try {
+      const data = await api("POST", "/api/mod/custom-commands",
+                             { name, response });
+      toast(`!${name} ${data.action}`);
+      document.getElementById("newName").value = "";
+      document.getElementById("newResp").value = "";
+      load();
+    } catch (e) { toast(`Failed: ${e.message}`, true); }
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>

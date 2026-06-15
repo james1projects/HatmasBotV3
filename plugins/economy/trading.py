@@ -47,7 +47,8 @@ class _TradingMixin:
     """
 
     async def execute_buy(self, username: str, god_name: str,
-                          hat_amount: int) -> Dict[str, Any]:
+                          hat_amount: int,
+                          channel: str = "chat") -> Dict[str, Any]:
         """
         Buy shares of a god with hats.
 
@@ -87,9 +88,9 @@ class _TradingMixin:
 
         # Record transaction (fee column kept at 0 for schema compat)
         await self._db.execute("""
-            INSERT INTO transactions (username, god_name, type, shares, price, total, fee)
-            VALUES (?, ?, 'buy', ?, ?, ?, 0)
-        """, (username, god_name, shares, price, hat_amount))
+            INSERT INTO transactions (username, god_name, type, shares, price, total, fee, channel)
+            VALUES (?, ?, 'buy', ?, ?, ?, 0, ?)
+        """, (username, god_name, shares, price, hat_amount, channel))
         await self._db.commit()
 
         # Emit overlay event
@@ -105,7 +106,8 @@ class _TradingMixin:
         }
 
     async def execute_sell(self, username: str, god_name: str,
-                           hat_amount: int) -> Dict[str, Any]:
+                           hat_amount: int,
+                           channel: str = "chat") -> Dict[str, Any]:
         """
         Sell shares of a god for hats.
 
@@ -147,9 +149,9 @@ class _TradingMixin:
 
         # Record transaction (fee column kept at 0 for schema compat)
         await self._db.execute("""
-            INSERT INTO transactions (username, god_name, type, shares, price, total, fee)
-            VALUES (?, ?, 'sell', ?, ?, ?, 0)
-        """, (username, god_name, shares_to_sell, price, net_received))
+            INSERT INTO transactions (username, god_name, type, shares, price, total, fee, channel)
+            VALUES (?, ?, 'sell', ?, ?, ?, 0, ?)
+        """, (username, god_name, shares_to_sell, price, net_received, channel))
         await self._db.commit()
 
         # Emit overlay event
@@ -175,12 +177,45 @@ class _TradingMixin:
                 UPDATE portfolios SET shares = ?, avg_cost = ? WHERE username = ? AND god_name = ?
             """, (total_shares, avg_cost, username, god_name))
         else:
+            # New rows inherit the user's leaderboard visibility from
+            # their existing holdings — otherwise a hidden user buying
+            # a new god would silently reappear on that god's holder
+            # list (the opt-out flag is per-row).
             await self._db.execute("""
-                INSERT INTO portfolios (username, god_name, shares, avg_cost)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO portfolios (username, god_name, shares,
+                                        avg_cost, leaderboard_opt_out)
+                VALUES (?, ?, ?, ?,
+                        COALESCE((SELECT MAX(leaderboard_opt_out)
+                                    FROM portfolios
+                                   WHERE LOWER(username) = LOWER(?)), 0))
                 ON CONFLICT(username, god_name) DO UPDATE SET
                     shares = excluded.shares, avg_cost = excluded.avg_cost
-            """, (username, god_name, shares, price))
+            """, (username, god_name, shares, price, username))
+        await self._db.commit()
+
+    # ── leaderboard visibility (website account toggle) ──
+    # The leaderboard_opt_out column + query filters have existed
+    # since the airtight pass, but nothing ever flipped the flag —
+    # the documented !hideme chat command was never implemented.
+    # The website toggle (POST /api/me/visibility) is the first
+    # real control. Applies to all current rows; _add_shares
+    # inheritance keeps future buys consistent.
+
+    async def get_leaderboard_hidden(self, username: str) -> bool:
+        async with self._db.execute(
+            "SELECT COALESCE(MAX(leaderboard_opt_out), 0) "
+            "FROM portfolios WHERE LOWER(username) = LOWER(?)",
+            (username,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        return bool(row and row[0])
+
+    async def set_leaderboard_hidden(self, username: str,
+                                     hidden: bool) -> None:
+        await self._db.execute(
+            "UPDATE portfolios SET leaderboard_opt_out = ? "
+            "WHERE LOWER(username) = LOWER(?)",
+            (1 if hidden else 0, username))
         await self._db.commit()
 
     async def _remove_shares(self, username: str, god_name: str, shares: float):

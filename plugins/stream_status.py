@@ -41,9 +41,31 @@ class StreamStatusPlugin:
             "is_live": False,
             "channel": TWITCH_CHANNEL,
         }
+        # Plugin listeners (killdetector convention). Called with the
+        # stream info dict on live/offline transitions. NOTE: a bot
+        # restart mid-stream fires the live transition again ("first
+        # detection"), so consumers needing once-per-day semantics
+        # must dedupe themselves (the Discord announcer does).
+        self._live_listeners = []
+        self._offline_listeners = []
 
     def setup(self, bot):
         self.bot = bot
+
+    def add_live_listener(self, coro):
+        """Register an async callable(info: dict) for the live transition."""
+        self._live_listeners.append(coro)
+
+    def add_offline_listener(self, coro):
+        """Register an async callable(info: dict) for the offline transition."""
+        self._offline_listeners.append(coro)
+
+    async def _dispatch(self, listeners, info):
+        for listener in listeners:
+            try:
+                await listener(info)
+            except Exception as e:
+                print(f"[StreamStatus] listener error: {e}")
 
     async def on_ready(self):
         if aiohttp is None:
@@ -190,9 +212,11 @@ class StreamStatusPlugin:
             print(f"[StreamStatus] Stream is LIVE — "
                   f"{new_info.get('title') or '(no title)'}")
             await self._emit("stream_live", new_info)
+            await self._dispatch(self._live_listeners, new_info)
         elif was_live and not new_live:
             print("[StreamStatus] Stream went OFFLINE")
             await self._emit("stream_offline", new_info)
+            await self._dispatch(self._offline_listeners, new_info)
 
     async def _emit(self, event_name: str, data: Dict[str, Any]):
         if not self.web_server:

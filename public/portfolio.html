@@ -16,6 +16,8 @@
 <meta name="twitter:title" content="{{OG_TITLE}}">
 <meta name="twitter:description" content="{{OG_DESCRIPTION}}">
 <meta name="twitter:image" content="https://hatmaster.tv/og-image.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="stylesheet" href="/theme.css">
 <style>
   .wrap {
@@ -69,11 +71,13 @@
     margin-bottom: 10px;
   }
   .name {
-    font-size: 32px;
-    font-weight: 700;
+    font-family: var(--font-display);
+    font-size: 42px;
+    font-weight: 400;
     margin: 0 0 6px;
-    letter-spacing: -0.02em;
-    line-height: 1.05;
+    letter-spacing: 0.02em;
+    line-height: 0.95;
+    text-transform: uppercase;
   }
   .subname {
     font-family: var(--font-mono);
@@ -254,7 +258,7 @@
 <body>
   <div class="wrap">
     <div class="brand-band">
-      <a class="left" href="/">// HATMASTER.TV</a>
+      <a class="left" href="/"><img class="brand-hat" src="/hat.png" alt="">// HATMASTER.TV</a>
       <div class="status"><span class="dot" id="live-dot"></span><span id="status">connecting…</span></div>
     </div>
 
@@ -262,6 +266,8 @@
       <div class="kicker">// PORTFOLIO</div>
       <h1 class="name" id="display-name">Loading…</h1>
       <p class="subname" id="subname"></p>
+      <button id="vis-toggle" class="icon-toggle"
+              style="display:none; margin: 0 0 8px;"></button>
       <div class="rank-pill" id="rank-pill">
         <span class="badge">RANK <span class="num" id="rank-num"></span>
           <span style="color: var(--text-dim); font-weight:400;"> / </span>
@@ -276,6 +282,24 @@
       <div class="total-pl" id="total-pl"></div>
     </div>
 
+    <div class="card" id="trade-card" style="display:none">
+      <div class="section-title">Trade</div>
+      <div class="trade-row">
+        <input class="t-god" id="trade-god" list="trade-gods"
+               placeholder="God" autocomplete="off">
+        <datalist id="trade-gods"></datalist>
+        <input class="t-amount" id="trade-amount"
+               placeholder="Hats (or 'all')" autocomplete="off">
+        <button class="trade-btn buy" id="trade-buy">BUY</button>
+        <button class="trade-btn sell" id="trade-sell">SELL</button>
+      </div>
+      <div class="trade-sub">
+        <span id="trade-balance">BALANCE: --</span>
+        <span id="trade-market"></span>
+      </div>
+      <div class="trade-msg" id="trade-msg"></div>
+    </div>
+
     <div class="card">
       <div class="section-title">Holdings</div>
       <div id="holdings"></div>
@@ -288,12 +312,13 @@
 
     <div class="footer-brand">
       <div class="footer-build">
-        <span class="dot"></span><span id="last-ping">DATA · &lt;1s</span> &nbsp;·&nbsp; HATMASBOT v2.5
+        <span class="dot"></span><span id="last-ping">DATA · &lt;1s</span> &nbsp;·&nbsp; HATMASBOT v2.7
       </div>
       <div>Made by <a href="https://twitch.tv/hatmaster" target="_blank">Hatmaster</a> &amp; Claude</div>
     </div>
   </div>
 
+<script src="/auth.js"></script>
 <script>
   // Determine platform from URL path: /yt/<id> or /twitch/<name>.
   // The same template renders both — the only difference is which API
@@ -628,6 +653,141 @@
   }
 
   setInterval(loadPortfolio, 5 * 60 * 1000);
+
+  // ─── leaderboard visibility toggle (own portfolio only) ──────────
+  // Self-serve privacy: hides this viewer from god-page holder lists
+  // and the Top Traders board. Works even when trading is disabled —
+  // it only needs login.
+  (function () {
+    if (!window.HatmasAuth) return;
+    var $vis = document.getElementById('vis-toggle');
+
+    function label(hidden) {
+      $vis.textContent = hidden
+        ? '[LEADERBOARD: HIDDEN]' : '[LEADERBOARD: VISIBLE]';
+      $vis.title = hidden
+        ? 'You are hidden from holder lists and Top Traders. '
+          + 'Click to become visible.'
+        : 'You appear on holder lists and Top Traders. '
+          + 'Click to hide yourself.';
+    }
+
+    HatmasAuth.ready.then(async function (me) {
+      if (!me || !me.logged_in) return;
+      if (_platform !== 'twitch') return;
+      if (me.login !== channelId.toLowerCase()) return;
+      var state = false;
+      try {
+        var r = await fetch('/api/me/settings', { cache: 'no-store' });
+        if (r.ok) state = !!(await r.json()).leaderboard_hidden;
+      } catch (e) { /* default visible */ }
+      label(state);
+      $vis.style.display = '';
+      $vis.addEventListener('click', async function () {
+        $vis.disabled = true;
+        try {
+          var resp = await fetch('/api/me/visibility', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ hidden: !state }),
+          });
+          var data = await resp.json();
+          if (data && data.ok) {
+            state = data.leaderboard_hidden;
+            label(state);
+          }
+        } catch (e) { /* leave state as-is */ }
+        $vis.disabled = false;
+      });
+    });
+  })();
+
+  // ─── website trading (auth.js) ────────────────────────────────────
+  // The trade card only appears when the logged-in Twitch user is
+  // looking at their OWN /twitch/ portfolio and trading is enabled.
+  // All money math happens server-side in /api/trade (which delegates
+  // to the same execute_buy/execute_sell chat commands use).
+  (function () {
+    if (!window.HatmasAuth) return;
+    var $card = document.getElementById('trade-card');
+    var $god = document.getElementById('trade-god');
+    var $amount = document.getElementById('trade-amount');
+    var $buy = document.getElementById('trade-buy');
+    var $sell = document.getElementById('trade-sell');
+    var $msg = document.getElementById('trade-msg');
+    var $bal = document.getElementById('trade-balance');
+    var $mkt = document.getElementById('trade-market');
+
+    async function refreshBalance() {
+      var b = await HatmasAuth.balance();
+      $bal.textContent = (b && b.balance != null)
+        ? 'BALANCE: ' + Math.floor(b.balance).toLocaleString() + ' HATS'
+        : 'BALANCE: --';
+      $mkt.textContent = (b && b.market_open)
+        ? 'MARKET OPEN' : 'MARKET CLOSED';
+    }
+
+    function setBusy(busy) {
+      $buy.disabled = busy;
+      $sell.disabled = busy;
+    }
+
+    async function doTrade(action) {
+      var god = $god.value.trim();
+      var amt = $amount.value.trim().toLowerCase();
+      if (!god || !amt) {
+        $msg.className = 'trade-msg err';
+        $msg.textContent = 'Enter a god and an amount.';
+        return;
+      }
+      setBusy(true);
+      $msg.className = 'trade-msg';
+      $msg.textContent = 'Working...';
+      var res = await HatmasAuth.trade(action, god, amt);
+      setBusy(false);
+      if (res.ok) {
+        $msg.className = 'trade-msg ok';
+        $msg.textContent = (action === 'buy' ? 'Bought ' : 'Sold ')
+          + Number(res.shares).toFixed(2) + ' shares of ' + res.god
+          + ' at ' + Math.round(res.price) + ' hats/share.';
+        $amount.value = '';
+        loadPortfolio();
+        refreshBalance();
+      } else {
+        $msg.className = 'trade-msg err';
+        $msg.textContent = res.error || 'Trade failed.';
+      }
+    }
+
+    HatmasAuth.ready.then(async function (me) {
+      if (!me || !me.logged_in || !me.trading_enabled) return;
+      if (_platform !== 'twitch') return;
+      if (me.login !== channelId.toLowerCase()) return;
+      $card.style.display = '';
+      refreshBalance();
+      $buy.addEventListener('click', function () { doTrade('buy'); });
+      $sell.addEventListener('click', function () { doTrade('sell'); });
+      // Clicking a holding row prefills the god input.
+      $holdings.addEventListener('click', function (ev) {
+        var row = ev.target.closest('.holding');
+        if (row && row.dataset.god) {
+          $god.value = row.dataset.god;
+          $amount.focus();
+        }
+      });
+      try {
+        var r = await fetch('/api/prices');
+        var data = await r.json();
+        var dl = document.getElementById('trade-gods');
+        Object.keys((data && data.prices) || {}).sort()
+          .forEach(function (g) {
+            var o = document.createElement('option');
+            o.value = g;
+            dl.appendChild(o);
+          });
+      } catch (e) { /* datalist is a nicety */ }
+    });
+  })();
 </script>
 </body>
 </html>

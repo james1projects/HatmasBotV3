@@ -39,12 +39,18 @@ class BasicPlugin:
 
     def setup(self, bot):
         self.bot = bot
-        bot.register_command("hello", self.cmd_hello)
-        bot.register_command("uptime", self.cmd_uptime)
-        bot.register_command("socials", self.cmd_socials)
-        bot.register_command("suggest", self.cmd_suggest)
-        bot.register_command("suggestions", self.cmd_suggestions, mod_only=True)
-        bot.register_command("clearsuggestions", self.cmd_clearsuggestions, mod_only=True)
+        bot.register_command("hello", self.cmd_hello,
+                             description="Says hello", plugin="basic")
+        bot.register_command("uptime", self.cmd_uptime,
+                             description="How long HatmasBot has been running", platforms=("twitch", "discord"), plugin="basic")
+        bot.register_command("socials", self.cmd_socials,
+                             description="YouTube, Bluesky, and Twitch links", platforms=("twitch", "discord"), plugin="basic")
+        bot.register_command("suggest", self.cmd_suggest,
+                             description="Save a stream suggestion", identity=True, plugin="basic")
+        bot.register_command("suggestions", self.cmd_suggestions,
+                             mod_only=True, description="Show count and last 3 suggestions", plugin="basic")
+        bot.register_command("clearsuggestions", self.cmd_clearsuggestions,
+                             mod_only=True, description="Clear all saved suggestions", plugin="basic")
 
     async def cmd_hello(self, message, args, whisper=False):
         name = message.chatter.display_name if message.chatter else "friend"

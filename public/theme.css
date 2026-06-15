@@ -16,7 +16,7 @@
  * discrimination. Perfect for price numbers / portfolio values
  * where 0/O and 1/l/I must not blur.
  */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Bebas+Neue&display=swap');
 
 :root {
   /* ─── Hatmas brand palette (May 2026) ───────────────────────
@@ -55,6 +55,14 @@
                'Segoe UI', Roboto, sans-serif;
   --font-mono: 'JetBrains Mono', 'IBM Plex Mono', 'SF Mono',
                Consolas, 'Courier New', monospace;
+  /* Display face for page-level identity ONLY (hero, god name,
+     portfolio name). Bebas Neue is the webfont sibling of the Big
+     Noodle Titling used on stream overlays + YouTube thumbnails —
+     same condensed all-caps DNA, so the site finally shares the
+     channel's visual identity. Body text and section labels stay
+     Inter/JetBrains; restraint keeps it from looking like a poster. */
+  --font-display: 'Bebas Neue', 'Big Noodle Titling', Impact,
+                  'Arial Narrow', sans-serif;
 
   /* ─── Surface metrics ─────────────────────────────────────── */
   --radius-sm: 3px;
@@ -138,8 +146,14 @@ a:hover { color: var(--accent-hi); }
 .down  { color: var(--red)   !important; }
 .muted { color: var(--text-dim) !important; }
 
-/* "SECTION TITLE" — the all-caps tracked label that goes above panels */
+/* "SECTION TITLE" — the all-caps tracked label that goes above
+ * panels. Every section now opens with the brand's // slash mark in
+ * bronze and closes with a hairline rule fading right — one shared
+ * device that makes all pages read as the same terminal. */
 .section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 600;
@@ -147,6 +161,18 @@ a:hover { color: var(--accent-hi); }
   letter-spacing: 0.18em;
   color: var(--text-dim);
   margin: 0 0 10px;
+}
+.section-title::before {
+  content: '//';
+  color: var(--accent);
+  font-weight: 700;
+  letter-spacing: 0;
+}
+.section-title::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--border), transparent);
 }
 
 /* ─── Tab row (small mono pills, terminal-style) ─────────────── */
@@ -459,4 +485,144 @@ html body {
   .platform-pill .pip      { animation: none !important; }
   .brand-band .status .dot,
   .footer-build .dot       { box-shadow: none !important; }
+}
+
+/* ─── Website login (auth.js) ─────────────────────────────────────
+   Auth chip + market state pill rendered into .brand-band by
+   /auth.js on every page. Plain text, no emoji (Tone rule). */
+.auth-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 10px;
+}
+.auth-avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 0;       /* sharp corners — brand */
+  border: 1px solid var(--border);
+  display: block;
+}
+.auth-name {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--text);
+  text-decoration: none;
+  text-transform: uppercase;
+}
+.auth-name:hover { color: var(--accent); }
+.market-chip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  margin-right: 10px;
+  white-space: nowrap;
+}
+.market-chip.open   { color: var(--green); border-color: var(--green); }
+.market-chip.closed { color: var(--text-dim); }
+
+/* ─── Trade panel (portfolio + god pages) ───────────────────────── */
+.trade-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.trade-row input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 8px 10px;
+  min-width: 0;
+}
+.trade-row input:focus { outline: none; border-color: var(--accent); }
+.trade-row .t-god    { flex: 2 1 140px; }
+.trade-row .t-amount { flex: 1 1 100px; }
+.trade-btn {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  padding: 8px 14px;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.trade-btn.buy:hover  { border-color: var(--green); color: var(--green); }
+.trade-btn.sell:hover { border-color: var(--red);   color: var(--red); }
+.trade-btn:disabled   { opacity: 0.4; cursor: default; }
+.trade-sub {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-top: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.trade-msg {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  margin-top: 8px;
+  min-height: 14px;
+}
+.trade-msg.ok  { color: var(--green); }
+.trade-msg.err { color: var(--red); }
+.trade-login-note {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.trade-login-note a { color: var(--accent); }
+
+/* ─── Look-and-feel pass (June 2026, Fable) ──────────────────────
+ * Display typography, brand-band hat mark, card depth language,
+ * focus rings. Palette untouched — this is execution polish. */
+
+/* Brand-band hat mark — the channel logo finally lives on the site.
+ * Served from /hat.png (copy of overlays/hat.png). */
+.brand-band .left,
+.brand-band a.left {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+.brand-hat {
+  height: 20px;
+  width: 20px;
+  object-fit: contain;
+  display: block;
+  /* subtle lift so the dark hat reads on the dark band */
+  filter: drop-shadow(0 0 4px rgba(223, 160, 110, 0.35));
+}
+
+/* Card depth language: one consistent treatment for every panel.
+ * Inset top highlight = light source from above; soft drop = panels
+ * float a hair off the page. Reads as depth at a glance without
+ * borders getting heavier. */
+.card, .chart-card, .total-card, .search-card,
+.trade-card, .priority-card, .stream-player, .stream-chat {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.045),
+    0 2px 8px rgba(11, 16, 22, 0.35);
+}
+
+/* Keyboard focus: bronze ring, consistent with the hover language.
+ * Buttons, links, inputs — anything focusable. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Footer: hairline separation from content above. */
+.footer-brand {
+  border-top: 1px solid var(--border);
+  margin-top: 28px;
 }

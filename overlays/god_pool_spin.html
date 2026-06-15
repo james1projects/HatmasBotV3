@@ -148,7 +148,11 @@
     will-change: transform;
   }
   .reel-track.spinning {
-    transition: transform 4.4s cubic-bezier(0.10, 0.85, 0.20, 1.0);
+    /* Transition timing is set inline by spin() so duration can scale
+       with pool size (every god in the pool needs to read past the
+       marker during the slow phase). The bezier here is only a
+       fallback for when JS hasn't set an inline transition yet. */
+    transition: transform 4.4s cubic-bezier(0.20, 0.55, 0.25, 1.0);
   }
 
   /* Each card: portrait + name */
@@ -291,7 +295,14 @@
   const CARD_STRIDE = 122;
   const FRAME_WIDTH = 680 - 44;     // matches container padding-aware width
   const REEL_WIDTH  = 680 - 44;     // we read it dynamically below too
-  const SPIN_DURATION_MS = 4400;    // matches the CSS transition
+  // Spin duration is recomputed per-spin in spin() based on pool size
+  // (more gods → longer spin so each one is readable in the slow phase).
+  // Both the CSS transition and the audio scheduler reference this var,
+  // so it must stay a `let` and be updated BEFORE scheduleSpinAudio runs.
+  let SPIN_DURATION_MS = 4400;
+  const SPIN_DURATION_BASE_MS = 4400;
+  const SPIN_DURATION_PER_GOD_MS = 150;  // extra ms per god beyond 8
+  const SPIN_DURATION_FREE_GODS = 8;     // first N gods are "free"
 
   // ────────────────────────────────────────────────────────────────
   //  AUDIO  (procedural — same approach as the gamble overlay so we
@@ -373,8 +384,8 @@
   // ────────────────────────────────────────────────────────────────
   //  Bezier inverse — keeps the ticks in lock-step with the reel.
   //
-  //  The CSS transition on .reel-track.spinning uses
-  //    cubic-bezier(0.10, 0.85, 0.20, 1.0)
+  //  The transition (set inline in spin()) uses
+  //    cubic-bezier(0.20, 0.55, 0.25, 1.0)
   //  Both halves of the bezier (x and y) are cubic polynomials in t
   //  with the endpoints clamped to (0,0) and (1,1):
   //    x(t) = 3(1-t)²·t·x1 + 3(1-t)·t²·x2 + t³
@@ -387,8 +398,13 @@
   //  This lets us schedule a tick at the exact moment each card
   //  center crosses the marker, so the ticks slow with the reel.
   // ────────────────────────────────────────────────────────────────
-  const BEZIER_X1 = 0.10, BEZIER_Y1 = 0.85;
-  const BEZIER_X2 = 0.20, BEZIER_Y2 = 1.0;
+  // Less front-loaded than the old (0.10, 0.85, 0.20, 1.0): the reel
+  // still sprints early for the slot-machine feel, but the slow phase
+  // is long enough that every god in the pool gets a readable look as
+  // it crosses the marker. Update CSS + spin()'s inline transition if
+  // you change these.
+  const BEZIER_X1 = 0.20, BEZIER_Y1 = 0.55;
+  const BEZIER_X2 = 0.25, BEZIER_Y2 = 1.0;
   function _bezier(t, p1, p2) {
     const inv = 1 - t;
     return 3 * inv * inv * t * p1
@@ -470,41 +486,57 @@
   function buildReel(candidates, chosen) {
     const track = document.getElementById('track');
     track.classList.remove('spinning', 'landed');
+    // Kill any leftover inline transition from a previous spin so the
+    // translateX(0) reset below snaps instantly instead of animating
+    // back to the start position. spin() re-arms the transition right
+    // before triggering the new animation.
+    track.style.transition = 'none';
     track.style.transform = 'translateX(0)';
     track.innerHTML = '';
 
-    // Build a long padded-out reel: candidates loop several times so
-    // the spin always travels far. The winner is placed near the end.
-    // We loop the candidates LOOPS times then append a final
-    // "winner segment" that ends on the chosen card.
-    const LOOPS = 6;
-    const sequence = [];
-    for (let i = 0; i < LOOPS; i++) {
-      // Shuffle each loop so the reel doesn't look like a
-      // straight-up repeat of the same order.
-      const shuffled = candidates.slice();
-      for (let j = shuffled.length - 1; j > 0; j--) {
+    function shuffleCopy(arr) {
+      const a = arr.slice();
+      for (let j = a.length - 1; j > 0; j--) {
         const k = Math.floor(Math.random() * (j + 1));
-        [shuffled[j], shuffled[k]] = [shuffled[k], shuffled[j]];
+        [a[j], a[k]] = [a[k], a[j]];
       }
-      for (const c of shuffled) sequence.push(c);
+      return a;
     }
 
-    // Insert the chosen god as the visual anchor near the END, with
-    // a few decoy cards after it so the camera "passes" the winner
-    // and lands on it cleanly (gives the slot-machine feel of just
-    // overshooting and snapping back).
+    // The reel is built in three segments so the slow-phase of the
+    // bezier ALWAYS contains every god in the pool at least once.
+    //
+    //   [fast loops — blurred padding] [reveal pass] [winner] [tail]
+    //
+    // - Fast loops feed the early high-speed sprint and the slot-
+    //   machine "wall of cards" feel. Their count scales inversely
+    //   with pool size so small pools (2–3 gods) still get a
+    //   satisfyingly long spin and big pools don't blow up the reel.
+    // - The reveal pass is a single shuffled copy of every non-winner
+    //   god, positioned so it crosses the marker during the readable
+    //   tail end of the easing curve. This is the segment that fixes
+    //   the original bug where viewers never saw most of the pool.
+    // - Tail is the small over-shoot buffer behind the winner so
+    //   there's still card content visible to the right of center
+    //   after the reel settles.
+    const N = candidates.length;
+    const FAST_LOOPS = Math.max(2, Math.ceil(20 / Math.max(1, N)));
+    const sequence = [];
+    for (let i = 0; i < FAST_LOOPS; i++) {
+      for (const c of shuffleCopy(candidates)) sequence.push(c);
+    }
+
+    const nonWinners = candidates.filter(c => c.god !== chosen);
+    for (const c of shuffleCopy(nonWinners)) sequence.push(c);
+
     const chosenObj = candidates.find(c => c.god === chosen)
                        || { god: chosen, votes: 1 };
     sequence.push(chosenObj);
 
-    // A handful of "tail" cards behind the winner so when the reel
-    // settles, there's still content visible to the right of center.
-    const tailPool = candidates.filter(c => c.god !== chosen);
-    const tailCount = Math.min(4, Math.max(2, tailPool.length));
+    const tailCount = Math.min(4, Math.max(2, nonWinners.length));
     for (let i = 0; i < tailCount; i++) {
-      const pick = tailPool.length
-        ? tailPool[Math.floor(Math.random() * tailPool.length)]
+      const pick = nonWinners.length
+        ? nonWinners[Math.floor(Math.random() * nonWinners.length)]
         : chosenObj;
       sequence.push(pick);
     }
@@ -560,9 +592,21 @@
     document.getElementById('resultName').textContent = '';
     document.getElementById('resultMeta').textContent = '';
 
+    // Adaptive duration so the reveal pass in buildReel reads at a
+    // viewable speed regardless of pool size. Must be set BEFORE
+    // scheduleSpinAudio runs (it reads SPIN_DURATION_MS) and BEFORE
+    // we arm the inline transition below.
+    const poolSize = Math.max(1, candidates.length);
+    SPIN_DURATION_MS = SPIN_DURATION_BASE_MS
+      + Math.max(0, poolSize - SPIN_DURATION_FREE_GODS)
+        * SPIN_DURATION_PER_GOD_MS;
+
     const { track, winnerIndex } = buildReel(candidates, chosen);
 
-    // Force layout so the initial transform sticks before we transition.
+    // Force layout so the translateX(0) + transition:none reset in
+    // buildReel commits before we re-arm the transition. Without this,
+    // the browser may coalesce the reset and the new transform change
+    // into a single non-animated jump.
     void track.offsetWidth;
 
     // Compute target offset: center the winner card under the marker.
@@ -581,12 +625,22 @@
     // can sync each tick to the moment a card center crosses the
     // marker (rather than guessing with a pre-baked time ramp).
     requestAnimationFrame(() => {
+      // Arm the transition inline so duration tracks pool size. The
+      // bezier here MUST match BEZIER_X1/Y1/X2/Y2 above — the audio
+      // scheduler uses those constants to sync ticks to the visual.
+      track.style.transition =
+        `transform ${SPIN_DURATION_MS / 1000}s `
+        + `cubic-bezier(${BEZIER_X1}, ${BEZIER_Y1}, `
+        + `${BEZIER_X2}, ${BEZIER_Y2})`;
       track.classList.add('spinning');
       track.style.transform = `translateX(${offset}px)`;
       scheduleSpinAudio(Math.abs(offset), frameWidth);
     });
 
     // After the spin finishes, light up the winner + show the line.
+    // 100ms guard past SPIN_DURATION_MS so the transition is fully
+    // settled before we add the .landed class (which animates the
+    // winner glow on top of the just-finished translateX transition).
     landTimer = setTimeout(() => {
       track.classList.add('landed');
       resultEl.classList.add('shown');
@@ -596,7 +650,7 @@
         `${v} vote${v === 1 ? '' : 's'}`;
       busy = false;
       landTimer = null;
-    }, 4500);
+    }, SPIN_DURATION_MS + 100);
   }
 
   HatmasOverlay.connect('god_pool_spin', {

@@ -43,6 +43,11 @@ from plugins.stream_status import StreamStatusPlugin
 from plugins.youtube_live_badge import YouTubeLiveBadgePlugin
 from plugins.backup_manager import BackupManagerPlugin
 from plugins.god_pool import GodPoolPlugin
+from plugins.priority_request import PriorityRequestPlugin
+from plugins.streamloots import StreamlootsPlugin
+from plugins.factorio import FactorioPlugin
+from plugins.discord_bridge import DiscordBridgePlugin
+from plugins.custom_commands import CustomCommandsPlugin
 
 
 async def main():
@@ -226,6 +231,62 @@ async def main():
     # exposes the current pool via /api/community for the website.
     bot.register_plugin("god_pool", GodPoolPlugin())
 
+    # ── Streamloots event hub ──
+    # SSE listener on the Streamloots alert overlay stream (the same
+    # unofficial surface MixItUp/Firebot use). Other plugins subscribe
+    # via streamloots.add_redemption_listener(cb) (also _purchase_ /
+    # _gift_) and receive normalized event dicts — see the docstring
+    # in plugins/streamloots.py. No-op until STREAMLOOTS_ALERT_ID is
+    # set in config_local.py. Future consumers (e.g. the Factorio
+    # plugin) attach their listeners here in main.py.
+    streamloots = StreamlootsPlugin()
+    bot.register_plugin("streamloots", streamloots)
+
+    # ── Factorio integration ──
+    # Bot half of the hatmas-events Factorio mod: RCON commands into
+    # the game, outbox tailer out of it (chat announcements for pet
+    # deaths, boss kills, ...). Subscribes to Streamloots redemptions
+    # below; FACTORIO_CARD_MAP in config maps card names to mod
+    # actions. No-op until FACTORIO_RCON_PASSWORD is set in
+    # config_local.py. Mod-only test commands: !factorio !fpet !fgrow
+    # !fsay !fboss.
+    factorio = FactorioPlugin()
+    bot.register_plugin("factorio", factorio)
+    streamloots.add_redemption_listener(factorio.on_streamloots_redemption)
+    # Card manager page + API: /factorio/cards on the dashboard
+    # webserver (port 8069). Mappings persist to
+    # data/factorio_cards.json; FACTORIO_CARD_MAP only seeds it once.
+    factorio.register_api_routes(web.app)
+
+    # ── Discord bridge ──
+    # Phase 1 foundation (see Discord_Integration_Plan.md): connects to
+    # the Discord gateway, observes messages, exposes send_message()
+    # for future consumers. No-op until DISCORD_ENABLED +
+    # DISCORD_BOT_TOKEN are set in config_local.py. Mod-only test
+    # commands: !discordstatus !discordtest.
+    discord_bridge = DiscordBridgePlugin()
+    bot.register_plugin("discord", discord_bridge)
+
+    # Phase 2: go-live announcement. The dedupe (max ONE per calendar
+    # day, persisted to data/discord_announce.json) lives inside the
+    # plugin, so bot restarts and stream restarts never double-announce.
+    # Gated by DISCORD_ANNOUNCE_ENABLED in config_local.py.
+    stream_status.add_live_listener(discord_bridge.on_stream_live)
+
+    # Mod-created text commands (managed from /mod). Registered LAST
+    # so built-in command names always win collisions.
+    custom_commands = CustomCommandsPlugin()
+    bot.register_plugin("custom_commands", custom_commands)
+
+    # ── Priority god request (Stripe) ──
+    # Hosts the $5-skip-the-line flow on hatmaster.tv/community.
+    # Registered AFTER godrequest so PriorityRequestPlugin can look
+    # it up in bot.plugins. The plugin instance is passed to
+    # PublicWebServer below so the new /api/priority-request/create
+    # and /api/stripe-webhook routes can reach it.
+    priority_request = PriorityRequestPlugin()
+    bot.register_plugin("priority_request", priority_request)
+
     # ── Open the shared aiosqlite connection ──
     # Plugin setup() calls (above) queued their schema callbacks via
     # core.db.register_schema(). init_db() now opens the connection
@@ -255,7 +316,10 @@ async def main():
     # directly to the internet. Subscribes to web.overlay so live
     # price ticks reach portfolio page WebSocket clients.
     public_web = PublicWebServer(overlay_manager=web.overlay,
-                                  stream_status=stream_status)
+                                  stream_status=stream_status,
+                                  priority_request=priority_request,
+                                  economy=economy,
+                                  bot=bot)  # /mod command matrix
     await public_web.start()
 
     print("[HatmasBot] Starting...")
