@@ -139,7 +139,8 @@ class _DBMixin:
                 price_change       REAL NOT NULL DEFAULT 0,
                 source             TEXT NOT NULL DEFAULT 'live',
                 was_live_at_settle INTEGER NOT NULL DEFAULT 0,  -- 1 if broadcaster was live on Twitch when this row was written; used for audit / dashboard
-                processed_at       TEXT NOT NULL DEFAULT (datetime('now'))
+                processed_at       TEXT NOT NULL DEFAULT (datetime('now')),
+                played_at          TEXT DEFAULT NULL  -- real match start from tracker.gg startTime (UTC 'YYYY-MM-DD HH:MM:SS'); NULL on legacy rows
             );
 
             CREATE INDEX IF NOT EXISTS idx_processed_matches_when
@@ -264,6 +265,18 @@ class _DBMixin:
                 "ALTER TABLE processed_matches ADD COLUMN "
                 "was_live_at_settle INTEGER NOT NULL DEFAULT 0")
             print("[Economy] Migration: added processed_matches.was_live_at_settle")
+
+        # processed_matches.played_at — the real match start time from
+        # tracker.gg's listing startTime (UTC 'YYYY-MM-DD HH:MM:SS').
+        # Before this column, the website displayed processed_at (when
+        # the settlement ran), which made backfilled matches all show
+        # the settlement moment instead of when they were played.
+        # Legacy rows keep NULL; the API falls back to processed_at.
+        if "played_at" not in proc_cols:
+            await self._db.execute(
+                "ALTER TABLE processed_matches ADD COLUMN "
+                "played_at TEXT DEFAULT NULL")
+            print("[Economy] Migration: added processed_matches.played_at")
 
         await self._db.commit()
 

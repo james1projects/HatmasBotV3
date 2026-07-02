@@ -50,7 +50,7 @@ from core.config import (
     ECONOMY_EXCLUDED_USERNAMES, TWITCH_BOT_USERNAME,
     TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET,
     WEB_SESSION_SECRET, WEB_TRADING_ENABLED, WEB_TRADE_COOLDOWN,
-    WEB_TRADE_MAX_PER_MIN, WEB_OAUTH_REDIRECT_URI,
+    WEB_TRADE_MAX_PER_MIN, WEB_OAUTH_REDIRECT_URI, FINDIT_MAX_SESSIONS,
     YOUTUBE_API_KEY, YOUTUBE_CHANNEL_ID,
     TIKTOK_USERNAME, TIKTOK_LATEST_VIDEO_URL, BLUESKY_HANDLE,
     SOCIAL_FEED_CACHE_TTL,
@@ -114,7 +114,8 @@ class PublicWebServer:
     """Read-only public aiohttp app on port 8070."""
 
     def __init__(self, overlay_manager=None, stream_status=None,
-                 priority_request=None, economy=None, bot=None):
+                 priority_request=None, economy=None, bot=None,
+                 findit=None):
         self.app = web.Application(middlewares=[_custom_404_middleware])
         # HatmasBot or None — the /mod page reads/writes the command
         # registry through bot.get_command_catalog() /
@@ -135,6 +136,11 @@ class PublicWebServer:
         # (WEBSITE_TRADING_DESIGN.md §2.1). Read paths still hit the
         # DB directly; only trades go through the plugin.
         self.economy = economy
+        # FindItPlugin or None — owns the GPU detection worker child
+        # process. We serve the /FindIt page and proxy /ws/findit to
+        # the worker; lifecycle (spawn/idle-kill) lives in the plugin.
+        self.findit = findit
+        self._findit_ws: Set[web.WebSocketResponse] = set()
         self._db: Optional["aiosqlite.Connection"] = None
 
         # ── website login + trading state ──
@@ -321,6 +327,14 @@ class PublicWebServer:
                 f"/{fname}", self._make_static_handler(fname))
 
         # WebSocket for live updates.
+        # FindIt (early development) — page + WS 404 while the "findit"
+        # feature toggle is off, same invisibility contract as spacegame.
+        self.app.router.add_get("/FindIt", self._handle_findit_page)
+        self.app.router.add_get(
+            "/findit",
+            lambda r: web.HTTPMovedPermanently("/FindIt"))
+        self.app.router.add_get("/ws/findit", self._handle_findit_ws)
+
         self.app.router.add_get("/ws/yt/{channel_id}", self._handle_ws)
         self.app.router.add_get("/ws/twitch/{username}",
                                  self._handle_twitch_ws)
@@ -380,6 +394,12 @@ class PublicWebServer:
                     except Exception:
                         pass
             bucket.clear()
+        for ws in list(self._findit_ws):
+            try:
+                await ws.close()
+            except Exception:
+                pass
+        self._findit_ws.clear()
 
         if self.overlay_manager:
             self.overlay_manager.remove_event_listener(self._on_overlay_event)
@@ -974,14 +994,17 @@ class PublicWebServer:
                     "timestamp": r[2],
                 })
 
-        # Recent matches list.
+        # Recent matches list. timestamp prefers played_at (the real
+        # match start from tracker.gg) and falls back to processed_at
+        # for legacy rows settled before the played_at column existed.
         recent_matches: List[Dict[str, Any]] = []
         async with self._db.execute("""
             SELECT match_id, outcome, kills, deaths, assists,
-                   price_change, source, processed_at
+                   price_change, source,
+                   COALESCE(played_at, processed_at)
               FROM processed_matches
              WHERE god_name = ?
-             ORDER BY processed_at DESC LIMIT 20
+             ORDER BY COALESCE(played_at, processed_at) DESC LIMIT 20
         """, (canonical,)) as cur:
             async for r in cur:
                 recent_matches.append({
@@ -1374,9 +1397,9 @@ class PublicWebServer:
         try:
             async with self._db.execute("""
                 SELECT god_name, outcome, kills, deaths, assists,
-                       price_change, processed_at
+                       price_change, COALESCE(played_at, processed_at)
                   FROM processed_matches
-                 ORDER BY processed_at DESC
+                 ORDER BY COALESCE(played_at, processed_at) DESC
                  LIMIT 30
             """) as cur:
                 async for r in cur:
@@ -2545,6 +2568,89 @@ class PublicWebServer:
     # ──────────────────────────────────────────────────────────────────
     #   WEBSOCKET (live ticks)
     # ──────────────────────────────────────────────────────────────────
+
+    # ──────────────────────────────────────────────────────────────────
+    #   FINDIT (hatmaster.tv/FindIt — early development, default OFF)
+    # ──────────────────────────────────────────────────────────────────
+    #
+    # Both routes 404 whenever the "findit" feature toggle is off — the
+    # page is indistinguishable from a URL that never existed (the HTML
+    # route gets the styled 404 via middleware). When on, the WS handler
+    # asks FindItPlugin for the localhost worker (spawned on demand) and
+    # proxies frames/results between phone and worker byte-for-byte.
+
+    def _findit_on(self) -> bool:
+        return bool(self.findit and self.findit.enabled())
+
+    async def _handle_findit_page(self, request: web.Request) -> web.Response:
+        if not self._findit_on():
+            raise web.HTTPNotFound()
+        path = PUBLIC_DIR / "findit.html"
+        if not path.exists():
+            return web.Response(text="FindIt page missing.", status=500)
+        return web.FileResponse(path, headers={"Cache-Control": "no-cache"})
+
+    async def _handle_findit_ws(self, request: web.Request):
+        if not self._findit_on():
+            raise web.HTTPNotFound()
+        if len(self._findit_ws) >= FINDIT_MAX_SESSIONS:
+            raise web.HTTPTooManyRequests(text="FindIt session limit reached")
+        try:
+            await self.findit.ensure_worker()
+        except Exception as e:
+            print(f"[PublicWebServer] FindIt worker unavailable: {e}")
+            raise web.HTTPServiceUnavailable(text="detector unavailable")
+
+        ws = web.WebSocketResponse(heartbeat=30, max_msg_size=8 * 1024 * 1024)
+        await ws.prepare(request)
+        self._findit_ws.add(ws)
+        self.findit.note_connect()
+        backend = self.findit.backend_url().replace("http://", "ws://") + "/ws"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.ws_connect(
+                        backend, max_msg_size=8 * 1024 * 1024) as back:
+
+                    async def client_to_worker():
+                        async for m in ws:
+                            if m.type == aiohttp.WSMsgType.TEXT:
+                                await back.send_str(m.data)
+                            elif m.type == aiohttp.WSMsgType.BINARY:
+                                await back.send_bytes(m.data)
+                            elif m.type == aiohttp.WSMsgType.ERROR:
+                                break
+
+                    async def worker_to_client():
+                        async for m in back:
+                            if m.type == aiohttp.WSMsgType.TEXT:
+                                await ws.send_str(m.data)
+                            elif m.type == aiohttp.WSMsgType.BINARY:
+                                await ws.send_bytes(m.data)
+                            elif m.type == aiohttp.WSMsgType.ERROR:
+                                break
+
+                    up = asyncio.create_task(client_to_worker())
+                    down = asyncio.create_task(worker_to_client())
+                    # Either side closing tears down the other.
+                    done, pending = await asyncio.wait(
+                        {up, down}, return_when=asyncio.FIRST_COMPLETED)
+                    for t in pending:
+                        t.cancel()
+                    for t in pending:
+                        try:
+                            await t
+                        except (asyncio.CancelledError, Exception):
+                            pass
+        except aiohttp.ClientError as e:
+            print(f"[PublicWebServer] FindIt proxy error: {e}")
+        finally:
+            self._findit_ws.discard(ws)
+            self.findit.note_disconnect()
+            try:
+                await ws.close()
+            except Exception:
+                pass
+        return ws
 
     async def _handle_ws(self, request: web.Request) -> web.WebSocketResponse:
         channel_id = request.match_info["channel_id"]

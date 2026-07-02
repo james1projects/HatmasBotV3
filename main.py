@@ -47,6 +47,7 @@ from plugins.youtube_live_badge import YouTubeLiveBadgePlugin
 from plugins.backup_manager import BackupManagerPlugin
 from plugins.god_pool import GodPoolPlugin
 from plugins.spacegame import SpaceGamePlugin
+from plugins.findit import FindItPlugin
 from plugins.priority_request import PriorityRequestPlugin
 from plugins.streamloots import StreamlootsPlugin
 from plugins.factorio import FactorioPlugin
@@ -244,6 +245,16 @@ async def main():
     # go silent + vanish from /mod, and the game page 404s, when disabled.
     bot.register_plugin("spacegame", SpaceGamePlugin())
 
+    # ── FindIt (early development, hatmaster.tv/FindIt) ──
+    # "Ctrl+F for real life" — phone camera object finder running on the
+    # GPU via a child-process worker in its own venv (.venv-findit).
+    # Gated behind the "findit" feature toggle (default OFF): the public
+    # page + WebSocket 404 and no worker process runs. The instance is
+    # passed to PublicWebServer below so /FindIt and /ws/findit can
+    # reach it. No chat commands — the entire surface is HTTP.
+    findit = FindItPlugin()
+    bot.register_plugin("findit", findit)
+
     # ── Streamloots event hub ──
     # SSE listener on the Streamloots alert overlay stream (the same
     # unofficial surface MixItUp/Firebot use). Other plugins subscribe
@@ -332,6 +343,7 @@ async def main():
                                   stream_status=stream_status,
                                   priority_request=priority_request,
                                   economy=economy,
+                                  findit=findit,
                                   bot=bot)  # /mod command matrix
     await public_web.start()
 

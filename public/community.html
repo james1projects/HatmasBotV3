@@ -29,14 +29,15 @@
   .brand-band {
     display: flex;
     justify-content: space-between;
-    align-items: baseline;
+    align-items: center;
     border-bottom: 1px solid var(--border);
     padding: 8px 0 12px;
     margin-bottom: 16px;
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: 11px;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.18em;
+    letter-spacing: 0.06em;
     color: var(--text-dim);
   }
   .brand-band a.left {
@@ -55,10 +56,12 @@
   }
   header h1 {
     margin: 0 0 8px;
-    font-size: 40px;
-    letter-spacing: -0.025em;
-    font-weight: 700;
-    line-height: 1.0;
+    font-family: var(--font-display);
+    font-size: 46px;
+    letter-spacing: 0.02em;
+    font-weight: 400;
+    line-height: 0.95;
+    text-transform: uppercase;
   }
   header p {
     margin: 0;
@@ -128,29 +131,31 @@
     line-height: 1.2;
   }
   .queue-row .requester {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-weight: 600;
     font-size: 10px;
     color: var(--text-dim);
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.05em;
     margin-top: 1px;
   }
   .queue-row .token {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-weight: 600;
     font-size: 9px;
     padding: 2px 5px;
     border: 1px solid var(--accent);
     color: var(--accent);
     border-radius: 2px;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.05em;
     flex-shrink: 0;
   }
   /* PRIORITY pill — shown on $5 paid_priority queue entries.
      Same shape as .token but louder (filled accent, gold glow) so
      the value-prop of the $5 feature is visible to free viewers. */
   .queue-row .priority {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: 9px;
     padding: 2px 6px;
     background: var(--accent);
@@ -158,7 +163,7 @@
     border: 1px solid var(--accent);
     border-radius: 2px;
     text-transform: uppercase;
-    letter-spacing: 0.10em;
+    letter-spacing: 0.06em;
     font-weight: 700;
     flex-shrink: 0;
     box-shadow: 0 0 8px rgba(255, 166, 87, 0.45);
@@ -168,8 +173,8 @@
     background: rgba(255, 166, 87, 0.06);
   }
   .queue-row .message {
-    font-family: var(--font-mono);
-    font-size: 10px;
+    font-family: var(--font-sans);
+    font-size: 11px;
     color: var(--accent);
     font-style: italic;
     margin-top: 3px;
@@ -202,11 +207,12 @@
     line-height: 1.2;
   }
   .pool-row .added {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-weight: 600;
     font-size: 10px;
     color: var(--text-dim);
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.05em;
     margin-top: 1px;
   }
   .pool-row .added .by { color: var(--accent); font-weight: 600; }
@@ -230,10 +236,8 @@
     text-align: center;
     color: var(--text-fade);
     padding: 24px 8px;
-    font-family: var(--font-mono);
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.16em;
+    font-family: var(--font-sans);
+    font-size: 12px;
   }
 
   .info-box {
@@ -261,13 +265,14 @@
   .mod-card { display: none; margin-bottom: 18px; }
   .mod-card.is-admin { display: block; }
   .mod-card .card-head .mod-tag {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-weight: 700;
     font-size: 9px;
     padding: 2px 6px;
     border: 1px solid var(--red);
     color: var(--red);
     border-radius: 2px;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.06em;
     margin-left: 8px;
   }
   .nom-row {
@@ -301,11 +306,12 @@
     line-height: 1.2;
   }
   .nom-row .by {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-weight: 600;
     font-size: 10px;
     color: var(--text-dim);
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.05em;
   }
   .nom-row .by .name { color: var(--accent); font-weight: 600; }
   .nom-row .snippet {
@@ -316,11 +322,12 @@
     overflow-wrap: anywhere;
   }
   .nom-row .video-link {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-weight: 600;
     font-size: 10px;
     color: var(--text-fade);
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.05em;
     margin-top: 4px;
     display: inline-block;
   }
@@ -332,10 +339,10 @@
     flex-shrink: 0;
   }
   .nom-row button {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: 10px;
     font-weight: 700;
-    letter-spacing: 0.14em;
+    letter-spacing: 0.06em;
     padding: 6px 10px;
     border-radius: var(--radius-sm);
     border: 1px solid;
@@ -414,11 +421,12 @@
   }
   .priority-card label {
     display: block;
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-weight: 600;
     font-size: 10px;
     color: var(--text-dim);
     text-transform: uppercase;
-    letter-spacing: 0.14em;
+    letter-spacing: 0.06em;
     margin-bottom: 4px;
   }
   .priority-card input,
@@ -456,8 +464,6 @@
     font-family: var(--font-mono);
     font-size: 10px;
     color: var(--text-fade);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
   }
   .priority-card button.pc-pay {
     width: 100%;
@@ -466,10 +472,10 @@
     border: 1px solid var(--accent);
     border-radius: var(--radius-sm);
     color: #1a1a1a;
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: 13px;
     font-weight: 700;
-    letter-spacing: 0.18em;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
     cursor: pointer;
     transition: filter 0.1s;
@@ -493,11 +499,9 @@
   .priority-card .pc-error.shown { display: block; }
   .priority-card .pc-disabled-note {
     margin-top: 8px;
-    font-family: var(--font-mono);
-    font-size: 11px;
+    font-family: var(--font-sans);
+    font-size: 12px;
     color: var(--text-fade);
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
     text-align: center;
   }
 </style>
@@ -506,18 +510,18 @@
   <a class="skip-link" href="#maincontent">Skip to content</a>
   <div class="wrap" id="maincontent" role="main" tabindex="-1">
     <div class="brand-band" role="banner">
-      <a class="left" href="/"><img class="brand-hat" src="/hat.png" alt="">// HATMASTER.TV</a>
+      <a class="left" href="/"><img class="brand-hat" src="/hat.png" alt="">HATMASTER.TV</a>
       <div class="right-cluster">
         <a href="/market" class="icon-toggle" style="text-decoration: none;"
            title="All god prices + the full market">
-          [MARKET]
+          Market
         </a>
         <div>COMMUNITY</div>
       </div>
     </div>
 
     <header>
-      <div class="kicker">// COMMUNITY</div>
+      <div class="kicker">Community</div>
       <h1>Voted by chat</h1>
       <p>God requests, the spin pool, and your daily nominations. All live from chat.</p>
     </header>
@@ -611,12 +615,6 @@
       </div>
     </div>
 
-    <div class="footer-brand">
-      <div class="footer-build">
-        <span class="dot"></span><span id="last-ping">DATA · &lt;1s</span> &nbsp;·&nbsp; HATMASBOT v2.7
-      </div>
-      <div>Made by <a href="https://twitch.tv/hatmaster" target="_blank">Hatmaster</a> &amp; Claude</div>
-    </div>
   </div>
 
 <script src="/auth.js"></script>
@@ -641,19 +639,9 @@
     return route + encodeURIComponent(slug);
   }
 
-  // Footer "last data" tick. Bumped from any successful poll so the
-  // user sees fresh-data signal in the footer build tag.
-  let _lastPingMs = Date.now();
-  function bumpPing() { _lastPingMs = Date.now(); updatePingLabel(); }
-  function updatePingLabel() {
-    const el = document.getElementById('last-ping');
-    if (!el) return;
-    const ago = Math.floor((Date.now() - _lastPingMs) / 1000);
-    if (ago < 2)       el.textContent = 'DATA · <1s';
-    else if (ago < 60) el.textContent = 'DATA · ' + ago + 's';
-    else               el.textContent = 'DATA · ' + Math.floor(ago / 60) + 'm';
-  }
-  setInterval(updatePingLabel, 1000);
+  // Footer (and its DATA freshness tag) removed July 2026. bumpPing
+  // stays as a no-op so the data-load call sites don't need touching.
+  function bumpPing() {}
 
   async function refresh() {
     try {

@@ -29,14 +29,15 @@
   .brand-band {
     display: flex;
     justify-content: space-between;
-    align-items: baseline;
+    align-items: center;
     border-bottom: 1px solid var(--border);
     padding: 8px 0 12px;
     margin-bottom: 16px;
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: 11px;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.18em;
+    letter-spacing: 0.06em;
     color: var(--text-dim);
   }
   .brand-band a.left {
@@ -109,11 +110,12 @@
   }
   .price.flash { color: var(--tick-flash); }
   .price-sub {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: 11px;
+    font-weight: 600;
     color: var(--text-dim);
     text-transform: uppercase;
-    letter-spacing: 0.12em;
+    letter-spacing: 0.07em;
   }
 
   /* ─── card primitive ──────────────────────────────────────────── */
@@ -171,11 +173,12 @@
     padding: 8px 10px;
   }
   .stat .label {
-    font-family: var(--font-mono);
-    font-size: 9px;
+    font-family: var(--font-sans);
+    font-size: 10px;
+    font-weight: 600;
     color: var(--text-dim);
     text-transform: uppercase;
-    letter-spacing: 0.16em;
+    letter-spacing: 0.06em;
     margin-bottom: 4px;
   }
   .stat .value {
@@ -219,15 +222,16 @@
   .holder .badge {
     display: inline-block;
     padding: 1px 5px;
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: 9px;
+    font-weight: 600;
     margin-left: 6px;
     background: transparent;
     border: 1px solid var(--border);
     border-radius: 2px;
     color: var(--text-dim);
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.05em;
   }
   .holder .badge.youtube { color: #ff5e5e; border-color: #ff5e5e44; }
   .holder .badge.twitch  { color: #c8a4ff; border-color: #c8a4ff44; }
@@ -248,14 +252,26 @@
   }
 
   .match-row .outcome {
-    font-family: var(--font-mono);
-    width: 48px;
+    font-family: var(--font-sans);
+    width: 52px;
+    padding: 3px 0;
+    text-align: center;
     font-weight: 700;
-    font-size: 11px;
-    letter-spacing: 0.08em;
+    font-size: 10px;
+    letter-spacing: 0.07em;
+    border-radius: var(--radius-sm);
+    flex-shrink: 0;
   }
-  .match-row .outcome.win { color: var(--green); }
-  .match-row .outcome.loss { color: var(--red); }
+  .match-row .outcome.win {
+    color: var(--green);
+    background: var(--green-bg);
+    box-shadow: inset 0 0 0 1px rgba(223, 160, 110, 0.25);
+  }
+  .match-row .outcome.loss {
+    color: var(--red);
+    background: var(--red-bg);
+    box-shadow: inset 0 0 0 1px rgba(223, 41, 53, 0.28);
+  }
   .match-row .kda {
     flex: 1;
     text-align: center;
@@ -281,8 +297,6 @@
     font-size: 10px;
     text-align: right;
     width: 60px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
   }
 
   .breakdown-row {
@@ -308,10 +322,8 @@
     text-align: center;
     color: var(--text-fade);
     padding: 16px 8px;
-    font-family: var(--font-mono);
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.16em;
+    font-family: var(--font-sans);
+    font-size: 12px;
   }
 </style>
 </head>
@@ -319,17 +331,21 @@
   <a class="skip-link" href="#maincontent">Skip to content</a>
   <div class="wrap" id="maincontent" role="main" tabindex="-1">
     <div class="brand-band" role="banner">
-      <a class="left" href="/"><img class="brand-hat" src="/hat.png" alt="">// HATMASTER.TV</a>
+      <a class="left" href="/"><img class="brand-hat" src="/hat.png" alt="">HATMASTER.TV</a>
       <div class="right-cluster">
+        <button id="icon-toggle" class="icon-toggle"
+                title="Toggle between custom OBS-style icons and official portraits">
+          Icons: Custom
+        </button>
         <a href="/market" class="icon-toggle" style="text-decoration: none;"
            title="All god prices + the full market">
-          [MARKET]
+          Market
         </a>
         <div class="status"><span class="dot" id="live-dot"></span><span id="status">connecting…</span></div>
       </div>
     </div>
 
-    <div class="kicker page-kicker">// GOD MARKET</div>
+    <div class="kicker page-kicker">God Market</div>
 
     <div class="head">
       <img class="portrait" id="portrait" src="" alt="">
@@ -377,18 +393,6 @@
       <div id="breakdown"></div>
     </div>
 
-    <div class="footer-brand">
-      <div class="footer-build">
-        <span class="dot"></span><span id="last-ping">DATA · &lt;1s</span> &nbsp;·&nbsp; HATMASBOT v2.7
-      </div>
-      <div>Made by <a href="https://twitch.tv/hatmaster" target="_blank">Hatmaster</a> &amp; Claude</div>
-      <div class="footer-controls">
-        <button id="icon-toggle" class="icon-toggle"
-                title="Toggle between custom OBS-style icons and official portraits">
-          [ICONS: CUSTOM]
-        </button>
-      </div>
-    </div>
   </div>
 
 <script src="/auth.js"></script>
@@ -411,7 +415,7 @@
   }
   const $iconToggle = document.getElementById('icon-toggle');
   function updateToggleLabel() {
-    $iconToggle.textContent = '[ICONS: ' + getIconStyle().toUpperCase() + ']';
+    $iconToggle.textContent = 'Icons: ' + getIconStyle();
   }
   updateToggleLabel();
   $iconToggle.addEventListener('click', () => {
@@ -431,20 +435,9 @@
   // Removed — it makes sense on the hub but not on a per-god page.
   // Viewers can jump to / from the brand-band link to watch live.
 
-  // Footer "last data" ping — bumped from any successful poll/WS
-  // message so the user can see at a glance that this page is
-  // actually receiving live updates.
-  let _lastPingMs = Date.now();
-  function bumpPing() { _lastPingMs = Date.now(); updatePingLabel(); }
-  function updatePingLabel() {
-    const el = document.getElementById('last-ping');
-    if (!el) return;
-    const ago = Math.floor((Date.now() - _lastPingMs) / 1000);
-    if (ago < 2)       el.textContent = 'DATA · <1s';
-    else if (ago < 60) el.textContent = 'DATA · ' + ago + 's';
-    else               el.textContent = 'DATA · ' + Math.floor(ago / 60) + 'm';
-  }
-  setInterval(updatePingLabel, 1000);
+  // Footer (and its DATA freshness tag) removed July 2026. bumpPing
+  // stays as a no-op so the data-load call sites don't need touching.
+  function bumpPing() {}
 
   const godNameRaw = decodeURIComponent(location.pathname.split('/').pop() || '');
   let canonicalName = godNameRaw;
@@ -942,7 +935,7 @@
       if (!me.logged_in) {
         body.innerHTML =
           '<div class="trade-login-note">' +
-          '<a href="/auth/login">[LOG IN WITH TWITCH]</a> ' +
+          '<a href="/auth/login">Log in with Twitch</a> ' +
           'to buy and sell shares from this page.</div>';
         return;
       }

@@ -49,11 +49,34 @@ played off-stream just update the price math silently.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from typing import Dict, Optional
 
 from core.config import ECONOMY_STARTING_PRICE
 
 from .fair_value import calculate_fair_value
+
+
+def _normalize_played_at(ts: Optional[str]) -> Optional[str]:
+    """
+    Normalize a tracker.gg startTime (ISO 8601, usually with a +00:00
+    offset and fractional seconds) to the DB's UTC 'YYYY-MM-DD HH:MM:SS'
+    convention used by processed_at. Returns None on anything
+    unparseable so a schema surprise degrades to the processed_at
+    fallback instead of storing garbage.
+    """
+    if not ts:
+        return None
+    try:
+        s = str(ts).strip()
+        if s.endswith(("Z", "z")):
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        return None
 
 
 class _MatchMixin:
@@ -276,7 +299,8 @@ class _MatchMixin:
     async def settle_match(self, match_id: Optional[str], god_name: str,
                            outcome: str, kills: int, deaths: int, assists: int,
                            *, source: str = "live",
-                           match_start_price: Optional[float] = None) -> bool:
+                           match_start_price: Optional[float] = None,
+                           played_at: Optional[str] = None) -> bool:
         """
         Apply the canonical match-end settlement to god prices.
 
@@ -385,13 +409,17 @@ class _MatchMixin:
 
         # Record in processed_matches for dedup. match_id is now
         # mandatory (checked above), so the row always writes.
+        # played_at is the real match start (tracker.gg startTime);
+        # NULL when the caller doesn't have one — the website falls
+        # back to processed_at.
         await self._db.execute("""
             INSERT INTO processed_matches
                 (match_id, god_name, outcome, kills, deaths, assists,
-                 price_change, source, was_live_at_settle)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 price_change, source, was_live_at_settle, played_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (match_id, god_name, outcome, kills, deaths, assists,
-              actual_change_pct, source, 1 if is_live else 0))
+              actual_change_pct, source, 1 if is_live else 0,
+              _normalize_played_at(played_at)))
 
         await self._db.commit()
 
@@ -596,6 +624,7 @@ class _MatchMixin:
                     deaths=deaths,
                     assists=assists,
                     source="backfill",
+                    played_at=entry.get("start_time"),
                 )
                 if ok:
                     summary["settled"] += 1

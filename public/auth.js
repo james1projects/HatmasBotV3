@@ -45,7 +45,7 @@ window.HatmasAuth = (function () {
       el.appendChild(link);
       const out = document.createElement('button');
       out.className = 'icon-toggle';
-      out.textContent = '[LOG OUT]';
+      out.textContent = 'Log out';
       out.addEventListener('click', async function () {
         try { await fetch('/auth/logout', { method: 'POST' }); }
         catch (e) { /* cookie clear is best-effort */ }
@@ -58,7 +58,7 @@ window.HatmasAuth = (function () {
       const a = document.createElement('a');
       a.className = 'icon-toggle';
       a.href = '/auth/login';
-      a.textContent = '[LOG IN WITH TWITCH]';
+      a.textContent = 'Log in with Twitch';
       a.title = 'Log in to trade from the site';
       el.appendChild(a);
       return el;

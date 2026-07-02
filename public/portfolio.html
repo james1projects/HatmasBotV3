@@ -29,14 +29,15 @@
   .brand-band {
     display: flex;
     justify-content: space-between;
-    align-items: baseline;
+    align-items: center;
     border-bottom: 1px solid var(--border);
     padding: 8px 0 12px;
     margin-bottom: 16px;
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: 11px;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.18em;
+    letter-spacing: 0.06em;
     color: var(--text-dim);
   }
   .brand-band a.left {
@@ -80,12 +81,13 @@
     text-transform: uppercase;
   }
   .subname {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-weight: 600;
     color: var(--text-dim);
     font-size: 11px;
     margin: 0;
     text-transform: uppercase;
-    letter-spacing: 0.16em;
+    letter-spacing: 0.07em;
   }
 
   /* Rank pill — sits under the username. Hidden by default; the
@@ -108,9 +110,9 @@
     background: var(--panel);
     border: 1px solid var(--accent);
     border-radius: 100px;
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: 11px;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.05em;
     color: var(--accent);
     text-transform: uppercase;
     font-weight: 700;
@@ -120,10 +122,11 @@
     font-variant-numeric: tabular-nums;
   }
   .rank-pill .pct {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-weight: 600;
     font-size: 10px;
     color: var(--text-dim);
-    letter-spacing: 0.1em;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
   }
 
@@ -136,10 +139,11 @@
     margin: 0 0 22px;
   }
   .total-label {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
+    font-weight: 600;
     font-size: 10px;
     text-transform: uppercase;
-    letter-spacing: 0.18em;
+    letter-spacing: 0.07em;
     color: var(--text-dim);
     margin-bottom: 6px;
   }
@@ -238,8 +242,6 @@
     font-size: 10px;
     white-space: nowrap;
     padding-left: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
   }
   .event.dividend { border-left: 2px solid var(--accent); }
   .event.share    { border-left: 2px solid var(--green); }
@@ -248,10 +250,8 @@
     text-align: center;
     color: var(--text-fade);
     padding: 24px 10px;
-    font-family: var(--font-mono);
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.16em;
+    font-family: var(--font-sans);
+    font-size: 12px;
   }
 </style>
 </head>
@@ -259,18 +259,18 @@
   <a class="skip-link" href="#maincontent">Skip to content</a>
   <div class="wrap" id="maincontent" role="main" tabindex="-1">
     <div class="brand-band" role="banner">
-      <a class="left" href="/"><img class="brand-hat" src="/hat.png" alt="">// HATMASTER.TV</a>
+      <a class="left" href="/"><img class="brand-hat" src="/hat.png" alt="">HATMASTER.TV</a>
       <div class="right-cluster">
         <a href="/market" class="icon-toggle" style="text-decoration: none;"
            title="All god prices + the full market">
-          [MARKET]
+          Market
         </a>
         <div class="status"><span class="dot" id="live-dot"></span><span id="status">connecting…</span></div>
       </div>
     </div>
 
     <header>
-      <div class="kicker">// PORTFOLIO</div>
+      <div class="kicker">Portfolio</div>
       <h1 class="name" id="display-name">Loading…</h1>
       <p class="subname" id="subname"></p>
       <button id="vis-toggle" class="icon-toggle"
@@ -319,12 +319,6 @@
       <div id="activity"></div>
     </div>
 
-    <div class="footer-brand">
-      <div class="footer-build">
-        <span class="dot"></span><span id="last-ping">DATA · &lt;1s</span> &nbsp;·&nbsp; HATMASBOT v2.7
-      </div>
-      <div>Made by <a href="https://twitch.tv/hatmaster" target="_blank">Hatmaster</a> &amp; Claude</div>
-    </div>
   </div>
 
 <script src="/auth.js"></script>
@@ -348,20 +342,9 @@
   // detail page). Viewers who want to watch can jump to / from the
   // brand-band link in the top-left.
 
-  // Bloomberg-style "last data received" tick in the footer. Bumped
-  // from any successful poll/WebSocket message — see WebSocket
-  // handler below for the bumpPing() call.
-  let _lastPingMs = Date.now();
-  function bumpPing() { _lastPingMs = Date.now(); updatePingLabel(); }
-  function updatePingLabel() {
-    const el = document.getElementById('last-ping');
-    if (!el) return;
-    const ago = Math.floor((Date.now() - _lastPingMs) / 1000);
-    if (ago < 2)       el.textContent = 'DATA · <1s';
-    else if (ago < 60) el.textContent = 'DATA · ' + ago + 's';
-    else               el.textContent = 'DATA · ' + Math.floor(ago / 60) + 'm';
-  }
-  setInterval(updatePingLabel, 1000);
+  // Footer (and its DATA freshness tag) removed July 2026. bumpPing
+  // stays as a no-op so the data-load call sites don't need touching.
+  function bumpPing() {}
 
   const $name      = document.getElementById('display-name');
   const $subname   = document.getElementById('subname');
@@ -673,7 +656,7 @@
 
     function label(hidden) {
       $vis.textContent = hidden
-        ? '[LEADERBOARD: HIDDEN]' : '[LEADERBOARD: VISIBLE]';
+        ? 'Leaderboard: Hidden' : 'Leaderboard: Visible';
       $vis.title = hidden
         ? 'You are hidden from holder lists and Top Traders. '
           + 'Click to become visible.'

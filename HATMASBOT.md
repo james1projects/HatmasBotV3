@@ -139,6 +139,12 @@ KillDeathDetector so the kill detector's `on_death` callback can call
 
 SnapPlugin exists but is commented out in main.py.
 
+FindItPlugin is registered between SpaceGamePlugin and StreamlootsPlugin.
+No chat commands — its entire surface is HTTP on the public webserver
+(hatmaster.tv/FindIt), gated behind the "findit" feature toggle (default
+OFF). The instance is passed to PublicWebServer in main.py. See the
+**FindIt — Ctrl+F for Real Life** section at the bottom.
+
 Bot also receives `token_manager` directly for raid shoutout and TTS API calls.
 
 **Cross-plugin event wiring (listener-list pattern).** After registration, main.py wires inter-plugin event flow without monkey-patching. Two hubs publish events; multiple subscribers attach listeners to each:
@@ -184,6 +190,7 @@ plugins/
   snap.py                   Thanos snap. Times out random half of chat.
   streamloots.py            Streamloots event hub. SSE listener + listener-list dispatch of card redemptions, chest purchases, gifts.
   factorio/                 Factorio integration package. plugin.py (lifecycle, card handling, manager API), rcon.py (asyncio Source-RCON client, no deps), catalog.py (action defs, Lua escaping, outbox->chat formatting), cards.py (CardStore: persisted card->action mappings), events.py (JSONL outbox tailer).
+  findit/                   FindIt (hatmaster.tv/FindIt, early dev, "findit" toggle default OFF). plugin.py (GPU worker child-process lifecycle: spawn on first page use, kill on toggle-off or idle), worker.py (YOLO-World + CLIP detection server, runs under .venv-findit on 127.0.0.1:8474). Page: public/findit.html, proxied WS: /ws/findit on the public webserver.
 overlays/
   control_panel.html        Dashboard for stream management (includes economy sim/test controls).
   nowplaying.html           Now Playing overlay (450x120).
@@ -1076,7 +1083,7 @@ toggle_feature, skip_song, youtube_ended, youtube_started, youtube_progress, sna
 
 All controllable via dashboard or API. Default: all enabled.
 
-song_requests, predictions, snap, claude_chat, smite_tracking, gamble, now_playing_overlay, auto_scene_switch, auto_title, god_requests, auto_shoutout, tts_highlights, kill_detection, voicelines, economy, streamloots, factorio
+song_requests, predictions, snap, claude_chat, smite_tracking, gamble, now_playing_overlay, auto_scene_switch, auto_title, god_requests, auto_shoutout, tts_highlights, kill_detection, voicelines, economy, youtube_rewards, web_trading, streamloots, factorio, spacegame (default OFF), findit (default OFF — hatmaster.tv/FindIt 404s and no GPU worker runs)
 
 ---
 
@@ -1160,6 +1167,9 @@ channel:manage:broadcast, channel:manage:predictions, channel:read:subscriptions
 | FACTORIO_SCRIPT_OUTPUT | Factorio script-output folder. Empty = auto-detect %APPDATA%\Factorio\script-output. |
 | FACTORIO_CARD_MAP | SEED ONLY for data/factorio_cards.json (first run). Live mappings are managed at /factorio/cards. Actions: adopt_pet, grow_pet, pet_say, boss_attack. |
 | FACTORIO_ANNOUNCE_EVENTS | Relay mod outbox events (pet deaths, boss kills) to Twitch chat (default True). |
+| FINDIT_PYTHON / WORKER_PORT / MODEL | FindIt worker: interpreter (.venv-findit), localhost port (8474), detection model (yolov8l-worldv2). |
+| FINDIT_SIM_THRESHOLD | CLIP cosine similarity to relabel a detection as an enrolled custom item (default 0.80). |
+| FINDIT_MAX_SESSIONS / IDLE_TIMEOUT / STARTUP_TIMEOUT | Concurrent phone cap (3) / secs before an unused worker is killed (900) / secs allowed for model warmup (240). |
 
 ---
 
@@ -1227,6 +1237,8 @@ access).
 | `GET /api/social/youtube` | Latest 12 uploads via playlistItems (1 quota unit, 15-min cache) |
 | `GET /api/social/bluesky` | Latest 10 posts via Bluesky public API (reposts/replies skipped, 15-min cache) |
 | `GET /api/social/tiktok` | Manual config passthrough (profile + featured video URL) |
+| `GET /FindIt` | FindIt phone page (404 while the `findit` toggle is off; `/findit` redirects) |
+| `GET /ws/findit` | WebSocket proxied to the FindIt GPU worker on localhost (404 while off, 429 over FINDIT_MAX_SESSIONS) |
 
 **Live updates:** the public webserver subscribes to the existing
 `OverlayManager` via a new `add_event_listener` API. When `economy.py`
@@ -2071,3 +2083,88 @@ tools/test_priority_request.py       exits cleanly (per-test close)
 tools/process_recordings.py          dashboard stop in finally
 main.py                              banner v2.8
 ```
+
+---
+
+## FindIt — Ctrl+F for Real Life (hatmaster.tv/FindIt, early development)
+
+Migrated 2026-07-02 from the standalone prototype at C:\Users\james\FindIt.
+Type what you're looking for on the phone page, point the camera around,
+and get a bounding box + beep (volume scales with confidence) when it's
+spotted. Tap a detected box to enroll it as a named custom item ("my lucky
+pen") — the worker stores a CLIP image embedding and from then on relabels
+that specific object and lets you search for it by name.
+
+### Architecture
+
+```
+Phone -> https://hatmaster.tv/FindIt          (public/findit.html)
+      -> wss://hatmaster.tv/ws/findit         (Cloudflare tunnel, TLS at edge)
+      -> core/public_webserver.py             _handle_findit_ws: proxy
+      -> ws://127.0.0.1:8474/ws               plugins/findit/worker.py
+                                              (child process, .venv-findit,
+                                               YOLO-World on the GPU)
+```
+
+- **The worker is a child process in its own venv** (`.venv-findit`) —
+  torch/ultralytics/fastapi stay out of the bot's environment entirely,
+  and a worker crash can never take the bot down. Managed by
+  `plugins/findit/plugin.py` with the same pattern as core/cloudflared.py.
+- **Lazy lifecycle:** no worker process runs until someone opens the page
+  and connects. A reconciler task (5s cadence) kills the worker when the
+  `findit` toggle goes off or after FINDIT_IDLE_TIMEOUT (900s) with no
+  clients — the model holds ~1.5 GB VRAM, so it never idles hot.
+- **Invisibility contract (same as spacegame):** toggle off = `/FindIt`
+  and `/ws/findit` 404 (the HTML route gets the styled 404 page, so the
+  URL is indistinguishable from one that never existed) and no worker
+  process exists. Flip it live from the control panel features card.
+- **Worker cwd is `data/findit/`** — model weights (yolov8l-worldv2.pt,
+  weights/clip/ViT-B-32.pt) live there, plus items.json (the custom-item
+  embedding gallery, atomic tmp+replace writes). First-ever start
+  auto-installs ultralytics' CLIP fork into .venv-findit and downloads
+  any missing weights; later starts are ~10-20s to model-warm.
+
+### WebSocket protocol (client <-> worker, proxied verbatim)
+
+```
+-> {"type": "query", "classes": ["ketchup bottle"], "conf": 0.2}
+-> <binary JPEG frame>                 (client self-paces: one in flight)
+<- {"type": "detections", "boxes": [{x1,y1,x2,y2,conf,label,custom,match,sim?}], "w", "h", "ms"}
+-> {"type": "enroll", "name": "my keys", "base": "keys", "image": <dataURL>}
+<- {"type": "enrolled", "name": "my keys", "views": 1}
+-> {"type": "forget", "name": "my keys"}
+<- {"type": "forgot", "name": "my keys"}
+```
+
+`match` = the box satisfies what was searched (custom names expand to
+their base class for detection, then CLIP re-ranks). Non-matching boxes
+render dim gray on the client and don't beep.
+
+### Setup (already done on this machine; for a rebuild)
+
+```powershell
+python -m venv .venv-findit
+.venv-findit\Scripts\python.exe -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+.venv-findit\Scripts\python.exe -m pip install ultralytics fastapi "uvicorn[standard]"
+```
+
+### Testing
+
+`python tools\test_findit_public.py` — 13-check integration suite that
+runs the REAL PublicWebServer + FindItPlugin + GPU worker chain on an
+ephemeral port with a stub bot (no Twitch/OBS/DB): invisibility when
+off, page + redirect when on, detection through the proxy, enroll/forget
+round-trip, reconciler kill on toggle-off. Safe to run while the
+production bot is up (worker port 8474 must be free).
+
+### Known limits / next steps
+
+- Public endpoint = anyone who finds the URL while the toggle is ON can
+  use GPU inference. Mitigations today: default-OFF toggle,
+  FINDIT_MAX_SESSIONS (3), one-frame-in-flight pacing. If it ever goes
+  properly public, add Twitch login gating via _session_identity (the
+  machinery /api/trade uses) and a per-IP frame budget.
+- CLIP similarity can confuse visually near-identical objects (two black
+  pens); more enrolled views + a higher FINDIT_SIM_THRESHOLD help.
+- The standalone prototype at C:\Users\james\FindIt still works
+  (self-signed HTTPS on the LAN) but is now superseded by this.

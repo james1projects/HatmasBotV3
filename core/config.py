@@ -461,7 +461,24 @@ DEFAULT_FEATURES = {
     "streamloots": True,   # gates event dispatch; connection stays up
     "factorio": True,      # gates card handling + chat announcements
     "spacegame": False,    # off = commands silent + hidden from /mod, game page 404s
+    "findit": False,       # off = hatmaster.tv/FindIt 404s + no GPU worker runs
 }
+
+# === FINDIT (plugins/findit/ — hatmaster.tv/FindIt, early development) ===
+# "Ctrl+F for real life": phone camera + open-vocabulary object detection
+# on the GPU. The heavy deps (torch/ultralytics) live in a dedicated venv
+# (.venv-findit), NOT the bot's environment — the bot only launches
+# plugins/findit/worker.py as a child process when the "findit" feature
+# toggle is on AND someone opens the page. Idle or toggled off = no
+# process, no VRAM.
+FINDIT_PYTHON = str(BASE_DIR / ".venv-findit" / "Scripts" / "python.exe")
+FINDIT_WORKER_PORT = 8474            # localhost-only detection worker
+FINDIT_MODEL = "yolov8l-worldv2.pt"  # resolved in data/findit/ (worker cwd)
+FINDIT_SIM_THRESHOLD = 0.80          # CLIP cosine sim to relabel a custom item
+FINDIT_MAX_SESSIONS = 3              # concurrent phone connections allowed
+FINDIT_IDLE_TIMEOUT = 900            # secs with no phones before worker stops
+FINDIT_STARTUP_TIMEOUT = 240         # secs to wait for model warmup (first-ever
+                                     # run also installs CLIP + downloads weights)
 
 # === DISCORD (plugins/discord_bridge.py) ===
 # See Discord_Integration_Plan.md. Overridden in config_local.py; the

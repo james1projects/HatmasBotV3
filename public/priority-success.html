@@ -26,14 +26,15 @@
   .brand-band {
     display: flex;
     justify-content: space-between;
-    align-items: baseline;
+    align-items: center;
     border-bottom: 1px solid var(--border);
     padding: 8px 0 12px;
     margin-bottom: 32px;
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: 11px;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.18em;
+    letter-spacing: 0.06em;
     color: var(--text-dim);
   }
   .brand-band a.left {
@@ -55,9 +56,12 @@
   }
   h1 {
     margin: 0 0 12px;
-    font-size: 32px;
-    letter-spacing: -0.02em;
-    line-height: 1.1;
+    font-family: var(--font-display);
+    font-size: 40px;
+    font-weight: 400;
+    letter-spacing: 0.02em;
+    line-height: 1;
+    text-transform: uppercase;
   }
   .lede {
     color: var(--text-dim);
@@ -89,10 +93,10 @@
     display: inline-block;
     padding: 10px 18px;
     border-radius: var(--radius-sm);
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: 12px;
     font-weight: 700;
-    letter-spacing: 0.16em;
+    letter-spacing: 0.05em;
     text-transform: uppercase;
     text-decoration: none;
     transition: filter 0.1s;
@@ -108,20 +112,12 @@
     color: var(--text);
   }
   .actions a:hover { filter: brightness(1.1); }
-  .footer-brand {
-    margin-top: 48px;
-    font-family: var(--font-mono);
-    font-size: 10px;
-    color: var(--text-fade);
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-  }
 </style>
 </head>
 <body>
   <div class="wrap">
     <div class="brand-band">
-      <a class="left" href="/"><img class="brand-hat" src="/hat.png" alt="">// HATMASTER.TV</a>
+      <a class="left" href="/"><img class="brand-hat" src="/hat.png" alt="">HATMASTER.TV</a>
       <div>PRIORITY REQUEST</div>
     </div>
 
@@ -140,9 +136,6 @@
          target="_blank" rel="noopener">Watch live ↗</a>
     </div>
 
-    <div class="footer-brand">
-      Hatmasbot v2.5 · made by Hatmaster &amp; Claude
-    </div>
   </div>
 
 <script>

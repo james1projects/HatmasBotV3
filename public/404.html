@@ -17,14 +17,15 @@
   .brand-band {
     display: flex;
     justify-content: space-between;
-    align-items: baseline;
+    align-items: center;
     border-bottom: 1px solid var(--border);
     padding: 8px 0 12px;
     margin-bottom: 64px;
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: 11px;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.18em;
+    letter-spacing: 0.06em;
     color: var(--text-dim);
   }
   .brand-band .left {
@@ -49,11 +50,13 @@
     margin: 0 0 12px;
   }
   .err h1 {
-    font-size: 32px;
+    font-family: var(--font-display);
+    font-size: 40px;
     margin: 0 0 18px;
-    letter-spacing: -0.02em;
-    font-weight: 700;
-    line-height: 1.05;
+    letter-spacing: 0.02em;
+    font-weight: 400;
+    line-height: 1;
+    text-transform: uppercase;
   }
   .err p {
     color: var(--text-dim);
@@ -71,9 +74,10 @@
     border: 1px solid var(--border);
     border-radius: 100px;
     color: var(--text);
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: 12px;
-    letter-spacing: 0.14em;
+    font-weight: 600;
+    letter-spacing: 0.05em;
     text-transform: uppercase;
     text-decoration: none;
     transition: border-color 0.12s, transform 0.12s, background 0.12s;
@@ -94,12 +98,12 @@
 <body>
   <div class="wrap">
     <div class="brand-band">
-      <a class="left" href="/"><img class="brand-hat" src="/hat.png" alt="">// HATMASTER.TV</a>
+      <a class="left" href="/"><img class="brand-hat" src="/hat.png" alt="">HATMASTER.TV</a>
       <div>404</div>
     </div>
 
     <div class="err">
-      <div class="kicker">// SIGNAL LOST</div>
+      <div class="kicker">Signal Lost</div>
       <div class="code">404</div>
       <h1>Off the chart.</h1>
       <p>This page does not exist. Check the URL for a typo, or head

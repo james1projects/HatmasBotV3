@@ -25,6 +25,17 @@ Usage:
     python tools/replay_economy.py             # confirms before running
     python tools/replay_economy.py --yes       # skip confirmation
     python tools/replay_economy.py --dry-run   # show what would happen
+    python tools/replay_economy.py --reconcile # gentle mode, see below
+
+--reconcile is the non-destructive variant: it sets god_prices totals
+and prices from the same tracker.gg lifetime aggregates but PRESERVES
+price_history and processed_matches (each god gets one extra
+price_history row, event='aggregate_reconcile', so charts show the
+adjustment). Use it to heal a window where the backfill was dead and
+the individual matches have scrolled off tracker.gg's 25-match
+listing: the missed matches can never be settled row-by-row, but the
+lifetime aggregates still include them. Restart the bot afterwards —
+it caches prices and games_played in memory.
 
 A timestamped backup of economy.db is taken before any changes. To
 roll back, copy the backup over economy.db. The raw profile JSON is
@@ -69,7 +80,7 @@ DEFAULT_MAX_MATCHES = 2000
 
 
 async def cmd_replay(skip_confirm: bool, dry_run: bool,
-                     max_matches: int) -> int:
+                     max_matches: int, reconcile: bool = False) -> int:
     if not SMITE2_PLATFORM_ID:
         print("SMITE2_PLATFORM_ID is empty — set it in config_local.py first.")
         return 1
@@ -83,19 +94,32 @@ async def cmd_replay(skip_confirm: bool, dry_run: bool,
     # ─── Confirm ──────────────────────────────────────────────────────
     if not dry_run and not skip_confirm:
         print("=" * 60)
-        print("REPLAY ECONOMY — this will:")
-        print(f"  * Back up: {db_path}")
-        print( "  * Wipe god_prices to defaults (price=100, totals=0)")
-        print( "  * Delete every row from price_history")
-        print( "  * Delete every row from processed_matches")
-        print(f"  * Walk tracker.gg history (cap {max_matches} matches)")
-        print( "  * Replay each match through the fair-value formula")
-        print()
-        print("PRESERVED: portfolios, transactions, dividends,")
-        print("           youtube_holdings, youtube_portfolios.")
+        if reconcile:
+            print("RECONCILE ECONOMY — this will:")
+            print(f"  * Back up: {db_path}")
+            print( "  * Fetch tracker.gg lifetime per-god aggregates")
+            print( "  * Overwrite god_prices totals + price per god")
+            print( "  * Append one 'aggregate_reconcile' price_history row per god")
+            print()
+            print("PRESERVED: price_history, processed_matches, portfolios,")
+            print("           transactions, dividends, all youtube_* tables.")
+            print()
+            print("Restart the bot afterwards — it caches prices in memory.")
+        else:
+            print("REPLAY ECONOMY — this will:")
+            print(f"  * Back up: {db_path}")
+            print( "  * Wipe god_prices to defaults (price=100, totals=0)")
+            print( "  * Delete every row from price_history")
+            print( "  * Delete every row from processed_matches")
+            print(f"  * Walk tracker.gg history (cap {max_matches} matches)")
+            print( "  * Replay each match through the fair-value formula")
+            print()
+            print("PRESERVED: portfolios, transactions, dividends,")
+            print("           youtube_holdings, youtube_portfolios.")
         print("=" * 60)
-        ans = input("Type 'reset' to proceed: ").strip().lower()
-        if ans != "reset":
+        word = "reconcile" if reconcile else "reset"
+        ans = input(f"Type '{word}' to proceed: ").strip().lower()
+        if ans != word:
             print("Aborted.")
             return 1
 
@@ -151,38 +175,51 @@ async def cmd_replay(skip_confirm: bool, dry_run: bool,
 
         print(f"Got per-god stats for {len(aggregates)} god(s).")
 
-        if dry_run:
-            print("[dry-run] Would wipe state and apply these prices:")
+        if dry_run or reconcile:
+            # Show the before → after diff so the change is auditable
+            # (dry-run stops here; reconcile continues to apply it).
             from plugins.economy import calculate_fair_value
+            current = {}
+            async with db.execute("""
+                SELECT god_name, price, games_played FROM god_prices
+            """) as cur:
+                async for row in cur:
+                    current[row[0]] = (row[1], row[2])
+            verb = "[dry-run] Would apply" if dry_run else "Applying"
+            print(f"{verb} these prices (old price/games -> new):")
             for god, agg in sorted(aggregates.items()):
                 fv = calculate_fair_value(
                     agg["wins"], agg["losses"],
                     agg["kills"], agg["deaths"], agg["assists"])
                 wr = (100.0 * agg["wins"] / agg["games"]
                       if agg["games"] else 0)
-                print(f"  {god:20s}  {fv:6.0f}  "
-                      f"{agg['games']}g  {agg['wins']}-{agg['losses']} "
-                      f"({wr:.0f}%)  "
+                old_p, old_g = current.get(god, (None, 0))
+                old = (f"{old_p:6.0f}/{old_g}g" if old_p is not None
+                       else "   new/0g")
+                print(f"  {god:20s}  {old} -> {fv:6.0f}/{agg['games']}g  "
+                      f"{agg['wins']}-{agg['losses']} ({wr:.0f}%)  "
                       f"K/D/A {agg['kills']}/{agg['deaths']}/{agg['assists']}")
-            return 0
+            if dry_run:
+                return 0
 
-        # ─── Wipe state ──────────────────────────────────────────────
-        print("Wiping god_prices, price_history, processed_matches…")
-        await db.execute("""
-            UPDATE god_prices SET
-                price          = ?,
-                games_played   = 0,
-                total_wins     = 0,
-                total_losses   = 0,
-                total_kills    = 0,
-                total_deaths   = 0,
-                total_assists  = 0,
-                updated_at     = datetime('now')
-        """, (ECONOMY_STARTING_PRICE,))
-        await db.execute("DELETE FROM price_history")
-        await db.execute("DELETE FROM processed_matches")
-        await db.commit()
-        print("State wiped.")
+        if not reconcile:
+            # ─── Wipe state (full replay only) ────────────────────────
+            print("Wiping god_prices, price_history, processed_matches…")
+            await db.execute("""
+                UPDATE god_prices SET
+                    price          = ?,
+                    games_played   = 0,
+                    total_wins     = 0,
+                    total_losses   = 0,
+                    total_kills    = 0,
+                    total_deaths   = 0,
+                    total_assists  = 0,
+                    updated_at     = datetime('now')
+            """, (ECONOMY_STARTING_PRICE,))
+            await db.execute("DELETE FROM price_history")
+            await db.execute("DELETE FROM processed_matches")
+            await db.commit()
+            print("State wiped.")
 
         # ─── Apply aggregate stats + fair-value price per god ───────
         from plugins.economy import calculate_fair_value
@@ -216,12 +253,15 @@ async def cmd_replay(skip_confirm: bool, dry_run: bool,
                   agg["wins"], agg["losses"],
                   agg["kills"], agg["deaths"], agg["assists"]))
 
-            # Seed price_history with one IPO-style entry so sparklines
-            # have a starting point.
+            # Full replay: seed price_history with one IPO-style entry
+            # so sparklines have a starting point. Reconcile: append an
+            # 'aggregate_reconcile' point instead — history is kept, so
+            # the chart shows the price stepping to its corrected value.
             await db.execute("""
                 INSERT INTO price_history (god_name, price, event)
-                VALUES (?, ?, 'replay_baseline')
-            """, (god, fv))
+                VALUES (?, ?, ?)
+            """, (god, fv,
+                  "aggregate_reconcile" if reconcile else "replay_baseline"))
             applied += 1
 
         await db.commit()
@@ -380,11 +420,16 @@ def main() -> int:
         help="List matches that would be replayed; don't wipe or write.")
     p.add_argument("--max", type=int, default=DEFAULT_MAX_MATCHES,
         metavar="N", help=f"Max matches to replay (default {DEFAULT_MAX_MATCHES}).")
+    p.add_argument("--reconcile", action="store_true",
+        help="Non-destructive: overwrite god_prices totals/prices from "
+             "lifetime aggregates but keep price_history and "
+             "processed_matches. Restart the bot afterwards.")
     args = p.parse_args()
     return asyncio.run(cmd_replay(
         skip_confirm=args.yes,
         dry_run=args.dry_run,
         max_matches=args.max,
+        reconcile=args.reconcile,
     ))
 
 

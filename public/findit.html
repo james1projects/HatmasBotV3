@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0b0f14">
+<title>FindIt - Hatmaster.tv</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #0b0f14; color: #e8eef4;
+               font-family: system-ui, -apple-system, sans-serif; overflow: hidden; }
+
+  #stage { position: fixed; inset: 0; }
+  /* video and canvas share the same aspect ratio, so identical object-fit
+     rules keep the overlay perfectly aligned with the picture */
+  #video, #overlay { position: absolute; inset: 0; width: 100%; height: 100%;
+                     object-fit: contain; }
+  #flash { position: absolute; inset: 0; pointer-events: none; opacity: 0;
+           box-shadow: inset 0 0 0 6px #22e06c; transition: opacity .5s; }
+  #flash.on { opacity: 1; transition: opacity .05s; }
+
+  #topbar { position: fixed; top: 0; left: 0; right: 0; display: flex; gap: 8px;
+            padding: max(10px, env(safe-area-inset-top)) 12px 10px;
+            background: rgba(11,15,20,.72); backdrop-filter: blur(10px); }
+  #query { flex: 1; min-width: 0; font-size: 16px; padding: 10px 12px;
+           border-radius: 10px; border: 1px solid #2a3644;
+           background: #121a24; color: #e8eef4; outline: none; }
+  #query:focus { border-color: #3b82f6; }
+  #toggle { font-size: 16px; font-weight: 600; padding: 10px 18px; border: 0;
+            border-radius: 10px; background: #22c55e; color: #06281a; }
+  #toggle.running { background: #ef4444; color: #fff; }
+
+  #bottombar { position: fixed; bottom: 0; left: 0; right: 0; display: flex;
+               align-items: center; gap: 14px;
+               padding: 10px 14px max(10px, env(safe-area-inset-bottom));
+               background: rgba(11,15,20,.72); backdrop-filter: blur(10px);
+               font-size: 13px; color: #9fb1c1; }
+  #bottombar label { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  #conf { width: 90px; accent-color: #3b82f6; }
+  #status { margin-left: auto; text-align: right; font-variant-numeric: tabular-nums; }
+  #status.found { color: #22e06c; font-weight: 700; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="video" autoplay muted playsinline></video>
+  <canvas id="overlay"></canvas>
+  <div id="flash"></div>
+</div>
+
+<div id="topbar">
+  <input id="query" type="text" placeholder="Find... e.g. ketchup bottle"
+         autocapitalize="off" autocomplete="off" enterkeyhint="search">
+  <button id="toggle">Start</button>
+</div>
+
+<div id="bottombar">
+  <label>Sensitivity <input id="conf" type="range" min="0.05" max="0.6" step="0.05" value="0.2"></label>
+  <label><input id="beep" type="checkbox" checked> Sound</label>
+  <span id="status">tap a found box to name it</span>
+</div>
+
+<script>
+const video = document.getElementById('video');
+const overlay = document.getElementById('overlay');
+const ctx = overlay.getContext('2d');
+const flash = document.getElementById('flash');
+const queryEl = document.getElementById('query');
+const toggleBtn = document.getElementById('toggle');
+const confEl = document.getElementById('conf');
+const beepEl = document.getElementById('beep');
+const statusEl = document.getElementById('status');
+
+let ws = null, running = false, busy = false, audioCtx = null;
+let lastBeep = 0, frames = 0, fpsT0 = performance.now(), fps = 0;
+let lastBoxes = [];         // boxes of the most recent server reply
+let statusHold = 0;         // keep transient messages (saved/forgot) visible
+let retries = 0;            // consecutive failed connects (server may be waking)
+const cap = document.createElement('canvas');       // capture buffer being sent
+const capCtx = cap.getContext('2d');
+const inflight = document.createElement('canvas');  // frame awaiting its reply
+const result = document.createElement('canvas');    // frame the reply belongs to
+
+function status(text, found) {
+  if (performance.now() < statusHold) return;
+  statusEl.textContent = text;
+  statusEl.classList.toggle('found', !!found);
+}
+function statusFlash(text) {
+  statusHold = 0;
+  status(text, true);
+  statusHold = performance.now() + 2500;
+}
+
+toggleBtn.onclick = () => running ? stop() : start();
+queryEl.addEventListener('change', sendQuery);
+confEl.addEventListener('change', sendQuery);
+queryEl.addEventListener('keydown', e => { if (e.key === 'Enter') queryEl.blur(); });
+overlay.addEventListener('click', onTap);
+
+async function start() {
+  if (!queryEl.value.trim()) { queryEl.focus(); status('type what to find first'); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' },
+               width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false
+    });
+    video.srcObject = stream;
+    await video.play();
+  } catch (e) { status('camera error: ' + e.message); return; }
+  // AudioContext must be created/resumed inside a user gesture (iOS rule)
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  audioCtx.resume();
+  running = true;
+  retries = 0;
+  toggleBtn.textContent = 'Stop';
+  toggleBtn.classList.add('running');
+  status('connecting... (first start loads the detector, ~30s)');
+  connect();
+}
+
+function stop() {
+  running = false; busy = false;
+  toggleBtn.textContent = 'Start';
+  toggleBtn.classList.remove('running');
+  if (ws) ws.close();
+  if (video.srcObject) { video.srcObject.getTracks().forEach(t => t.stop()); video.srcObject = null; }
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  lastBoxes = [];
+  flash.classList.remove('on');
+  status('stopped');
+}
+
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws/findit`);
+  ws.binaryType = 'arraybuffer';
+  ws.onopen = () => { retries = 0; sendQuery(); busy = false; status('searching...'); pump(); };
+  ws.onmessage = ev => handle(JSON.parse(ev.data));
+  ws.onclose = () => {
+    if (!running) return;
+    retries++;
+    if (retries > 40) { status('cannot reach the server - is FindIt enabled?'); stop(); return; }
+    status(retries < 4 ? 'reconnecting...'
+                       : 'waiting for the detector to start...');
+    setTimeout(connect, 2000);
+  };
+  ws.onerror = () => ws.close();
+}
+
+function sendQuery() {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: 'query',
+      classes: queryEl.value.split(',').map(s => s.trim()).filter(Boolean),
+      conf: parseFloat(confEl.value)
+    }));
+  }
+}
+
+// Self-pacing loop: exactly one frame in flight; the server's reply triggers
+// the next capture, so the rate adapts to network + inference latency.
+function pump() {
+  if (!running || busy || !ws || ws.readyState !== WebSocket.OPEN) return;
+  if (!video.videoWidth) { setTimeout(pump, 100); return; }
+  busy = true;
+  const scale = Math.min(1, 960 / Math.max(video.videoWidth, video.videoHeight));
+  cap.width = Math.round(video.videoWidth * scale);
+  cap.height = Math.round(video.videoHeight * scale);
+  capCtx.drawImage(video, 0, 0, cap.width, cap.height);
+  copyCanvas(cap, inflight);   // remember exactly what this reply will describe
+  cap.toBlob(async blob => {
+    if (!blob || !ws || ws.readyState !== WebSocket.OPEN) { busy = false; return; }
+    ws.send(await blob.arrayBuffer());
+  }, 'image/jpeg', 0.7);
+}
+
+function copyCanvas(src, dst) {
+  dst.width = src.width; dst.height = src.height;
+  dst.getContext('2d').drawImage(src, 0, 0);
+}
+
+function handle(msg) {
+  if (msg.type === 'enrolled') { statusFlash(`saved "${msg.name}" (${msg.views} view${msg.views > 1 ? 's' : ''})`); return; }
+  if (msg.type === 'forgot')   { statusFlash(`forgot "${msg.name}"`); return; }
+  if (msg.type === 'error')    { statusFlash('error: ' + msg.message); return; }
+  if (msg.type !== 'detections') return;
+  busy = false;
+  copyCanvas(inflight, result);   // the frame these boxes belong to
+  lastBoxes = msg.boxes;
+  draw(msg);
+  frames++;
+  const now = performance.now();
+  if (now - fpsT0 > 1000) { fps = frames * 1000 / (now - fpsT0); frames = 0; fpsT0 = now; }
+  const matched = msg.boxes.filter(b => b.match);
+  status(`${matched.length ? 'FOUND' : 'searching'} - ${fps.toFixed(1)} fps - ${msg.ms} ms`,
+         matched.length > 0);
+  if (matched.length) celebrate(matched);
+  else flash.classList.remove('on');
+  if (running) pump();
+}
+
+function draw(msg) {
+  if (msg.w && (overlay.width !== msg.w || overlay.height !== msg.h)) {
+    overlay.width = msg.w; overlay.height = msg.h;
+  }
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  const lw = Math.max(2, overlay.width / 240);
+  ctx.font = `bold ${Math.max(14, overlay.width / 40)}px system-ui`;
+  for (const b of msg.boxes) {
+    const color = !b.match ? 'rgba(160,170,180,.55)'   // detected but not what you asked for
+                : b.custom ? '#ffd54a'                  // your named item
+                : '#22e06c';                            // generic match
+    ctx.strokeStyle = color;
+    ctx.lineWidth = b.match ? lw : Math.max(1, lw / 2);
+    ctx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
+    const label = `${b.label} ${(b.conf * 100).toFixed(0)}%`;
+    const tw = ctx.measureText(label).width;
+    const th = Math.max(18, overlay.width / 32);
+    const ty = b.y1 > th ? b.y1 - th : b.y1;
+    ctx.fillStyle = b.match ? color : 'rgba(120,130,140,.5)';
+    ctx.fillRect(b.x1 - lw / 2, ty, tw + 12, th);
+    ctx.fillStyle = '#04140a';
+    ctx.fillText(label, b.x1 + 5, ty + th * 0.75);
+  }
+}
+
+function celebrate(matchedBoxes) {
+  flash.classList.add('on');
+  const now = performance.now();
+  if (now - lastBeep > 800) {
+    lastBeep = now;
+    const bestConf = Math.max(...matchedBoxes.map(b => b.conf));
+    if (beepEl.checked) beep(Math.min(1, 0.35 + 0.65 * bestConf));
+    if (navigator.vibrate) navigator.vibrate(80);
+  }
+}
+
+function beep(volume) {
+  if (!audioCtx) return;
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.type = 'sine';
+  o.frequency.value = 880;
+  g.gain.setValueAtTime(volume, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.18);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start();
+  o.stop(audioCtx.currentTime + 0.2);
+}
+
+// ---- tap-to-name -----------------------------------------------------------
+
+function onTap(ev) {
+  if (!lastBoxes.length || !result.width) return;
+  // screen -> frame coordinates (undo the object-fit:contain letterboxing)
+  const r = overlay.getBoundingClientRect();
+  const scale = Math.min(r.width / overlay.width, r.height / overlay.height);
+  const dx = (r.width - overlay.width * scale) / 2;
+  const dy = (r.height - overlay.height * scale) / 2;
+  const x = (ev.clientX - r.left - dx) / scale;
+  const y = (ev.clientY - r.top - dy) / scale;
+
+  let hit = null;
+  for (const b of lastBoxes) {
+    if (x >= b.x1 && x <= b.x2 && y >= b.y1 && y <= b.y2) {
+      const area = (b.x2 - b.x1) * (b.y2 - b.y1);
+      if (!hit || area < hit.area) hit = { box: b, area };
+    }
+  }
+  if (hit) nameBox(hit.box);
+}
+
+function nameBox(box) {
+  const name = box.custom
+    ? prompt(`Rename "${box.label}" - or leave empty to forget it. ` +
+             `Entering the same name adds another view (helps recognition).`, box.label)
+    : prompt(`Name this ${box.label} (e.g. "my lucky pen"). ` +
+             `You'll then be able to search for it by that name.`);
+  if (name === null || !ws || ws.readyState !== WebSocket.OPEN) return;
+  const trimmed = name.trim();
+  if (!trimmed) {
+    if (box.custom) ws.send(JSON.stringify({ type: 'forget', name: box.label }));
+    return;
+  }
+  // crop the tapped box (with margin) from the frame those boxes belong to
+  const m = 0.12, bw = box.x2 - box.x1, bh = box.y2 - box.y1;
+  const xa = Math.max(0, box.x1 - bw * m), ya = Math.max(0, box.y1 - bh * m);
+  const xb = Math.min(result.width, box.x2 + bw * m), yb = Math.min(result.height, box.y2 + bh * m);
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(xb - xa));
+  c.height = Math.max(1, Math.round(yb - ya));
+  c.getContext('2d').drawImage(result, xa, ya, xb - xa, yb - ya, 0, 0, c.width, c.height);
+  ws.send(JSON.stringify({ type: 'enroll', name: trimmed, base: box.label,
+                           image: c.toDataURL('image/jpeg', 0.85) }));
+}
+</script>
+</body>
+</html>

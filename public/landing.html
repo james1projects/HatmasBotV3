@@ -29,18 +29,19 @@
     padding: 24px 16px 60px;
   }
 
-  /* Brand band — terminal-style header strip */
+  /* Brand band — site header strip */
   .brand-band {
     display: flex;
     justify-content: space-between;
-    align-items: baseline;
+    align-items: center;
     border-bottom: 1px solid var(--border);
     padding: 8px 0 12px;
     margin-bottom: 20px;
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: 11px;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.18em;
+    letter-spacing: 0.06em;
     color: var(--text-dim);
   }
   .brand-band .left { color: var(--accent); font-weight: 700; }
@@ -60,10 +61,10 @@
     padding: 32px 0 18px;
   }
   .hero .kicker {
-    font-family: var(--font-mono);
-    font-size: 10px;
+    font-family: var(--font-sans);
+    font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.24em;
+    letter-spacing: 0.16em;
     text-transform: uppercase;
     color: var(--accent);
     margin-bottom: 14px;
@@ -126,10 +127,11 @@
   }
   .platform-pill .logo svg { width: 100%; height: 100%; display: block; }
   .platform-pill .handle {
-    font-family: var(--font-mono);
-    font-size: 12px;
+    font-family: var(--font-sans);
+    font-size: 12.5px;
+    font-weight: 500;
     color: var(--text);
-    letter-spacing: 0.02em;
+    letter-spacing: 0.01em;
   }
   .platform-pill .pip {
     display: none;
@@ -160,10 +162,10 @@
     margin: 26px 0;
   }
   .market-card .mk-kicker {
-    font-family: var(--font-mono);
-    font-size: 10px;
+    font-family: var(--font-sans);
+    font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.24em;
+    letter-spacing: 0.16em;
     text-transform: uppercase;
     color: var(--accent);
     margin-bottom: 8px;
@@ -188,10 +190,10 @@
     line-height: 1.5;
   }
   .market-card .mk-cta {
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: 12px;
     font-weight: 700;
-    letter-spacing: 0.14em;
+    letter-spacing: 0.07em;
     text-transform: uppercase;
     color: var(--accent);
     border: 1px solid var(--accent);
@@ -214,10 +216,10 @@
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    font-family: var(--font-mono);
-    font-size: 11px;
+    font-family: var(--font-sans);
+    font-size: 12px;
     font-weight: 600;
-    letter-spacing: 0.16em;
+    letter-spacing: 0.05em;
     text-transform: uppercase;
     padding: 8px 16px;
     background: transparent;
@@ -245,11 +247,9 @@
   }
   .social-panel { margin-bottom: 18px; }
   .social-loading {
-    font-family: var(--font-mono);
-    font-size: 11px;
+    font-family: var(--font-sans);
+    font-size: 12px;
     color: var(--text-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.14em;
     text-align: center;
     padding: 28px 0;
   }
@@ -288,8 +288,6 @@
     font-family: var(--font-mono);
     font-size: 10px;
     color: var(--text-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
     padding: 0 10px 9px;
   }
   .yt-inline-player {
@@ -334,10 +332,10 @@
     line-height: 1.2;
   }
   .bsky-profile .pf-handle {
-    font-family: var(--font-mono);
-    font-size: 11px;
+    font-family: var(--font-sans);
+    font-size: 12px;
     color: var(--text-dim);
-    letter-spacing: 0.04em;
+    letter-spacing: 0.01em;
   }
   .bsky-feed {
     display: flex;
@@ -380,7 +378,12 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .bsky-head .ph-handle,
+  .bsky-head .ph-handle {
+    font-family: var(--font-sans);
+    font-size: 11px;
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
   .bsky-head .ph-time {
     font-family: var(--font-mono);
     font-size: 10.5px;
@@ -426,10 +429,10 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--text-dim);
-    font-family: var(--font-mono);
+    font-family: var(--font-sans);
     font-size: 11px;
     font-weight: 600;
-    letter-spacing: 0.16em;
+    letter-spacing: 0.05em;
     text-transform: uppercase;
     cursor: pointer;
     transition: border-color 0.12s, color 0.12s;
@@ -466,15 +469,15 @@
 
   <div class="wrap" id="maincontent" role="main" tabindex="-1">
     <div class="brand-band" role="banner">
-      <div class="left"><img class="brand-hat" src="/hat.png" alt="">// HATMASTER.TV</div>
+      <div class="left"><img class="brand-hat" src="/hat.png" alt="">HATMASTER.TV</div>
       <div class="right-cluster">
         <a href="/market" class="icon-toggle" style="text-decoration: none;"
            title="Hatmas Market — god prices, portfolios, trading">
-          [MARKET]
+          Market
         </a>
         <a href="/community" class="icon-toggle" style="text-decoration: none;"
            title="God request queue + viewer suggestions">
-          [COMMUNITY]
+          Community
         </a>
         <div class="status offline" id="band-status">
           <span class="dot"></span><span id="band-status-text">OFFLINE</span>
@@ -483,7 +486,7 @@
     </div>
 
     <section class="hero" id="hero">
-      <div class="kicker">// SMITE 2 STREAMS · VIDEOS · COMMUNITY</div>
+      <div class="kicker">Smite 2 Streams · Videos · Community</div>
       <h1 class="hero-title">Hatmaster<span class="accent">.tv</span></h1>
       <p class="hero-tagline">
         Watch live on Twitch, catch VODs on YouTube,<br>
@@ -530,7 +533,7 @@
     </section>
 
     <section class="market-card" aria-label="The Hatmas Market">
-      <div class="mk-kicker">// THE HATMAS MARKET ─ A SMITE 2 STOCK EXCHANGE</div>
+      <div class="mk-kicker">The Hatmas Market — A Smite 2 Stock Exchange</div>
       <div class="mk-body">
         <div class="mk-text">
           <div class="mk-title">Hatmas <span class="accent">Market</span></div>
@@ -540,7 +543,7 @@
             then climb the leaderboard.
           </p>
         </div>
-        <a class="mk-cta" href="/market">ENTER THE MARKET →</a>
+        <a class="mk-cta" href="/market">Enter the Market →</a>
       </div>
     </section>
 
@@ -588,12 +591,6 @@
     <div class="social-panel" id="panel-tiktok" style="display:none"></div>
     <div class="social-panel" id="panel-bluesky" style="display:none"></div>
 
-    <div class="footer-brand">
-      <div class="footer-build">
-        <span class="dot"></span><span id="last-ping">DATA · &lt;1s</span> &nbsp;·&nbsp; HATMASBOT v2.7
-      </div>
-      <div>Made by <a href="https://twitch.tv/hatmaster" target="_blank">Hatmaster</a> &amp; Claude</div>
-    </div>
   </div>
 
 <script src="/auth.js"></script>
@@ -614,23 +611,9 @@
   }
   setLive(false);  // default until first stream-status response
 
-  // ─── footer "last data" ping ────────────────────────────────────
-  // Bloomberg-terminal-y signal that the page is fresh. bumpPing()
-  // is called whenever we successfully pull from the API; a 1s
-  // interval re-renders the relative label so the user sees it tick.
-  let _lastPingMs = Date.now();
-  function bumpPing() { _lastPingMs = Date.now(); updatePingLabel(); }
-  function updatePingLabel() {
-    const el = document.getElementById('last-ping');
-    if (!el) return;
-    const ago = Math.floor((Date.now() - _lastPingMs) / 1000);
-    let label;
-    if (ago < 2)       label = 'DATA · <1s';
-    else if (ago < 60) label = 'DATA · ' + ago + 's';
-    else               label = 'DATA · ' + Math.floor(ago / 60) + 'm';
-    el.textContent = label;
-  }
-  setInterval(updatePingLabel, 1000);
+  // Footer (and its DATA freshness tag) removed July 2026. bumpPing
+  // stays as a no-op so the data-load call sites don't need touching.
+  function bumpPing() {}
 
   // ─── Twitch embed (live-only, plus chat + currently-playing) ────
   // Polls /api/stream-status every 30s. When live, mounts both the
@@ -782,7 +765,7 @@
     }
     html += '<div class="social-cta"><a class="icon-toggle" href="' +
       profile + '" target="_blank" rel="noopener">' +
-      '[VISIT MY TIKTOK]</a></div>';
+      'Visit my TikTok</a></div>';
     el.innerHTML = html;
     // TikTok's embed script: load ONCE globally; re-adding it on
     // every tab switch re-inits embeds weirdly (plan doc warning).
@@ -851,7 +834,7 @@
     _bskyLoading = true;
     var btn = document.getElementById('bsky-more');
     var feed = document.getElementById('bsky-feed');
-    if (btn) { btn.disabled = true; btn.textContent = 'LOADING...'; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Loading...'; }
     try {
       var data = await _bskyFetchPage();
       _bskyCursor = data.cursor || '';
@@ -861,7 +844,7 @@
     } catch (e) { _bskyCursor = ''; }
     if (btn) {
       btn.disabled = false;
-      btn.textContent = 'LOAD MORE POSTS';
+      btn.textContent = 'Load more posts';
       // No cursor (or a page that filtered to nothing) = end of feed.
       btn.style.display = _bskyCursor ? '' : 'none';
     }
@@ -897,14 +880,14 @@
         escapeHtml(pf.handle || data.handle || '') + '</div>' +
         '</div>' +
         '<a class="icon-toggle" href="' + pfUrl + '"' +
-        ' target="_blank" rel="noopener">[FOLLOW]</a>' +
+        ' target="_blank" rel="noopener">Follow</a>' +
         '</div>' +
         '<div class="bsky-feed" id="bsky-feed">';
       posts.forEach(function (p) { html += _bskyPostHtml(p); });
       html += '</div>' +
         '<button class="bsky-more" id="bsky-more"' +
         (_bskyCursor ? '' : ' style="display:none"') +
-        '>LOAD MORE POSTS</button></div>';
+        '>Load more posts</button></div>';
       el.innerHTML = html;
       var btn = document.getElementById('bsky-more');
       btn.addEventListener('click', _bskyLoadMore);

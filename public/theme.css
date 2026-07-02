@@ -130,9 +130,9 @@ a:hover { color: var(--accent-hi); }
   display: inline-block;
   padding: 2px 6px;
   font-size: 10px;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -146,27 +146,32 @@ a:hover { color: var(--accent-hi); }
 .down  { color: var(--red)   !important; }
 .muted { color: var(--text-dim) !important; }
 
-/* "SECTION TITLE" — the all-caps tracked label that goes above
- * panels. Every section now opens with the brand's // slash mark in
- * bronze and closes with a hairline rule fading right — one shared
- * device that makes all pages read as the same terminal. */
+/* "SECTION TITLE" — the header that goes above panels. Set in the
+ * display face (Bebas Neue — same condensed DNA as the stream
+ * overlays and thumbnails) so sections read as channel-brand
+ * headers, not terminal log lines. Opens with a skewed bronze bar
+ * (a quieter echo of the old // mark) and closes with a hairline
+ * rule fading right. */
 .section-title {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 600;
+  gap: 10px;
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 400;
   text-transform: uppercase;
-  letter-spacing: 0.18em;
-  color: var(--text-dim);
-  margin: 0 0 10px;
+  letter-spacing: 0.045em;
+  line-height: 1;
+  color: var(--text);
+  margin: 0 0 12px;
 }
 .section-title::before {
-  content: '//';
-  color: var(--accent);
-  font-weight: 700;
-  letter-spacing: 0;
+  content: '';
+  width: 5px;
+  height: 15px;
+  flex-shrink: 0;
+  background: var(--accent);
+  transform: skewX(-14deg);
 }
 .section-title::after {
   content: '';
@@ -183,12 +188,12 @@ a:hover { color: var(--accent-hi); }
   flex-wrap: wrap;
 }
 .tab {
-  font-family: var(--font-mono);
-  font-size: 10px;
+  font-family: var(--font-sans);
+  font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.14em;
-  padding: 4px 10px;
+  letter-spacing: 0.06em;
+  padding: 4px 11px;
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text-dim);
@@ -211,12 +216,12 @@ a:hover { color: var(--accent-hi); }
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text-dim);
-  font-family: var(--font-mono);
-  font-size: 10px;
+  font-family: var(--font-sans);
+  font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.12em;
-  padding: 3px 8px;
+  letter-spacing: 0.06em;
+  padding: 4px 10px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: border-color 0.1s, color 0.1s, background 0.1s;
@@ -245,12 +250,13 @@ a:hover { color: var(--accent-hi); }
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 11px;
+  font-weight: 600;
   color: var(--text-dim);
   margin-bottom: 8px;
   text-transform: uppercase;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.07em;
   gap: 12px;
   flex-wrap: wrap;
 }
@@ -294,12 +300,13 @@ a:hover { color: var(--accent-hi); }
 .stream-meta-right .viewers { color: var(--accent); font-weight: 600; }
 
 .now-playing-line {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 11px;
+  font-weight: 600;
   color: var(--text-dim);
   margin: 0 0 8px;
   text-transform: uppercase;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.07em;
 }
 .now-playing-line .god {
   color: var(--accent);
@@ -351,42 +358,20 @@ a:hover { color: var(--accent-hi); }
   border-radius: var(--radius-sm);
   padding: 6px 10px;
   margin: 0 0 10px;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 11px;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.07em;
   text-align: center;
-}
-
-/* ─── Brand footer ─────────────────────────────────────────── */
-.footer-brand {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  text-align: center;
-  padding: 32px 0 8px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  color: var(--text-fade);
-  text-transform: uppercase;
-}
-.footer-brand a {
-  color: var(--text-dim);
-  border-bottom: 1px dotted var(--text-fade);
-}
-.footer-brand a:hover {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
 }
 
 /* ─── Shared "ambient" polish (every page) ─────────────────────
  *
  * These rules were originally inline in landing.html. Hoisted up
  * so portfolio / god / community pages get the same chart-grid
- * background, brand-band offline state, and footer build tag
- * without duplicating CSS per page.
+ * background and brand-band offline state without duplicating
+ * CSS per page.
  */
 
 /* Subtle bronze chart-grid pattern fixed to the viewport. Sells the
@@ -424,50 +409,14 @@ html body {
   color: var(--text-fade);
 }
 
-/* Footer build tag: Bloomberg-style "data freshness" line. Pages
- * that include the markup get the styling for free. Pages that
- * want it should put this above the attribution line:
- *
- *   <div class="footer-build">
- *     <span class="dot"></span><span data-last-ping>DATA · <1s</span>
- *     &nbsp;·&nbsp; HATMASBOT v2.5
- *   </div>
- *
- * The optional data-last-ping element is updated client-side by
- * each page's poll loop. If the page doesn't poll, drop the
- * element and just show the static build tag. */
-.footer-build {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--text-fade);
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-}
-.footer-build .dot {
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--green);
-  box-shadow: 0 0 5px var(--green);
-  margin-right: 8px;
-  vertical-align: middle;
-}
-
-.footer-controls {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-
 /* Hero kicker — the small tracked-out mono label that goes above
  * a page title. Used on landing, available on any page that wants
  * to introduce itself visually. */
 .kicker {
-  font-family: var(--font-mono);
-  font-size: 10px;
+  font-family: var(--font-sans);
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.24em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--accent);
 }
@@ -483,8 +432,7 @@ html body {
   .ticker-track            { animation: none !important; }
   .live-indicator .dot     { animation: none !important; }
   .platform-pill .pip      { animation: none !important; }
-  .brand-band .status .dot,
-  .footer-build .dot       { box-shadow: none !important; }
+  .brand-band .status .dot { box-shadow: none !important; }
 }
 
 /* ─── Website login (auth.js) ─────────────────────────────────────
@@ -504,20 +452,22 @@ html body {
   display: block;
 }
 .auth-name {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.08em;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
   color: var(--text);
   text-decoration: none;
-  text-transform: uppercase;
 }
 .auth-name:hover { color: var(--accent); }
 .market-chip {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 10px;
-  letter-spacing: 0.14em;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   padding: 3px 8px;
   border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   margin-right: 10px;
   white-space: nowrap;
 }
@@ -544,13 +494,15 @@ html body {
 .trade-row .t-god    { flex: 2 1 140px; }
 .trade-row .t-amount { flex: 1 1 100px; }
 .trade-btn {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  padding: 8px 14px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 8px 16px;
   cursor: pointer;
   background: transparent;
   border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   color: var(--text);
 }
 .trade-btn.buy:hover  { border-color: var(--green); color: var(--green); }
@@ -559,24 +511,26 @@ html body {
 .trade-sub {
   display: flex;
   justify-content: space-between;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: 10px;
+  font-weight: 600;
   color: var(--text-dim);
   margin-top: 8px;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
+.trade-sub .num, .trade-sub [data-num] { font-family: var(--font-mono); }
 .trade-msg {
-  font-family: var(--font-mono);
-  font-size: 11px;
+  font-family: var(--font-sans);
+  font-size: 12px;
   margin-top: 8px;
   min-height: 14px;
 }
 .trade-msg.ok  { color: var(--green); }
 .trade-msg.err { color: var(--red); }
 .trade-login-note {
-  font-family: var(--font-mono);
-  font-size: 11px;
+  font-family: var(--font-sans);
+  font-size: 13px;
   color: var(--text-dim);
 }
 .trade-login-note a { color: var(--accent); }
@@ -586,12 +540,19 @@ html body {
  * focus rings. Palette untouched — this is execution polish. */
 
 /* Brand-band hat mark — the channel logo finally lives on the site.
- * Served from /hat.png (copy of overlays/hat.png). */
+ * Served from /hat.png (copy of overlays/hat.png). The wordmark is
+ * set in the display face so the site header carries the same
+ * condensed identity as the stream overlays and thumbnails. */
 .brand-band .left,
 .brand-band a.left {
   display: inline-flex;
   align-items: center;
   gap: 9px;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  line-height: 1;
 }
 .brand-hat {
   height: 20px;
@@ -619,12 +580,6 @@ html body {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
-}
-
-/* Footer: hairline separation from content above. */
-.footer-brand {
-  border-top: 1px solid var(--border);
-  margin-top: 28px;
 }
 
 /* Skip-to-content link: off-screen until focused by keyboard (WCAG 2.4.1). */

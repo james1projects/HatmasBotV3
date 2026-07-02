@@ -682,5 +682,12 @@ class GodMatcher:
         }
         if slug in specials:
             return specials[slug]
-        # Default: capitalize each word
-        return " ".join(word.capitalize() for word in slug.split("-"))
+        # Default: capitalize each word. Stems may use hyphens (CDN
+        # slugs: "hou-yi") or spaces (operator-named files: "Ah Puch");
+        # treat both as word separators so "Ah Puch.png" maps to
+        # "Ah Puch", not "Ah puch" (capitalize() lowercases the rest
+        # of the word, which silently filtered every multi-word god's
+        # overlay / reference fingerprints).
+        return " ".join(
+            word.capitalize() for word in slug.replace(" ", "-").split("-")
+        )

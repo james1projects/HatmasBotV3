@@ -128,10 +128,17 @@ class _HistoryMixin:
                 mid = attrs.get("id") or (entry.get("id") if isinstance(entry, dict) else None)
                 if not mid:
                     continue
+                # Match start time: the live listing schema (verified
+                # 2026-07) carries it as metadata.timestamp; older
+                # attribute names kept as fallbacks.
+                emeta = entry.get("metadata", {}) if isinstance(entry, dict) else {}
+                if not isinstance(emeta, dict):
+                    emeta = {}
                 out.append({
                     "match_id": mid,
                     "start_time": (attrs.get("startTime")
-                                   or attrs.get("start_time")),
+                                   or attrs.get("start_time")
+                                   or emeta.get("timestamp")),
                     "raw_entry": entry,
                 })
 

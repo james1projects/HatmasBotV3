@@ -45,3 +45,9 @@ curl_cffi>=0.6.0                # Chrome TLS fingerprint impersonation
 #
 # google-auth-oauthlib>=1.2
 # google-api-python-client>=2.130
+
+# === FindIt worker (NOT installed here) ===
+# The FindIt GPU worker (plugins/findit/worker.py) runs in its own venv,
+# .venv-findit, with torch+cu128 / torchvision / ultralytics / fastapi /
+# uvicorn. Keep those OUT of the bot environment — see the FindIt section
+# of HATMASBOT.md for the exact install commands.

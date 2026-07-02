@@ -84,3 +84,9 @@ jobs/
 # Listed so they don't reappear in `git status` if recreated by mistake.
 /git
 /query
+
+# FindIt GPU worker venv (torch/ultralytics — see HATMASBOT.md FindIt section)
+.venv-findit/
+
+# Model weights (re-downloaded on first run - too big for GitHub)
+weights/
