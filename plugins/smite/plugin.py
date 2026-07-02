@@ -85,7 +85,12 @@ class SmitePlugin(
         self.session = None           # aiohttp session for Twitch API calls
         self._cffi_session = None     # curl_cffi session for tracker.gg (Cloudflare bypass)
         self._token_manager = token_manager  # Auto-refresh token manager
-        self._cffi_executor = ThreadPoolExecutor(max_workers=2)
+        # max_workers=1: every tracker.gg call shares ONE curl_cffi
+        # Session, and curl handles are not safe to drive from two
+        # threads at once. A single worker serializes them (calls are
+        # infrequent - a poll every 30-45s plus the odd chat command),
+        # trading rare queuing latency for no cross-thread session use.
+        self._cffi_executor = ThreadPoolExecutor(max_workers=1)
 
         # Match state
         self.is_in_match = False
