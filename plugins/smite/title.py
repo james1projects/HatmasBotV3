@@ -160,11 +160,12 @@ class _TitleMixin:
         """Persist current title templates to disk."""
         import core.config as _cfg
         try:
+            from core.atomic_io import atomic_write_json
             path = Path(DATA_DIR) / "title_templates.json"
-            path.write_text(json.dumps({
+            atomic_write_json(path, {
                 "god": _cfg.TITLE_TEMPLATE_GOD,
                 "lobby": _cfg.TITLE_TEMPLATE_LOBBY,
-            }, indent=2), encoding="utf-8")
+            })
         except Exception as e:
             print(f"[Smite] Failed to save title templates: {e}")
 

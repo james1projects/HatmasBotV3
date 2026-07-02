@@ -64,13 +64,9 @@ class DeathCounterPlugin:
 
     def _save_state(self):
         try:
-            STATE_FILE.write_text(
-                json.dumps(
-                    {"count": self._count, "date": self._date},
-                    indent=2,
-                ),
-                encoding="utf-8",
-            )
+            from core.atomic_io import atomic_write_json
+            atomic_write_json(STATE_FILE,
+                              {"count": self._count, "date": self._date})
         except Exception as e:
             print(f"[DeathCounter] Failed to save state: {e}")
 

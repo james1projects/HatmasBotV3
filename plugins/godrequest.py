@@ -97,8 +97,8 @@ class GodRequestPlugin:
                 self.queue = []
 
     def _save_data(self):
-        with open(GODREQ_QUEUE_FILE, "w") as f:
-            json.dump(self.queue, f, indent=2)
+        from core.atomic_io import atomic_write_json
+        atomic_write_json(GODREQ_QUEUE_FILE, self.queue)
 
     def _save_history(self, entry):
         history = []
@@ -109,8 +109,8 @@ class GodRequestPlugin:
             except Exception:
                 pass
         history.append(entry)
-        with open(GODREQ_HISTORY_FILE, "w") as f:
-            json.dump(history, f, indent=2)
+        from core.atomic_io import atomic_write_json
+        atomic_write_json(GODREQ_HISTORY_FILE, history)
         for fn in self._history_listeners:
             try:
                 fn(entry)

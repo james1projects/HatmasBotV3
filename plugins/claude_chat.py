@@ -44,8 +44,8 @@ class ClaudeChatPlugin:
     def _save_history(self):
         """Persist full conversation history to disk."""
         try:
-            with open(CLAUDE_HISTORY_FILE, "w") as f:
-                json.dump(self.history, f, indent=2)
+            from core.atomic_io import atomic_write_json
+            atomic_write_json(CLAUDE_HISTORY_FILE, self.history)
         except Exception as e:
             print(f"[Claude] Failed to save history: {e}")
 

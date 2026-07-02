@@ -363,11 +363,11 @@ class DiscordBridgePlugin:
 
     def _save_announce_state(self):
         try:
-            with open(ANNOUNCE_STATE_FILE, "w") as f:
-                json.dump({
-                    "last_announce_date": self._last_announce_date,
-                    "saved_at": datetime.now().isoformat(timespec="seconds"),
-                }, f, indent=2)
+            from core.atomic_io import atomic_write_json
+            atomic_write_json(ANNOUNCE_STATE_FILE, {
+                "last_announce_date": self._last_announce_date,
+                "saved_at": datetime.now().isoformat(timespec="seconds"),
+            })
         except Exception as e:
             print(f"[Discord] Failed to save announce state: {e}")
 

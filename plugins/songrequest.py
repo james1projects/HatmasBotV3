@@ -102,14 +102,14 @@ class SongRequestPlugin:
                 pass
 
     def _save_data(self):
-        with open(SR_LIKES_FILE, "w") as f:
-            json.dump({"likes": self.likes, "user_likes": self.user_likes}, f, indent=2)
-        with open(SR_QUEUE_FILE, "w") as f:
-            json.dump(self.queue, f, indent=2)
+        from core.atomic_io import atomic_write_json
+        atomic_write_json(SR_LIKES_FILE,
+                          {"likes": self.likes, "user_likes": self.user_likes})
+        atomic_write_json(SR_QUEUE_FILE, self.queue)
 
     def _save_blacklist(self):
-        with open(SR_BLACKLIST_FILE, "w") as f:
-            json.dump(self.blacklist, f, indent=2)
+        from core.atomic_io import atomic_write_json
+        atomic_write_json(SR_BLACKLIST_FILE, self.blacklist)
 
     def _save_state(self):
         """Persist current_song so the overlay can restore after a restart."""
@@ -117,8 +117,8 @@ class SongRequestPlugin:
             "current_song": self.current_song,
             "youtube_playing": self._youtube_playing,
         }
-        with open(SR_STATE_FILE, "w") as f:
-            json.dump(state, f, indent=2)
+        from core.atomic_io import atomic_write_json
+        atomic_write_json(SR_STATE_FILE, state)
 
     def _save_history(self, song):
         history = []
@@ -126,8 +126,8 @@ class SongRequestPlugin:
             with open(SR_HISTORY_FILE) as f:
                 history = json.load(f)
         history.append({**song, "played_at": datetime.now().isoformat()})
-        with open(SR_HISTORY_FILE, "w") as f:
-            json.dump(history, f, indent=2)
+        from core.atomic_io import atomic_write_json
+        atomic_write_json(SR_HISTORY_FILE, history)
 
     @staticmethod
     def _song_key(title, artist):
@@ -229,8 +229,9 @@ class SongRequestPlugin:
                     "refresh_token": self.spotify_refresh,
                     "expiry": self.spotify_token_expiry,
                 }
-                with open(DATA_DIR / "spotify_token.json", "w") as f:
-                    json.dump(token_data, f)
+                from core.atomic_io import atomic_write_json
+                atomic_write_json(DATA_DIR / "spotify_token.json",
+                                  token_data, indent=None)
                 print("[SongRequest] Spotify token refreshed")
             else:
                 print(f"[SongRequest] Spotify refresh failed: {resp.status}")

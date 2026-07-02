@@ -58,10 +58,11 @@ class CardStore:
     def _save(self):
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(
+            from core.atomic_io import atomic_write_text
+            atomic_write_text(
+                self.path,
                 json.dumps({"version": 1, "cards": self._cards},
-                           indent=2) + "\n",
-                encoding="utf-8")
+                           indent=2) + "\n")
         except OSError as e:
             print(f"[Factorio] Card store save failed: {e}")
 

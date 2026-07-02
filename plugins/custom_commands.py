@@ -50,9 +50,8 @@ class CustomCommandsPlugin:
 
     def _save(self):
         try:
-            STORE_FILE.write_text(
-                json.dumps(self.commands, indent=2, sort_keys=True),
-                encoding="utf-8")
+            from core.atomic_io import atomic_write_json
+            atomic_write_json(STORE_FILE, self.commands, sort_keys=True)
         except Exception as e:
             print(f"[CustomCmds] Failed to save store: {e}")
 

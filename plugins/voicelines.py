@@ -568,6 +568,7 @@ class VoiceLinePlugin:
                 "reward_map": self._reward_map,
                 "last_god_slug": self._last_god_slug,
             }
-            STATE_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            from core.atomic_io import atomic_write_json
+            atomic_write_json(STATE_FILE, data)
         except Exception as e:
             print(f"[VoiceLine] Failed to save state: {e}")

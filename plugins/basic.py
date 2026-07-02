@@ -32,8 +32,8 @@ class BasicPlugin:
 
     def _save_suggestions(self):
         try:
-            with open(SUGGESTIONS_FILE, "w") as f:
-                json.dump(self._suggestions, f, indent=2)
+            from core.atomic_io import atomic_write_json
+            atomic_write_json(SUGGESTIONS_FILE, self._suggestions)
         except Exception as e:
             print(f"[Basic] Failed to save suggestions: {e}")
 

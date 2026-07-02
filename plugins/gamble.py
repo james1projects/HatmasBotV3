@@ -59,8 +59,9 @@ class GamblePlugin:
 
     def _save_jackpot(self):
         try:
-            with open(GAMBLE_JACKPOT_FILE, "w") as f:
-                json.dump({"jackpot_pool": self.jackpot_pool}, f)
+            from core.atomic_io import atomic_write_json
+            atomic_write_json(GAMBLE_JACKPOT_FILE,
+                              {"jackpot_pool": self.jackpot_pool}, indent=None)
         except Exception as e:
             print(f"[Gamble] Failed to save jackpot: {e}")
 

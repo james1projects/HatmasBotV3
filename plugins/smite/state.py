@@ -66,8 +66,8 @@ class _StateMixin:
             "session_losses": self._session_losses,
             "session_date": self._session_date or datetime.now().strftime("%Y-%m-%d"),
         }
-        with open(SMITE2_STATE_FILE, "w") as f:
-            json.dump(state, f, indent=2)
+        from core.atomic_io import atomic_write_json
+        atomic_write_json(SMITE2_STATE_FILE, state)
 
     # === DAILY RECORD ===
 

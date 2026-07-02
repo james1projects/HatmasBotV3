@@ -769,7 +769,8 @@ class KillDeathDetector:
             "timestamp": time.time(),
         }
         try:
-            STATE_FILE.write_text(json.dumps(state), encoding="utf-8")
+            from core.atomic_io import atomic_write_json
+            atomic_write_json(STATE_FILE, state, indent=None)
         except OSError as e:
             if self._debug:
                 _log(f"[KillDetector] Failed to save state: {e}")
