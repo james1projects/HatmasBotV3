@@ -9,6 +9,7 @@ Usage:
   python -m core.auth --broadcaster  — Generate broadcaster token (your channel account)
 """
 
+import os
 import sys
 import http.server
 import webbrowser
@@ -76,9 +77,14 @@ def refresh_token(refresh_tok):
 
 
 def save_token(token_data, token_file):
+    # Atomic write (temp + os.replace): Twitch rotates refresh tokens,
+    # so a partial write here would corrupt the only current copy.
+    # Same pattern as core/token_manager.py._persist_token.
     token_file.parent.mkdir(exist_ok=True)
-    with open(token_file, "w") as f:
+    tmp_file = token_file.with_suffix(token_file.suffix + ".tmp")
+    with open(tmp_file, "w") as f:
         json.dump(token_data, f, indent=2)
+    os.replace(tmp_file, token_file)
     print(f"Token saved to {token_file}")
 
 
