@@ -2228,9 +2228,12 @@ class PublicWebServer:
                         if not holding or holding["shares"] <= 0:
                             return err(400, f"You do not own any "
                                             f"{god_name} shares.")
-                        hat_amount = int(
+                        # round() so "all" sells the whole position —
+                        # int() truncation left dust shares behind
+                        # (execute_sell clamps any overshoot).
+                        hat_amount = int(round(
                             holding["shares"]
-                            * eco._prices.get(god_name, 0))
+                            * eco._prices.get(god_name, 0)))
                 else:
                     hat_amount = int(str(amount_raw).replace(",", ""))
             except (TypeError, ValueError):

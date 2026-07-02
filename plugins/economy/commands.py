@@ -154,7 +154,12 @@ class _CommandsMixin:
             if not holding or holding["shares"] <= 0:
                 await self.bot.send_reply(message, f"You don't own any {god_name} shares", whisper)
                 return
-            hat_amount = int(holding["shares"] * self._prices.get(god_name, 0))
+            # round(), not int(): truncation requested slightly less
+            # than the full position value, leaving dust shares behind
+            # after every "sell all". Rounding up overshoots by <=0.5
+            # hat and execute_sell clamps to the actual holding.
+            hat_amount = int(round(holding["shares"]
+                                   * self._prices.get(god_name, 0)))
         else:
             try:
                 hat_amount = int(amount_str)
