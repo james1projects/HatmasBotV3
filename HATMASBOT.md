@@ -2,7 +2,7 @@
 
 Complete reference for HatmasBot. This file is the single source of truth for Claude when working on this codebase across sessions.
 
-**v2.8 | June 2026 | Built by Hatmaster & Claude**
+**v2.8.1 | July 2026 | Built by Hatmaster & Claude**
 
 v2.5 adds the public-facing Hatmas Market website (`hatmaster.tv`),
 YouTube comment-based share rewards, periodic match backfill from
@@ -37,6 +37,15 @@ plus a market teaser card), and all Hatmas Market content (ticker,
 god grid, search, top traders, recent activity) lives at
 `hatmaster.tv/market` (`public/market.html`; `/Market` redirects).
 
+v2.8.1 (July 2, overnight hardening pass) fixes a whisper bypass of
+mod-only commands, makes every trade/dividend/settlement path
+compensate cleanly on partial failure, moves gTTS and the Claude chat
+API call off the event loop, converts every plugin JSON state write to
+atomic tmp+replace (new `core/atomic_io.py`), and recovers a
+truncated-on-disk `plugins/economy/plugin.py` whose `cleanup()` had
+silently been a no-op. See the **v2.8.1 Update — Overnight Hardening
+Pass** section at the bottom.
+
 ---
 
 ## Working in this repo (read first if you are Claude)
@@ -60,6 +69,19 @@ script in bash (read, assert exact `old` block matches once, write
 replacement, verify on disk). The `hatmasbot-safe-edits` skill has the full
 playbook including recovery (`tr -d '\0'` for NUL bytes, bash heredoc
 rewrite for truncation). Install it if it isn't already loaded.
+
+This is not hypothetical: `plugins/economy/plugin.py` shipped truncated
+mid-comment for several releases (discovered 2026-07-02). It still
+compiled because a docstring alone is a valid function body, so
+`EconomyPlugin.cleanup()` silently did nothing on every shutdown. A
+reliable tripwire: a Python file whose last byte is not a newline is a
+truncation suspect —
+
+```bash
+for f in $(git ls-files '*.py'); do
+  [ -n "$(tail -c 1 "$f" | tr -d '\0\r\n')" ] && echo "SUSPECT: $f"
+done
+```
 
 ---
 
@@ -140,6 +162,7 @@ core/
   token_manager.py          Async OAuth token manager with auto-refresh for bot + broadcaster tokens.
   webserver.py              aiohttp server. Overlays, API, control panel, TTS/gamble queues.
   auth.py                   OAuth browser flow for bot and broadcaster tokens.
+  atomic_io.py              atomic_write_json/_text (tmp + os.replace). Used by every plugin that persists data/*.json — a crash mid-write can no longer truncate state files.
   cache.py                  Simple TTL cache.
   nsfw_check.py             Album art NSFW classification.
   god_matcher.py            Portrait-based god identification via HSV histogram matching.
@@ -379,7 +402,7 @@ Polls Spotify every 3s. Pushes next song to queue 30s before current ends (gaple
 Fires on ChannelRaidSubscription. Fetches raider's last game via GET /helix/channels. Sends chat message with raider name, viewer count, and last game. Calls POST /helix/chat/shoutouts for official shoutout card. 120s per-raider cooldown. Configurable min viewers (SHOUTOUT_MIN_VIEWERS). Controllable via `auto_shoutout` feature toggle.
 
 ### TTS for Highlighted Messages (bot.py + webserver + tts.html)
-Detected in event_message by checking `payload.type == "channel_points_highlighted"`. Message text is sent to webserver's trigger_tts() which generates an MP3 via gTTS and queues it. Overlay at /overlay/tts polls /api/tts_queue, plays audio via Web Audio API (AudioContext + decodeAudioData for OBS compatibility), shows purple message box with username + text + sound wave animation. Auto-hides after speech ends. Queue processes one at a time. Audio files stored in data/tts_audio/, auto-cleaned to last 30 files. Controllable via `tts_highlights` feature toggle. Max message length: 300 chars (TTS_MAX_LENGTH).
+Detected in event_message by checking `payload.type == "channel_points_highlighted"`. Message text is sent to webserver's trigger_tts(), which spawns a background task that generates the MP3 via gTTS in a worker thread (asyncio.to_thread — gTTS makes a blocking HTTPS call to Google, which used to freeze the whole event loop per message) and then queues it. Overlay at /overlay/tts polls /api/tts_queue, plays audio via Web Audio API (AudioContext + decodeAudioData for OBS compatibility), shows purple message box with username + text + sound wave animation. Auto-hides after speech ends. Queue processes one at a time. Audio files stored in data/tts_audio/, auto-cleaned to last 30 files. Controllable via `tts_highlights` feature toggle. Max message length: 300 chars (TTS_MAX_LENGTH).
 
 ### God Request Auto-Complete
 When smite plugin fires god_detected, godrequest plugin checks if detected god matches next in queue. If so, removes request, logs to history, announces in chat, advances OBS display.
@@ -1896,3 +1919,155 @@ plugins/factorio/                    NEW - bot half (plugin.py, rcon.py, catalog
   Streamloots hub.
 - Streamloots card art/collection (rarity tiers map naturally to
   event sizes: common = scout raid, legendary = boss).
+
+---
+
+## v2.8.1 Update — Overnight Hardening Pass (2026-07-02)
+
+An unattended overnight review of all 106 Python files (local-LLM
+first pass on the RTX 5090, every finding verified against source by
+Claude before acting), followed by 23 fix commits. No feature changes;
+everything below is correctness, integrity, or responsiveness.
+StreamingSpaceGame was excluded. Full per-commit detail lived in
+MORNING_REPORT.md on the `overnight-2026-07-01` branch.
+
+### Security
+
+- **Whispered commands now enforce `mod_only`.** The whisper path in
+  `core/bot.py` checked command enablement and cooldowns but never
+  `mod_only` — any viewer could run `!spin`, `!godclear`, `!scene`,
+  `!poolclear`, etc. by whispering the bot. Whisper payloads carry no
+  badge info, so after the fix only the broadcaster (is_mod name
+  fallback) can run mod commands via whisper.
+
+### Money-path integrity (Hats, shares, channel points)
+
+- **`execute_buy` / `execute_sell` compensate on partial failure**
+  (plugins/economy/trading.py). Buy: if the portfolio or ledger write
+  fails after MixItUp deducted hats, the granted shares are removed
+  and the hats refunded. Sell: shares are removed before the MixItUp
+  credit (reliable local DB first, flaky HTTP second) and restored at
+  their original avg cost if the credit fails. Failed compensations
+  log CRITICAL lines.
+- **Per-user trade lock.** `_user_trade_lock` in trading.py serializes
+  balance-check -> deduct -> write for the same user across every entry
+  point (chat, website, tests). Previously only `/api/trade` held a
+  lock, so concurrent chat+web trades could double-spend.
+- **Sell payouts round exactly** (`int(round(...))`, not `int(...)`) —
+  float round-trips shorted sellers a hat. Sell-"all" (chat + web)
+  also rounds, so no dust holding survives closing a position.
+- **Dividends only ledger credits MixItUp accepted**
+  (plugins/economy/dividends.py). A failed credit is skipped loudly;
+  if EVERY credit failed, the dividends row is not written, leaving
+  the match_id unclaimed so the settle-time catch-up retries later.
+- **Match settlement commits atomically** (match.py + db.py).
+  `_update_price` used to commit mid-settlement, opening a crash
+  window where the W/L/KDA aggregate bump persisted without the
+  processed_matches dedup claim — a retry would double-count the match
+  into the price formula. `_update_price(commit=False)` defers to the
+  single end-of-settlement commit.
+- **Gamble cooldown is claimed before the awaited balance fetch**
+  (plugins/gamble.py). Two rapid `!gamble all` messages could both
+  pass the cooldown check and double-bet a balance that covered one
+  wager. Validation failures release the claim so typos don't burn it.
+- **Voiceline redemptions refund when the god has no voice-line files**
+  (plugins/voicelines.py) — previously only the no-god-selected case
+  refunded; missing files just kept the viewer's points.
+
+### Responsiveness (event-loop freezes)
+
+- **@HatmasBot no longer freezes the bot** — claude_chat.py now uses
+  `anthropic.AsyncAnthropic`; the sync client blocked the entire loop
+  for the full API round-trip on every mention.
+- **TTS no longer freezes the bot** — `trigger_tts` runs gTTS (a
+  blocking HTTPS call to Google + mp3 write) via `asyncio.to_thread`
+  in a background task.
+- **tracker.gg calls serialized onto one executor thread**
+  (plugins/smite/plugin.py, max_workers 2 -> 1) — all calls share one
+  curl_cffi Session and curl handles are not safe across threads.
+
+### Crash-safety and lifecycle
+
+- **`core/atomic_io.py` (NEW)**: `atomic_write_json` / `atomic_write_text`
+  (tmp + `os.replace`). Every plugin state file converted: godrequest
+  queue + history (holds paid entries), songrequest likes/queue/
+  blacklist/state/history + Spotify token, killdetector KDA state,
+  voicelines reward map, death counter, gamble jackpot, suggestions,
+  Claude history, custom commands, Discord announce state, smite
+  session state + title templates, Factorio card store. Twitch token
+  files in token_manager.py and auth.py use the same pattern (a
+  corrupted token file means manual re-auth, since Twitch rotates
+  refresh tokens).
+- **`EconomyPlugin.cleanup()` reconstructed** — plugins/economy/plugin.py
+  was truncated on disk mid-comment (the file-tool desync documented
+  at the top of this file) since at least the v2.5 catch-up commit.
+  It compiled anyway (docstring = valid body), so cleanup silently did
+  nothing: backfill task never cancelled, MixItUp session never closed.
+- **overlay_manager broadcast fix** — `_send` iterated the live WS
+  client set across awaits; a client connecting/dropping mid-broadcast
+  raised RuntimeError and killed the broadcast for everyone. Now
+  iterates a snapshot. token_manager.close() also awaits its cancelled
+  validation task.
+- **process_recordings.py** releases the dashboard VOD-processor panel
+  in a `finally`, so a mid-batch crash can't leave it stuck at
+  "processing".
+
+### Tests
+
+- **Three existing suites could never finish unattended** — they hung
+  at exit on leaked aiosqlite worker threads (non-daemon), with output
+  stuck in the stdio buffer: tests/test_economy.py (missing
+  close_db()), tools/test_priority_request.py (per-test in-memory
+  connections never closed). All now exit 0 and are safe to wire into
+  Stream Deck buttons or pre-deploy checks.
+- **tests/test_trading_hardening.py (NEW)** — 4 regression tests:
+  buy refund on portfolio-write failure, sell share-restore on credit
+  failure, exact sell rounding, per-user lock vs concurrent
+  double-spend. Standalone: `python tests/test_trading_hardening.py`.
+- Suite status at merge: test_economy, test_trading_hardening,
+  test_web_session (11), test_web_trade (20), test_priority_request
+  (18) — all exit 0. test_kda_fixture needs digit templates in data/
+  and can't run from a fresh worktree.
+
+### Known-and-deferred (decisions, not oversights)
+
+- `ECONOMY_POSITION_LIMIT` still unenforced in execute_buy (also
+  listed in HATMAS_MARKET_AIRTIGHT_DESIGN.md).
+- Shared-DB implicit transactions: interleaved coroutines can commit
+  each other's half-done multi-statement sequences. The atomic-
+  settlement fix closed the worst case; a `db_transaction()`
+  async-lock helper would close the rest.
+- Partial dividend failure (some credits fail, some succeed) records
+  the successes and claims the match — failed holders aren't retried.
+- nsfw_check fails open on vision-API errors; gamble win/loss
+  `_adjust_balance` results are unchecked (announces regardless);
+  claude_chat history JSON grows unbounded; obs.py drives the sync
+  obsws client inline (localhost, ms-scale).
+
+### Files added or significantly modified in v2.8.1
+
+```
+core/atomic_io.py                    NEW - atomic JSON/text writes
+core/bot.py                          whisper mod_only enforcement
+core/token_manager.py                atomic token writes; close() awaits task
+core/auth.py                         atomic token writes
+core/overlay_manager.py              WS broadcast snapshot
+core/webserver.py                    TTS generation off-loop
+core/public_webserver.py             sell-all rounding
+plugins/economy/trading.py           per-user lock + compensation + rounding
+plugins/economy/dividends.py         ledger-what-was-paid
+plugins/economy/match.py + db.py     atomic settlement commit
+plugins/economy/plugin.py            cleanup() reconstructed (was truncated)
+plugins/economy/commands.py          sell-all rounding
+plugins/claude_chat.py               AsyncAnthropic
+plugins/gamble.py                    cooldown claimed pre-await
+plugins/godrequest.py                spin fulfillment announcement
+plugins/voicelines.py                refund on missing voice-line files
+plugins/smite/plugin.py              single-thread tracker executor
+plugins/ (13 files)                  atomic state writes via core/atomic_io
+tests/test_trading_hardening.py      NEW - 4 regression tests
+tests/test_economy.py                exits cleanly (close_db)
+tools/test_priority_request.py       exits cleanly (per-test close)
+tools/process_recordings.py          dashboard stop in finally
+main.py                              banner v2.8
+```
