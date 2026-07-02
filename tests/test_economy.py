@@ -391,8 +391,11 @@ async def run_tests():
 
     print()
 
-    # Cleanup
+    # Cleanup. close_db() matters twice over: it releases the file
+    # lock so os.remove works, and it stops aiosqlite's non-daemon
+    # worker thread — without it the process hangs forever at exit.
     await economy.cleanup()
+    await shared_db.close_db()
     if test_db.exists():
         os.remove(test_db)
 
