@@ -83,7 +83,10 @@ class ClaudeChatPlugin:
 
     async def on_ready(self):
         try:
-            self.client = anthropic.Anthropic(api_key=CLAUDE_API_KEY)
+            # Async client: the sync Anthropic client's messages.create
+            # blocked the entire event loop (chat, overlays, detectors)
+            # for the full API round-trip on every @HatmasBot mention.
+            self.client = anthropic.AsyncAnthropic(api_key=CLAUDE_API_KEY)
             print("[Claude] API client initialized")
         except Exception as e:
             print(f"[Claude] Failed to initialize: {e}")
@@ -141,7 +144,7 @@ class ClaudeChatPlugin:
         api_messages = self._get_context(username)
 
         try:
-            response = self.client.messages.create(
+            response = await self.client.messages.create(
                 model=CLAUDE_MODEL,
                 max_tokens=CLAUDE_MAX_TOKENS,
                 system=CLAUDE_SYSTEM_PROMPT,
