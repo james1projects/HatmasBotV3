@@ -318,20 +318,18 @@ class VoiceLinePlugin:
         reward_def = REWARD_DEFS[key]
         folder = reward_def["folder"]
 
-        # Find voice line files
+        # Find voice line files. Missing folder / no files is a
+        # fulfillment failure just like "no god selected" — refund the
+        # redemption instead of keeping the viewer's points.
         vl_dir = VOICELINE_DIR / god_slug / folder
-        if not vl_dir.exists():
-            await self.bot.send_chat(
-                f"@{user_name} No {folder} voice lines found for "
-                f"{god_slug.replace('_', ' ').title()}."
-            )
-            return True
-
-        ogg_files = list(vl_dir.glob("*.ogg"))
+        ogg_files = list(vl_dir.glob("*.ogg")) if vl_dir.exists() else []
         if not ogg_files:
+            refunded = await self._refund_redemption(reward_id, redemption_id)
+            suffix = (" Points refunded." if refunded
+                      else " Auto-refund failed, please ping a mod.")
             await self.bot.send_chat(
                 f"@{user_name} No {folder} voice lines found for "
-                f"{god_slug.replace('_', ' ').title()}."
+                f"{god_slug.replace('_', ' ').title()}.{suffix}"
             )
             return True
 
