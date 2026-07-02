@@ -32,6 +32,7 @@ column in `transactions` is preserved at 0 for schema compatibility.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Dict, List, Optional
 
 
@@ -46,6 +47,23 @@ class _TradingMixin:
       Overlay emit from _OverlaysMixin (_emit_trade_event)
     """
 
+    def _user_trade_lock(self, username: str) -> asyncio.Lock:
+        """Per-user lock serializing the balance-check -> deduct ->
+        portfolio-write sequence across every trade entry point (chat
+        commands, website /api/trade, tests). Without it, two
+        concurrent trades for the same user can both pass the balance
+        check and double-spend hats the user only has once. Lazily
+        created so the mixin works in stripped-down test harnesses."""
+        locks = getattr(self, "_trade_locks_by_user", None)
+        if locks is None:
+            locks = {}
+            self._trade_locks_by_user = locks
+        key = (username or "").lower()
+        lock = locks.get(key)
+        if lock is None:
+            lock = locks[key] = asyncio.Lock()
+        return lock
+
     async def execute_buy(self, username: str, god_name: str,
                           hat_amount: int,
                           channel: str = "chat") -> Dict[str, Any]:
@@ -54,6 +72,11 @@ class _TradingMixin:
 
         Returns dict with: success, shares, price, fee, total_cost, error.
         `fee` is always 0 - trading is fee-free.
+
+        Runs under a per-user lock (see _user_trade_lock). If the
+        portfolio/ledger write fails AFTER hats were deducted from
+        MixItUp, the hats are refunded so the user never pays for
+        shares they didn't receive.
         """
         god_name = self._resolve_god_name(god_name)
         if not god_name:
@@ -71,27 +94,40 @@ class _TradingMixin:
         if shares <= 0:
             return {"success": False, "error": "Amount too small"}
 
-        # Check balance
-        balance = await self._get_balance(username)
-        if balance is None:
-            return {"success": False, "error": "Could not check balance"}
-        if balance < hat_amount:
-            return {"success": False, "error": f"Not enough hats (have {balance:,})"}
+        async with self._user_trade_lock(username):
+            # Check balance
+            balance = await self._get_balance(username)
+            if balance is None:
+                return {"success": False, "error": "Could not check balance"}
+            if balance < hat_amount:
+                return {"success": False, "error": f"Not enough hats (have {balance:,})"}
 
-        # Execute: deduct hats
-        success = await self._adjust_balance(username, -hat_amount)
-        if not success:
-            return {"success": False, "error": "Transaction failed"}
+            # Execute: deduct hats
+            success = await self._adjust_balance(username, -hat_amount)
+            if not success:
+                return {"success": False, "error": "Transaction failed"}
 
-        # Update portfolio
-        await self._add_shares(username, god_name, shares, price)
+            # Hats are gone from MixItUp now. If the portfolio/ledger
+            # write fails, refund - otherwise the user paid and got
+            # no shares.
+            try:
+                # Update portfolio
+                await self._add_shares(username, god_name, shares, price)
 
-        # Record transaction (fee column kept at 0 for schema compat)
-        await self._db.execute("""
-            INSERT INTO transactions (username, god_name, type, shares, price, total, fee, channel)
-            VALUES (?, ?, 'buy', ?, ?, ?, 0, ?)
-        """, (username, god_name, shares, price, hat_amount, channel))
-        await self._db.commit()
+                # Record transaction (fee column kept at 0 for schema compat)
+                await self._db.execute("""
+                    INSERT INTO transactions (username, god_name, type, shares, price, total, fee, channel)
+                    VALUES (?, ?, 'buy', ?, ?, ?, 0, ?)
+                """, (username, god_name, shares, price, hat_amount, channel))
+                await self._db.commit()
+            except Exception as e:
+                print(f"[Economy] Buy failed after deduct - refunding "
+                      f"{hat_amount} hats to {username}: {e}")
+                refunded = await self._adjust_balance(username, hat_amount)
+                if not refunded:
+                    print(f"[Economy] CRITICAL: refund failed - {username} "
+                          f"is owed {hat_amount} hats (buy {god_name})")
+                return {"success": False, "error": "Trade failed"}
 
         # Emit overlay event
         self._emit_trade_event("buy", username, god_name, shares, price, hat_amount, 0)
@@ -123,36 +159,51 @@ class _TradingMixin:
         if price <= 0:
             return {"success": False, "error": "No market data for this god"}
 
-        # How many shares does user hold?
-        holding = await self._get_holding(username, god_name)
-        if holding is None or holding["shares"] <= 0:
-            return {"success": False, "error": f"You don't own any {god_name} shares"}
+        async with self._user_trade_lock(username):
+            # How many shares does user hold?
+            holding = await self._get_holding(username, god_name)
+            if holding is None or holding["shares"] <= 0:
+                return {"success": False, "error": f"You don't own any {god_name} shares"}
 
-        # Calculate shares to sell
-        shares_to_sell = hat_amount / price
-        if shares_to_sell > holding["shares"]:
-            shares_to_sell = holding["shares"]  # Sell all
+            # Calculate shares to sell
+            shares_to_sell = hat_amount / price
+            if shares_to_sell > holding["shares"]:
+                shares_to_sell = holding["shares"]  # Sell all
 
-        # Fee-free: net == gross.
-        net_received = int(shares_to_sell * price)
+            # Fee-free: net == gross. round() rather than int(): the
+            # float round-trip (hat_amount / price * price) can land at
+            # 4.999999... and a bare int() would short the seller a hat.
+            net_received = int(round(shares_to_sell * price))
 
-        if net_received <= 0:
-            return {"success": False, "error": "Amount too small"}
+            if net_received <= 0:
+                return {"success": False, "error": "Amount too small"}
 
-        # Execute: add hats
-        success = await self._adjust_balance(username, net_received)
-        if not success:
-            return {"success": False, "error": "Transaction failed"}
+            # Remove shares first (local DB - the reliable side), then
+            # credit hats via MixItUp HTTP (the flaky side). If the
+            # credit fails, restore the shares at their original avg
+            # cost so the seller ends up exactly where they started.
+            await self._remove_shares(username, god_name, shares_to_sell)
 
-        # Update portfolio
-        await self._remove_shares(username, god_name, shares_to_sell)
+            success = await self._adjust_balance(username, net_received)
+            if not success:
+                await self._add_shares(username, god_name, shares_to_sell,
+                                       holding["avg_cost"])
+                return {"success": False, "error": "Transaction failed"}
 
-        # Record transaction (fee column kept at 0 for schema compat)
-        await self._db.execute("""
-            INSERT INTO transactions (username, god_name, type, shares, price, total, fee, channel)
-            VALUES (?, ?, 'sell', ?, ?, ?, 0, ?)
-        """, (username, god_name, shares_to_sell, price, net_received, channel))
-        await self._db.commit()
+            # Money has moved correctly on both sides now. A failure
+            # writing the history row shouldn't fail (or unwind) the
+            # trade - log it and move on.
+            try:
+                # Record transaction (fee column kept at 0 for schema compat)
+                await self._db.execute("""
+                    INSERT INTO transactions (username, god_name, type, shares, price, total, fee, channel)
+                    VALUES (?, ?, 'sell', ?, ?, ?, 0, ?)
+                """, (username, god_name, shares_to_sell, price, net_received, channel))
+                await self._db.commit()
+            except Exception as e:
+                print(f"[Economy] Sell ledger write failed for {username} "
+                      f"({god_name}, {net_received} hats) - trade itself "
+                      f"completed: {e}")
 
         # Emit overlay event
         self._emit_trade_event("sell", username, god_name, shares_to_sell, price, net_received, 0)
