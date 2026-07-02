@@ -452,9 +452,18 @@ class GodRequestPlugin:
                     print(f"[GodRequest] Failed to remove {next_god} "
                           f"from spin pool: {e}")
 
+            # Spin entries carry a blank requester (by design — the
+            # queue renderers skip the suffix), so don't announce
+            # "requested by ." for them.
+            if completed.get("requester"):
+                lead = (f"God request fulfilled! Playing {next_god} as "
+                        f"requested by {completed['requester']}.")
+            elif completed.get("source") == "spin":
+                lead = f"Spin fulfilled! Now playing {next_god}."
+            else:
+                lead = f"God request fulfilled! Now playing {next_god}."
             await self.bot.send_chat(
-                f"God request fulfilled! Playing {next_god} as requested by "
-                f"{completed['requester']}. "
+                lead + " "
                 + (f"Next up: {self.queue[0]['god']}" if self.queue
                    else "Queue is now empty!")
             )
