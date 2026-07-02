@@ -536,6 +536,12 @@ class HatmasBot(commands.Bot):
                 cmd = self._custom_commands[cmd_name]
                 if not self.is_command_enabled(cmd_name, "twitch"):
                     return  # disabled from the /mod page
+                # Whisper payloads carry no badge info, so is_mod() only
+                # passes for the broadcaster (name fallback). Without
+                # this gate any viewer could run mod-only commands
+                # (!spin, !godclear, !scene, ...) by whispering the bot.
+                if cmd["mod_only"] and not self.is_mod(wrapped.chatter):
+                    return
                 if (not self.is_mod(wrapped.chatter)
                         and self.check_cooldown(cmd_name, sender_name) > 0):
                     return
