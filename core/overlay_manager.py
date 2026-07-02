@@ -127,7 +127,10 @@ class OverlayManager:
         disconnected = set()
 
         async with self._send_lock:
-            for ws in self._ws_clients.get(overlay_name, set()):
+            # Snapshot: register_ws/unregister_ws can mutate the live set
+            # while we're parked on an await below, and mutating a set
+            # mid-iteration raises RuntimeError and kills the broadcast.
+            for ws in list(self._ws_clients.get(overlay_name, ())):
                 try:
                     await asyncio.wait_for(ws.send_str(message_json), timeout=2.0)
                 except Exception:

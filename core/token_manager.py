@@ -75,6 +75,10 @@ class TokenManager:
         """Shutdown the token manager."""
         if self._validation_task:
             self._validation_task.cancel()
+            try:
+                await self._validation_task
+            except (asyncio.CancelledError, Exception):
+                pass
         if self._session:
             await self._session.close()
 
