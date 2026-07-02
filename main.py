@@ -60,9 +60,9 @@ async def main():
     quiet_known_connection_errors()
 
     print("=" * 50)
-    print("  HatmasBot v2.5")
+    print("  HatmasBot v2.8")
     print("  Built by Hatmaster & Claude")
-    print("  May 2026")
+    print("  April-July 2026")
     print("=" * 50)
     print()
 
