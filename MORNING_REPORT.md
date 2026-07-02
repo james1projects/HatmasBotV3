@@ -19,9 +19,10 @@ git merge overnight-2026-07-01        # take everything
 
 ## TL;DR
 
-**22 fix commits**: 1 security hole, 7 money-path integrity fixes, 3
+**23 fix commits**: 1 security hole, 7 money-path integrity fixes, 3
 "whole-bot freezes" fixes, crash-safe state persistence across every plugin,
-1 truncated-file recovery, 3 test-suite repairs, and a new regression suite.
+1 truncated-file recovery, 3 test-suite repairs, a new regression suite,
+and assorted smaller hardening.
 
 **Everything verified**: all five runnable test suites exit 0 on the branch
 tip (economy harness, trading hardening 4/4, web session 11/11, web trade
@@ -92,6 +93,7 @@ in the gitignored `data/`.)
 | `f83e297` | Buy unwind also removes granted shares, not just the refund | low, tested |
 | `b08848e` | Gamble: claim cooldown before the awaited balance fetch (two rapid `!gamble all` could double-bet one balance) | low |
 | `c886ae7` | tracker.gg calls serialized onto one executor thread (shared curl session isn't thread-safe) | low |
+| `0852fb0` | process_recordings: dashboard VOD panel no longer stuck at "processing" if a batch crashes mid-run | none |
 
 ## Verified-but-NOT-fixed — your call
 
