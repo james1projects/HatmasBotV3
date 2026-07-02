@@ -108,11 +108,14 @@ class _TradingMixin:
                 return {"success": False, "error": "Transaction failed"}
 
             # Hats are gone from MixItUp now. If the portfolio/ledger
-            # write fails, refund - otherwise the user paid and got
-            # no shares.
+            # write fails, unwind everything - otherwise the user pays
+            # and gets nothing (or, if only the ledger failed, gets a
+            # refund AND keeps the shares).
+            shares_added = False
             try:
-                # Update portfolio
+                # Update portfolio (commits internally)
                 await self._add_shares(username, god_name, shares, price)
+                shares_added = True
 
                 # Record transaction (fee column kept at 0 for schema compat)
                 await self._db.execute("""
@@ -121,8 +124,15 @@ class _TradingMixin:
                 """, (username, god_name, shares, price, hat_amount, channel))
                 await self._db.commit()
             except Exception as e:
-                print(f"[Economy] Buy failed after deduct - refunding "
-                      f"{hat_amount} hats to {username}: {e}")
+                print(f"[Economy] Buy failed after deduct - unwinding "
+                      f"for {username} ({god_name}, {hat_amount} hats): {e}")
+                if shares_added:
+                    try:
+                        await self._remove_shares(username, god_name, shares)
+                    except Exception as e2:
+                        print(f"[Economy] CRITICAL: share rollback failed - "
+                              f"{username} kept {shares:.3f} {god_name} "
+                              f"shares: {e2}")
                 refunded = await self._adjust_balance(username, hat_amount)
                 if not refunded:
                     print(f"[Economy] CRITICAL: refund failed - {username} "
