@@ -90,6 +90,14 @@ def load_config(config_path: Path) -> dict:
     for key in required:
         if key not in cfg:
             die(f"Config missing required key '{key}': {config_path}")
+    # Resolve in-repo dirs relative to the repo root so the pipeline is
+    # portable across machines. Absolute values are left untouched;
+    # vegas_exe (external program) is never rewritten.
+    for key in ("inbox_dir", "rendered_dir", "highlight_dir",
+                "preset_dir", "jobs_dir", "scripts_dir"):
+        _p = Path(cfg[key])
+        if not _p.is_absolute():
+            cfg[key] = str((REPO_ROOT / _p).resolve())
     return cfg
 
 

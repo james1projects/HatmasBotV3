@@ -40,13 +40,13 @@
   --border-hi: #7D98A1;     /* Cool Steel — hover/active border */
   --grid:      #2B3845;
   --text:      #FFFFFF;     /* White — primary body text */
-  --text-dim:  #7D98A1;     /* Cool Steel — secondary text */
-  --text-fade: rgba(125, 152, 161, 0.55);   /* Cool Steel @ faded alpha */
+  --text-dim:  #9FB4BB;     /* Cool Steel (lightened) — secondary text, AA 4.5:1 on all surfaces */
+  --text-fade: rgba(159, 180, 187, 0.78);   /* faded meta text — AA 4.5:1 on page bg */
   --accent:    #DFA06E;     /* Light Bronze — primary accent */
   --accent-hi: #E8B583;
   --green:     #DFA06E;     /* gain — strict palette reuses Bronze */
   --green-bg:  rgba(223, 160, 110, 0.10);
-  --red:       #DF2935;     /* Scarlet Rush — loss */
+  --red:       #FF6B73;     /* Scarlet Rush (lightened) — loss, AA 4.5:1 on page bg */
   --red-bg:    rgba(223, 41, 53, 0.10);
   --tick-flash:#F5F3BB;     /* Lemon Chiffon flash on price update */
 
@@ -625,4 +625,21 @@ html body {
 .footer-brand {
   border-top: 1px solid var(--border);
   margin-top: 28px;
+}
+
+/* Skip-to-content link: off-screen until focused by keyboard (WCAG 2.4.1). */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 1000;
+  background: var(--accent);
+  color: #000;
+  padding: 8px 14px;
+  font-weight: 700;
+  text-decoration: none;
+  border-radius: 0 0 6px 0;
+}
+.skip-link:focus {
+  left: 0;
 }

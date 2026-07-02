@@ -31,6 +31,12 @@ boss biters, a `hatmas` remote interface for future RCON control,
 and a JSONL event outbox. See the **v2.8 Update — Streamloots Hub +
 Factorio Mod** section at the bottom.
 
+July 2026: the website split in two. `hatmaster.tv/` is now a simple
+home page (social tabs: Twitch live embed, YouTube, TikTok, Bluesky,
+plus a market teaser card), and all Hatmas Market content (ticker,
+god grid, search, top traders, recent activity) lives at
+`hatmaster.tv/market` (`public/market.html`; `/Market` redirects).
+
 ---
 
 ## Working in this repo (read first if you are Claude)
@@ -229,6 +235,7 @@ tools/
   check_factorio_rcon.py    Standalone probe for the Factorio bridge: connects RCON, pings the hatmas-events mod, verifies remote calls round-trip. Run after hosting the save; exit 0 = bridge working.
   reconcile_stripe.py       Audit/repair CLI for priority-request payments. Subcommands: audit (diff Stripe vs priority_payments), unplayed (refund candidates), refund <session_id>.
   test_priority_request.py  16-test regression suite for the Stripe webhook money path. Run before touching priority_request.py; exits non-zero on any failure.
+  dev_stub_site.py          Stdlib stub of the public webserver on port 8071: serves public/ pages with canned JSON for every API the landing + market pages call, so the front-end can be previewed and its JS exercised without starting the bot. Also wired as the "stub-site" config in .claude/launch.json.
   check_stream_ready.py     Pre-stream readiness check. Runs ~12 concurrent end-to-end probes (bot dashboard, both Twitch tokens, OBS WebSocket + Smite 2 source, MixItUp, tracker.gg, public webserver, hatmaster.tv, cloudflared service, disk space, asset library, Spotify token, SMITE 2 process). ~400ms full / ~150ms with --quick. Exit 0 = ready, 1 = at least one FAIL. Use check_stream.bat for one-press Stream Deck workflow.
 go_live.bat                 Stream Deck: apply LIVE NOW badge on last 8 YouTube thumbnails. Pair with go_offline.bat at end of stream.
 go_offline.bat              Stream Deck: revert LIVE badges. Idempotent and partial-failure tolerant.
@@ -1234,11 +1241,17 @@ permanent SSH tunnel.
 
 **Setup steps we ran (one-time):**
 
+> **Tunnel name:** the live tunnel is now **`HatBot`** (current PC). An
+> older `HatmasBot` tunnel still exists on the previous PC and in the
+> Cloudflare dashboard, pending removal — don't confuse the two. The
+> commands below use the current name. `CLOUDFLARED_TUNNEL_NAME` in
+> `core/config.py` must match whatever `cloudflared tunnel list` shows.
+
 1. Bought `hatmaster.tv` via **Cloudflare Registrar** ($30/yr, no markup over wholesale, auto-managed DNS). Could also work with any registrar (Porkbun, Namecheap) by pointing nameservers at Cloudflare.
 2. Created a Cloudflare Zero Trust account (free tier; required to use Tunnels).
 3. Installed `cloudflared` via the Windows MSI (https://github.com/cloudflare/cloudflared/releases).
 4. Ran `cloudflared tunnel login` — opened a browser, picked the `hatmaster.tv` zone, downloaded `cert.pem` to `C:\Users\james\.cloudflared\`.
-5. `cloudflared tunnel create HatmasBot` — created a new tunnel, generated `<TUNNEL_ID>.json` credentials.
+5. `cloudflared tunnel create HatBot` — created a new tunnel, generated `<TUNNEL_ID>.json` credentials.
 6. Wrote `C:\Users\james\.cloudflared\config.yml`:
    ```yaml
    tunnel: <TUNNEL_ID>
@@ -1249,7 +1262,7 @@ permanent SSH tunnel.
        service: http://localhost:8070
      - service: http_status:404
    ```
-7. `cloudflared tunnel route dns HatmasBot hatmaster.tv` — automatically created the CNAME pointing the bare domain at the tunnel.
+7. `cloudflared tunnel route dns HatBot hatmaster.tv` — automatically created the CNAME pointing the bare domain at the tunnel.
 8. `cloudflared.exe service install` (run from the user home directory so the config.yml is found) — registered cloudflared as a Windows service.
 9. `sc config cloudflared start= auto` + `sc start cloudflared` — sets startup type to auto so it survives reboots, and starts it now.
 
@@ -1258,7 +1271,7 @@ boot. If you ever see Cloudflare error 1033 ("Tunnel error") on
 hatmaster.tv, the cloudflared service has stopped. Fix with `sc start
 cloudflared`. If `sc query cloudflared` says it's running but the
 dashboard shows zero connections, check `cloudflared tunnel info
-HatmasBot` — usually means the wrong tunnel ID is configured, redo
+HatBot` — usually means the wrong tunnel ID is configured, redo
 the local install.
 
 **Pitfalls we hit:**
@@ -1269,7 +1282,7 @@ the local install.
 - `cloudflared service uninstall` puts the service into "marked for
   deletion" state if Services.msc / Task Manager has a handle open.
   Sign out + back in (or reboot) to clear.
-- Foreground `cloudflared tunnel run HatmasBot` works for testing but
+- Foreground `cloudflared tunnel run HatBot` works for testing but
   only persists while the terminal stays open. Always use the Windows
   service for production.
 - The `parent=` query param in Twitch player iframe URLs has to match
@@ -1442,11 +1455,13 @@ It backs up the DB first and asks for explicit confirmation.
 | `tools/mark_youtube_video.py` | YouTube video → god mapping (manual `set <video_id> <god>`, `--auto-scan`, `--list-untagged`, `--list-tagged`, `--scan-comments`, `--stats`). |
 | `tools/replay_economy.py` | Wipe `god_prices` + `price_history` + `processed_matches`, re-fetch tracker.gg profile aggregates across all gamemodes, recompute every god's price via the fair-value formula. Backs up `economy.db` first. Portfolios are preserved. |
 | `tools/purge_excluded.py` | Delete bot-account rows from `portfolios` + `transactions`. Backs up first; supports `--dry-run`. |
+| `tools/catchup_backfill.py` | Settle tracker.gg matches the bot's periodic backfill missed (July 2026, added after the match.py truncation left 5 weeks unsettled). Deep listing fetch (`--max 500 --pages 20`, pagination best-effort — tracker.gg currently serves one ~25-match page), diffs against `processed_matches`, settles oldest→newest through the same `settle_match()` path as the bot. Additive only (no wipe); backs up `economy.db` first; supports `--dry-run`; idempotent. |
 
 ### Theme & UI Architecture
 
 - `public/theme.css` — shared design system: B612 + B612 Mono fonts (Airbus cockpit family), near-black palette with amber accent + vivid green/red ticks, sharp 4px corners, mono numbers with tabular figures throughout.
-- `public/landing.html` — god grid + ticker tape + search + Twitch embed.
+- `public/landing.html` — simple home page (July 2026 split): social tabs (Twitch live embed / YouTube / TikTok / Bluesky), platform pills, and a market teaser card. All market content moved to market.html.
+- `public/market.html` — the Hatmas Market at `hatmaster.tv/market`: god grid + ticker tape + portfolio search + top traders + recent activity + icon toggle. `/Market` 301-redirects to `/market`.
 - `public/portfolio.html` — per-viewer portfolio (handles both `/yt/` and `/twitch/` routes).
 - `public/god.html` — god detail with stock-style price chart, holder tabs (All/Twitch/YouTube), recent matches, formula breakdown.
 - All three pages support `?preview=1` to force-show the Twitch embed using sample data.

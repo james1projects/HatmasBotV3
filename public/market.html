@@ -1,0 +1,1169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#202C39">
+<title>Hatmas Market: Smite 2 Stock Exchange</title>
+<meta name="description" content="Live god prices, viewer portfolios, and a community-run market for Smite 2. Watch Hatmaster grind, earn shares by commenting, climb the leaderboard.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Hatmas Market">
+<meta property="og:url" content="https://hatmaster.tv/market">
+<meta property="og:title" content="Hatmas Market: Smite 2 Stock Exchange">
+<meta property="og:description" content="Live god prices · viewer portfolios. Comment on videos or watch streams to earn shares.">
+<meta property="og:image" content="https://hatmaster.tv/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Hatmas Market: Smite 2 Stock Exchange">
+<meta name="twitter:description" content="Live god prices · viewer portfolios. Comment on videos or watch streams to earn shares.">
+<meta name="twitter:image" content="https://hatmaster.tv/og-image.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="stylesheet" href="/theme.css">
+<style>
+  /* ─── ticker tape (top bar) ───────────────────────────────────── */
+  .ticker-bar {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    height: 30px;
+    /* Slightly deeper tint of Jet Black to anchor the sticky ticker */
+    background: #151E28;
+    border-bottom: 1px solid var(--border);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+  }
+  .ticker-bar .label {
+    flex-shrink: 0;
+    background: var(--accent);
+    color: var(--bg);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    padding: 0 12px;
+    height: 100%;
+    display: flex;
+    align-items: center;
+  }
+  .ticker-viewport {
+    flex: 1;
+    overflow: hidden;
+    white-space: nowrap;
+    position: relative;
+    /* fade the tape out at both ends instead of hard-clipping */
+    -webkit-mask-image: linear-gradient(90deg,
+      transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%);
+    mask-image: linear-gradient(90deg,
+      transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%);
+  }
+  .ticker-track {
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    /* Start in the visible state and animate left.
+       Width = 2x the content; animation goes from 0 to -50%
+       so when copy A finishes scrolling off, copy B is in
+       its place — seamless loop. */
+    animation: ticker-scroll 80s linear infinite;
+    will-change: transform;
+  }
+  .ticker-track:hover { animation-play-state: paused; }
+  @keyframes ticker-scroll {
+    from { transform: translateX(0); }
+    to   { transform: translateX(-50%); }
+  }
+  a.tick {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 16px;
+    font-family: var(--font-mono);
+    font-feature-settings: 'tnum' 1;
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+    border-right: 1px solid var(--border);
+    height: 30px;
+    line-height: 30px;
+    text-decoration: none;
+    transition: background 0.1s;
+  }
+  a.tick:hover { background: var(--panel); }
+  a.tick .tick-icon {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+    background: var(--bg-2);
+  }
+  a.tick .name {
+    color: var(--text);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+  a.tick .px { color: var(--accent); font-weight: 700; }
+  a.tick .chg { font-size: 11px; font-weight: 600; }
+  a.tick .chg.up   { color: var(--green); }
+  a.tick .chg.down { color: var(--red); }
+  a.tick .chg.flat { color: var(--text-fade); }
+
+  /* ─── page-specific layout ────────────────────────────────────── */
+  .wrap {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 24px 16px 60px;
+  }
+
+  /* Brand band — terminal-style header strip */
+  .brand-band {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 1px solid var(--border);
+    padding: 8px 0 12px;
+    margin-bottom: 20px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--text-dim);
+  }
+  .brand-band a.left {
+    color: var(--accent);
+    font-weight: 700;
+  }
+  .brand-band .status .dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 6px var(--green);
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+
+  /* ─── hero ───────────────────────────────────────────────────── */
+  .hero {
+    text-align: center;
+    padding: 32px 0 18px;
+  }
+  .hero .kicker {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 14px;
+  }
+  .hero-title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 84px;
+    line-height: 0.88;
+    letter-spacing: 0.015em;
+    font-weight: 400;
+    text-transform: uppercase;
+  }
+  .hero-title .accent {
+    color: var(--accent);
+    text-shadow: 0 0 32px rgba(223, 160, 110, 0.35);
+  }
+  @media (max-width: 560px) {
+    .hero-title { font-size: 58px; }
+  }
+  .hero-tagline {
+    margin: 16px auto 0;
+    color: var(--text);
+    font-size: 16px;
+    line-height: 1.55;
+    max-width: 620px;
+    font-weight: 400;
+  }
+
+  /* ─── how it works ───────────────────────────────────────────── */
+  .how-it-works {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin: 26px 0 26px;
+    overflow: hidden;
+  }
+  .step {
+    padding: 14px 16px;
+    background: var(--panel);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-height: 72px;
+  }
+  .step .num {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    color: var(--accent);
+    font-weight: 700;
+  }
+  .step .label {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    letter-spacing: 0.16em;
+    color: var(--text);
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+  .step .desc {
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.4;
+    margin-top: 2px;
+  }
+
+  /* ─── top traders (leaderboard strip) ───────────────────────── */
+  .top-traders {
+    margin: 0 0 28px;
+  }
+  .top-traders .section-title { margin-bottom: 8px; }
+  .leaderboard-list {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .trader-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    text-decoration: none;
+    color: var(--text);
+    transition: background 0.1s;
+  }
+  .trader-row:first-child { border-top: 0; }
+  .trader-row:hover { background: var(--panel-hi); }
+  .trader-row .rank {
+    font-family: var(--font-mono);
+    font-feature-settings: 'tnum' 1;
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-dim);
+    width: 34px;
+    flex-shrink: 0;
+    letter-spacing: 0.02em;
+  }
+  /* Top three get the amber treatment — feels like a podium without
+     being garish about it. */
+  .trader-row.rank-1 .rank { color: var(--accent); }
+  .trader-row.rank-2 .rank,
+  .trader-row.rank-3 .rank { color: var(--accent-hi); }
+  .trader-row .name {
+    flex: 1;
+    min-width: 0;
+    font-size: 14px;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .trader-row .platform-badge {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    padding: 1px 5px;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    margin-left: 8px;
+    vertical-align: 1px;
+  }
+  .trader-row .platform-badge.youtube {
+    color: #ff5e5e;
+    border-color: #ff5e5e44;
+  }
+  .trader-row .platform-badge.twitch {
+    color: #c8a4ff;
+    border-color: #c8a4ff44;
+  }
+  .trader-row .holdings {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-fade);
+    letter-spacing: 0.06em;
+    flex-shrink: 0;
+    text-transform: uppercase;
+  }
+  .trader-row .value {
+    font-family: var(--font-mono);
+    font-feature-settings: 'tnum' 1;
+    font-variant-numeric: tabular-nums;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--accent);
+    flex-shrink: 0;
+    min-width: 64px;
+    text-align: right;
+  }
+  @media (max-width: 480px) {
+    .trader-row { padding: 9px 12px; font-size: 12px; gap: 10px; }
+    .trader-row .holdings { display: none; }
+  }
+
+  /* ─── activity strip (Bloomberg-style event feed) ────────────── */
+  .activity-strip {
+    margin: 0 0 28px;
+  }
+  .activity-strip .section-title {
+    margin-bottom: 8px;
+  }
+  .activity-list {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .event-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+    line-height: 1.4;
+  }
+  .event-row:first-child { border-top: 0; }
+  .event-row .pip {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--text-fade);
+  }
+  .event-row.kind-match-win .pip      { background: var(--green); }
+  .event-row.kind-match-loss .pip     { background: var(--red); }
+  .event-row.kind-share-grant .pip    { background: var(--accent); }
+  .event-row.kind-dividend .pip       { background: var(--tick-flash); }
+  .event-row.kind-new-portfolio .pip  { background: var(--accent); }
+  .event-row.kind-trade-buy .pip      { background: var(--green); }
+  .event-row.kind-trade-sell .pip     { background: var(--red); }
+  .event-row .label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .event-row .label .actor  { color: var(--accent); font-weight: 600; }
+  .event-row .label .god    { color: var(--text);   font-weight: 600; }
+  .event-row .label .kda    { font-family: var(--font-mono); color: var(--text-dim); }
+  .event-row .label .amount { font-family: var(--font-mono); }
+  .event-row .label .up     { color: var(--green); font-family: var(--font-mono); }
+  .event-row .label .down   { color: var(--red);   font-family: var(--font-mono); }
+  .event-row .time {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-fade);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    flex-shrink: 0;
+  }
+  @media (max-width: 480px) {
+    .event-row { padding: 9px 12px; font-size: 12px; gap: 10px; }
+    .event-row .label { white-space: normal; line-height: 1.35; }
+  }
+
+  /* ─── mobile ─────────────────────────────────────────────────── */
+  @media (max-width: 720px) {
+    .hero { padding: 22px 0 14px; }
+    .hero-title { font-size: 40px; }
+    .hero-tagline { font-size: 14px; }
+    .how-it-works { grid-template-columns: 1fr; }
+    .step { min-height: auto; padding: 12px 14px; }
+    .brand-band { flex-wrap: wrap; gap: 8px; }
+  }
+  @media (max-width: 380px) {
+    .hero-title { font-size: 32px; }
+    .hero-tagline { font-size: 13px; }
+  }
+
+  /* ─── search bar ─────────────────────────────────────────────── */
+  .search-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 8px 10px 8px 14px;
+    margin: 16px auto 24px;
+    max-width: 520px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  .search-card .label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    white-space: nowrap;
+  }
+  .search-input {
+    flex: 1;
+    padding: 8px 10px;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-size: 13px;
+    font-family: var(--font-mono);
+    outline: none;
+    transition: border-color 0.12s, background 0.12s;
+  }
+  .search-input::placeholder { color: var(--text-fade); }
+  .search-input:focus {
+    border-color: var(--accent);
+    background: var(--panel-hi);
+  }
+
+  .search-results {
+    max-width: 520px;
+    margin: 0 auto 24px;
+  }
+  .result-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 4px;
+    color: var(--text);
+    text-decoration: none;
+    transition: background 0.1s, border-color 0.1s;
+  }
+  .result-item:hover, .result-item:focus {
+    background: var(--panel-hi);
+    border-color: var(--accent);
+    outline: none;
+  }
+  .result-item .name { font-size: 14px; font-weight: 500; }
+  .result-item .meta {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+  }
+  .result-badge {
+    display: inline-block;
+    padding: 1px 5px;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    margin-left: 8px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    vertical-align: middle;
+  }
+  .result-badge.youtube { color: #ff5e5e; border-color: #ff5e5e44; }
+  .result-badge.twitch  { color: #c8a4ff; border-color: #c8a4ff44; }
+
+  /* ─── god grid ────────────────────────────────────────────────── */
+  .grid-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin: 12px 0 12px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 8px;
+  }
+  .grid-header .count {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.12em;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 8px;
+  }
+  @media (max-width: 480px) {
+    .grid { grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 6px; }
+  }
+
+  .god-tile {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 8px 10px;
+    text-decoration: none;
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    transition: border-color 0.15s ease, background 0.15s ease,
+                transform 0.15s ease, box-shadow 0.15s ease;
+    position: relative;
+    overflow: hidden;
+  }
+  .god-tile:hover {
+    background: var(--panel-hi);
+    border-color: var(--accent);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(11, 16, 22, 0.45),
+                0 0 0 1px rgba(223, 160, 110, 0.18);
+  }
+
+  .god-tile .icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    object-fit: cover;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+  }
+  .god-tile:hover .icon {
+    border-color: var(--accent);
+  }
+  .god-tile .name {
+    font-size: 13px;
+    font-weight: 600;
+    margin: 8px 0 4px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    letter-spacing: -0.01em;
+  }
+  .god-tile .price {
+    font-family: var(--font-mono);
+    font-feature-settings: 'tnum' 1;
+    font-variant-numeric: tabular-nums;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--accent);
+    line-height: 1;
+  }
+  .god-tile .wl {
+    font-family: var(--font-mono);
+    font-feature-settings: 'tnum' 1;
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 6px;
+    line-height: 1;
+    letter-spacing: 0.02em;
+  }
+  .god-tile .wl .w { color: var(--green); font-weight: 600; }
+  .god-tile .wl .l { color: var(--red);   font-weight: 600; }
+  .god-tile .wl .sep { color: var(--text-fade); margin: 0 3px; }
+  .god-tile .kda {
+    font-family: var(--font-mono);
+    font-feature-settings: 'tnum' 1;
+    font-variant-numeric: tabular-nums;
+    font-size: 10px;
+    color: var(--text-fade);
+    margin-top: 2px;
+    letter-spacing: 0.04em;
+  }
+  .god-tile .nodata {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-fade);
+    margin-top: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .god-tile svg.spark {
+    width: 92%;
+    height: 16px;
+    margin-top: 8px;
+  }
+
+  .empty, .loading {
+    color: var(--text-dim);
+    text-align: center;
+    padding: 32px 16px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+  }
+</style>
+</head>
+<body>
+  <a class="skip-link" href="#maincontent">Skip to content</a>
+  <div class="ticker-bar" id="ticker-bar" aria-hidden="true">
+    <div class="label">LIVE</div>
+    <div class="ticker-viewport">
+      <div class="ticker-track" id="ticker-track"></div>
+    </div>
+  </div>
+
+  <div class="wrap" id="maincontent" role="main" tabindex="-1">
+    <div class="brand-band" role="banner">
+      <a class="left" href="/"><img class="brand-hat" src="/hat.png" alt="">// HATMASTER.TV</a>
+      <div class="right-cluster">
+        <a href="/community" class="icon-toggle" style="text-decoration: none;"
+           title="God request queue + viewer suggestions">
+          [COMMUNITY]
+        </a>
+        <div class="status offline" id="band-status">
+          <span class="dot"></span><span id="band-status-text">OFFLINE</span>
+        </div>
+      </div>
+    </div>
+
+    <section class="hero" id="hero">
+      <div class="kicker">// THE HATMAS MARKET ─ A SMITE 2 STOCK EXCHANGE</div>
+      <h1 class="hero-title">Hatmas <span class="accent">Market</span></h1>
+      <p class="hero-tagline">
+        Live god prices &middot; viewer portfolios.<br>
+        Comment on videos or watch streams to earn shares!
+      </p>
+    </section>
+
+    <section class="how-it-works" aria-label="How Hatmas Market works">
+      <div class="step">
+        <span class="num">01</span>
+        <span class="label">Watch</span>
+        <span class="desc">Live on Twitch or VODs on YouTube</span>
+      </div>
+      <div class="step">
+        <span class="num">02</span>
+        <span class="label">Earn</span>
+        <span class="desc">Comment on "Full Gameplay" videos for shares</span>
+      </div>
+      <div class="step">
+        <span class="num">03</span>
+        <span class="label">Trade</span>
+        <span class="desc">Trade gods, build portfolios, climb the board</span>
+      </div>
+    </section>
+
+    <section class="top-traders" id="top-traders" style="display:none"
+             aria-label="Top traders by portfolio value">
+      <div class="section-title">Top traders</div>
+      <div class="leaderboard-list" id="leaderboard-list"></div>
+    </section>
+
+    <section class="activity-strip" id="activity-strip" style="display:none"
+             aria-label="Recent market activity">
+      <div class="section-title">Recent activity</div>
+      <div class="activity-list" id="activity-list"></div>
+    </section>
+
+    <div class="search-card">
+      <div class="label">FIND PORTFOLIO</div>
+      <input id="q" class="search-input" type="search"
+             autocomplete="off" autocapitalize="off" spellcheck="false"
+             placeholder="YouTube display name…"
+             aria-label="YouTube display name">
+    </div>
+    <div id="search-results" class="search-results"></div>
+
+    <div class="grid-header">
+      <div class="section-title">Gods</div>
+      <div class="count" id="god-count">--</div>
+    </div>
+
+    <div id="grid" class="grid">
+      <div class="loading">Connecting to the market…</div>
+    </div>
+
+    <div class="footer-brand">
+      <div class="footer-build">
+        <span class="dot"></span><span id="last-ping">DATA · &lt;1s</span> &nbsp;·&nbsp; HATMASBOT v2.7
+      </div>
+      <div>Made by <a href="https://twitch.tv/hatmaster" target="_blank">Hatmaster</a> &amp; Claude</div>
+      <div class="footer-controls">
+        <button id="icon-toggle" class="icon-toggle"
+                title="Toggle between custom OBS-style icons and official portraits">
+          [ICONS: CUSTOM]
+        </button>
+      </div>
+    </div>
+  </div>
+
+<script src="/auth.js"></script>
+<script>
+  // ─── icon style toggle (persisted in localStorage) ───────────────
+  const ICON_PREF_KEY = 'hatmas:icon-style';
+  function getIconStyle() {
+    return localStorage.getItem(ICON_PREF_KEY) || 'custom';
+  }
+  function setIconStyle(s) {
+    localStorage.setItem(ICON_PREF_KEY, s);
+  }
+  function iconUrl(name, slug) {
+    const safeSlug = slug || String(name).toLowerCase()
+                                          .replace(/\s+/g, '-')
+                                          .replace(/'/g, '');
+    const route = getIconStyle() === 'custom'
+                    ? '/custom-god-icon/' : '/god-icon/';
+    return route + encodeURIComponent(safeSlug);
+  }
+
+  const $iconToggle = document.getElementById('icon-toggle');
+  function updateToggleLabel() {
+    $iconToggle.textContent = '[ICONS: ' + getIconStyle().toUpperCase() + ']';
+  }
+  updateToggleLabel();
+  $iconToggle.addEventListener('click', () => {
+    const cur = getIconStyle();
+    setIconStyle(cur === 'custom' ? 'official' : 'custom');
+    updateToggleLabel();
+    // Re-render anything that uses icons
+    if (lastGods) {
+      renderTicker(lastGods);
+      renderGrid(lastGods);
+    }
+  });
+
+  // Cache the most recent /api/gods response so the toggle can
+  // re-render without a network round trip.
+  let lastGods = null;
+
+  // ─── footer "last data" ping ────────────────────────────────────
+  // Bloomberg-terminal-y signal that the page is fresh. bumpPing()
+  // is called whenever we successfully pull from the API; a 1s
+  // interval re-renders the relative label so the user sees it tick.
+  // Declared before any code that can call bumpPing().
+  let _lastPingMs = Date.now();
+  function bumpPing() { _lastPingMs = Date.now(); updatePingLabel(); }
+  function updatePingLabel() {
+    const el = document.getElementById('last-ping');
+    if (!el) return;
+    const ago = Math.floor((Date.now() - _lastPingMs) / 1000);
+    let label;
+    if (ago < 2)       label = 'DATA · <1s';
+    else if (ago < 60) label = 'DATA · ' + ago + 's';
+    else               label = 'DATA · ' + Math.floor(ago / 60) + 'm';
+    el.textContent = label;
+  }
+  setInterval(updatePingLabel, 1000);
+
+  // ─── brand-band LIVE pill ────────────────────────────────────────
+  // Trimmed stream-status poll: the stream embed lives on the home
+  // page now, so this page only lights the pill. Same endpoint,
+  // same 30s cadence.
+  const $bandStatus    = document.getElementById('band-status');
+  const $bandStatusText= document.getElementById('band-status-text');
+  function setLive(live) {
+    if ($bandStatus) $bandStatus.classList.toggle('offline', !live);
+    if ($bandStatusText) $bandStatusText.textContent = live ? 'LIVE' : 'OFFLINE';
+  }
+  setLive(false);  // default until first stream-status response
+
+  async function refreshStreamStatus() {
+    try {
+      const r = await fetch('/api/stream-status');
+      if (!r.ok) return;
+      const data = await r.json();
+      bumpPing();
+      setLive(!!data.is_live);
+    } catch (e) { /* silent — keep last state */ }
+  }
+  refreshStreamStatus();
+  setInterval(refreshStreamStatus, 30 * 1000);
+
+  // ─── recent activity feed ───────────────────────────────────────
+  // Bloomberg-tape style. Pulls /api/recent-events (UNION across
+  // matches, share grants, dividends, new portfolios, trades),
+  // renders the 8 most recent as a compact list. Polls every 20s.
+  // The whole section hides itself if there's no data yet (fresh DB,
+  // YT scanner disabled, etc.) so the layout doesn't look broken.
+  const $activityStrip = document.getElementById('activity-strip');
+  const $activityList  = document.getElementById('activity-list');
+
+  async function refreshActivity() {
+    try {
+      const r = await fetch('/api/recent-events');
+      if (!r.ok) return;
+      const data = await r.json();
+      bumpPing();
+      renderActivity(data.events || []);
+    } catch (e) { /* silent */ }
+  }
+
+  function renderActivity(events) {
+    if (!events.length) {
+      $activityStrip.style.display = 'none';
+      return;
+    }
+    $activityStrip.style.display = '';
+    $activityList.innerHTML = '';
+    for (const e of events.slice(0, 8)) {
+      const row = document.createElement('div');
+      // Per-event kind class drives the pip color. Match and trade
+      // get a sub-kind suffix ('-win'/'-loss', '-buy'/'-sell') so
+      // the same CSS rules handle both outcomes.
+      let kindCls = 'kind-' + e.kind;
+      if (e.kind === 'match') kindCls += '-' + (e.outcome || 'win');
+      if (e.kind === 'trade') kindCls += '-' + (e.trade || 'buy');
+      row.className = 'event-row ' + kindCls;
+      row.innerHTML =
+        '<span class="pip" aria-hidden="true"></span>' +
+        '<span class="label">' + formatEventLabel(e) + '</span>' +
+        '<span class="time">' + relTime(e.ts) + '</span>';
+      $activityList.appendChild(row);
+    }
+  }
+
+  function formatEventLabel(e) {
+    switch (e.kind) {
+      case 'match': {
+        const verb  = e.outcome === 'win' ? 'won' : 'lost';
+        const delta = (e.delta || 0);
+        const sign  = delta >= 0 ? '+' : '';
+        const cls   = delta >= 0 ? 'up' : 'down';
+        const kda   = (e.kda || [0,0,0]).join('/');
+        return '<span class="actor">Hatmaster</span> ' + verb +
+               ' on <span class="god">' + escapeHtml(e.god) + '</span> · ' +
+               '<span class="kda">' + kda + '</span> · ' +
+               '<span class="' + cls + '">' + sign + delta.toFixed(1) + '%</span>';
+      }
+      case 'share_grant': {
+        const n = Math.round(e.shares || 0);
+        return '<span class="actor">' + escapeHtml(e.actor || '?') + '</span> ' +
+               'earned <span class="amount">' + n +
+               ' share' + (n === 1 ? '' : 's') + '</span> of ' +
+               '<span class="god">' + escapeHtml(e.god) + '</span>';
+      }
+      case 'dividend': {
+        const hats = Math.round(e.total || 0);
+        const hold = e.holders || 0;
+        return '<span class="god">' + escapeHtml(e.god) + '</span> ' +
+               'paid <span class="amount">' + hats + ' hats</span> ' +
+               'to <span class="amount">' + hold +
+               ' holder' + (hold === 1 ? '' : 's') + '</span>';
+      }
+      case 'new_portfolio':
+        return '<span class="actor">' + escapeHtml(e.actor || '?') + '</span> ' +
+               'joined the market';
+      case 'trade': {
+        const verb = e.trade === 'sell' ? 'sold' : 'bought';
+        const sh   = Number(e.shares || 0).toFixed(1);
+        const px   = Math.round(e.price || 0);
+        return '<span class="actor">' + escapeHtml(e.actor || '?') + '</span> ' +
+               verb + ' <span class="amount">' + sh + '</span> ' +
+               '<span class="god">' + escapeHtml(e.god) + '</span> @ ' +
+               '<span class="amount">' + px + '</span>';
+      }
+      default:
+        return '<span class="muted">unknown event</span>';
+    }
+  }
+
+  function relTime(iso) {
+    if (!iso) return '';
+    // SQLite stores 'YYYY-MM-DD HH:MM:SS' in UTC without a tz marker.
+    // JS Date.parse treats that as local time, which would skew the
+    // relative age by the user's UTC offset. Normalize to ISO+Z.
+    const normalized = iso.includes('T') ? iso : iso.replace(' ', 'T') + 'Z';
+    const t = Date.parse(normalized);
+    if (isNaN(t)) return '';
+    const sec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+    if (sec < 60)    return 'NOW';
+    if (sec < 3600)  return Math.floor(sec / 60) + 'm';
+    if (sec < 86400) return Math.floor(sec / 3600) + 'h';
+    return Math.floor(sec / 86400) + 'd';
+  }
+
+  refreshActivity();
+  setInterval(refreshActivity, 20 * 1000);
+
+  // ─── top traders (leaderboard strip) ────────────────────────────
+  // Pulls /api/leaderboard, renders the top 10 portfolios by current
+  // value. Each row links to the portfolio page so a curious new
+  // viewer can dig into how a top trader built their position. Polls
+  // every 60s — leaderboards don't need to be as twitchy as the
+  // activity feed.
+  const $topTraders      = document.getElementById('top-traders');
+  const $leaderboardList = document.getElementById('leaderboard-list');
+
+  async function refreshLeaderboard() {
+    try {
+      const r = await fetch('/api/leaderboard?limit=10');
+      if (!r.ok) return;
+      const data = await r.json();
+      bumpPing();
+      renderLeaderboard(data.leaderboard || []);
+    } catch (e) { /* silent */ }
+  }
+
+  function renderLeaderboard(entries) {
+    if (!entries.length) {
+      $topTraders.style.display = 'none';
+      return;
+    }
+    $topTraders.style.display = '';
+    $leaderboardList.innerHTML = '';
+    for (const e of entries) {
+      const a = document.createElement('a');
+      a.className = 'trader-row rank-' + e.rank;
+      a.href = e.url;
+      const badgeClass = e.platform === 'twitch' ? 'twitch' : 'youtube';
+      const badgeText  = e.platform === 'twitch' ? 'TW' : 'YT';
+      const n = e.holdings_count || 0;
+      const holdingsText = n + (n === 1 ? ' god' : ' gods');
+      const valueText = Math.round(e.total_value).toLocaleString();
+      a.innerHTML =
+        '<span class="rank">#' + e.rank + '</span>' +
+        '<span class="name">' + escapeHtml(e.display_name) +
+          '<span class="platform-badge ' + badgeClass + '">' +
+          badgeText + '</span>' +
+        '</span>' +
+        '<span class="holdings">' + holdingsText + '</span>' +
+        '<span class="value">' + valueText + '</span>';
+      $leaderboardList.appendChild(a);
+    }
+  }
+
+  refreshLeaderboard();
+  setInterval(refreshLeaderboard, 60 * 1000);
+
+  // ─── search by display name ──────────────────────────────────────
+  const $q = document.getElementById('q');
+  const $sr = document.getElementById('search-results');
+  let lastQuery = '';
+  let debounceTimer = null;
+
+  $q.addEventListener('input', () => {
+    clearTimeout(debounceTimer);
+    const q = $q.value.trim();
+    if (q.length < 2) { $sr.innerHTML = ''; return; }
+    debounceTimer = setTimeout(() => doSearch(q), 250);
+  });
+  $q.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const first = $sr.querySelector('.result-item');
+      if (first) first.click();
+    }
+  });
+  async function doSearch(q) {
+    if (q === lastQuery) return;
+    lastQuery = q;
+    try {
+      const r = await fetch('/api/search?q=' + encodeURIComponent(q));
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      renderSearch(data.results || []);
+    } catch (err) {
+      $sr.innerHTML = '<div class="empty">Search failed</div>';
+    }
+  }
+  function renderSearch(results) {
+    if (!results.length) {
+      $sr.innerHTML = '<div class="empty">No matches</div>';
+      return;
+    }
+    $sr.innerHTML = '';
+    for (const r of results) {
+      const a = document.createElement('a');
+      a.className = 'result-item';
+      // Server returns r.url (and r.platform); fall back to legacy
+      // YouTube path for any older clients/results.
+      a.href = r.url || ('/yt/' + encodeURIComponent(r.channel_id));
+      const platform = r.platform || 'youtube';
+      const badgeClass = platform === 'twitch' ? 'twitch' : 'youtube';
+      const badgeText  = platform === 'twitch' ? 'TW' : 'YT';
+      a.innerHTML =
+        `<div class="name">${escapeHtml(r.display_name)}` +
+        `  <span class="result-badge ${badgeClass}">${badgeText}</span></div>` +
+        `<div class="meta">portfolio →</div>`;
+      $sr.appendChild(a);
+    }
+  }
+
+  // ─── god grid ────────────────────────────────────────────────────
+  const $grid = document.getElementById('grid');
+  const $count = document.getElementById('god-count');
+  loadGods();
+  async function loadGods() {
+    try {
+      const r = await fetch('/api/gods');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      lastGods = data.gods || [];
+      bumpPing();
+      renderGrid(lastGods);
+      renderTicker(lastGods);
+    } catch (err) {
+      $grid.innerHTML = '<div class="empty">Market offline · couldn\'t load gods</div>';
+    }
+  }
+
+  // ─── ticker tape ─────────────────────────────────────────────────
+  // Builds two identical copies of the god list end-to-end so the CSS
+  // animation can translate -50% and loop seamlessly. Each "tick"
+  // shows NAME · PRICE · CHANGE-% with green/red coloring derived
+  // from the sparkline trend (current vs first point in the recent
+  // history window).
+  const $ticker = document.getElementById('ticker-track');
+  function renderTicker(gods) {
+    const playable = gods.filter(g => g.games > 0);
+    if (!playable.length) {
+      $ticker.innerHTML = '';
+      return;
+    }
+    // Sort by absolute change so the most-moving gods float to the
+    // start of the loop — more interesting to look at than alpha order.
+    const enriched = playable.map(g => {
+      const sp = g.sparkline || [];
+      let chg = 0;
+      if (sp.length >= 2 && sp[0] > 0) {
+        chg = ((g.price - sp[0]) / sp[0]) * 100;
+      }
+      return { g, chg };
+    });
+    enriched.sort((a, b) => Math.abs(b.chg) - Math.abs(a.chg));
+
+    const tickHtml = (item) => {
+      const { g, chg } = item;
+      let cls = 'flat', sign = '';
+      let chgText = '0.0%';
+      if (Math.abs(chg) >= 0.05) {
+        cls = chg > 0 ? 'up' : 'down';
+        sign = chg > 0 ? '▲' : '▼';
+        chgText = sign + Math.abs(chg).toFixed(1) + '%';
+      } else {
+        chgText = '·';
+      }
+      const url = iconUrl(g.name, g.slug);
+      return `<a class="tick" href="/god/${encodeURIComponent(g.name)}">` +
+             `<img class="tick-icon" src="${url}" ` +
+             `     alt="" loading="lazy" ` +
+             `     onerror="this.style.visibility='hidden'">` +
+             `<span class="name">${escapeHtml(g.name.toUpperCase())}</span>` +
+             `<span class="px">${Math.round(g.price)}</span>` +
+             `<span class="chg ${cls}">${chgText}</span>` +
+             `</a>`;
+    };
+
+    // Duplicate the content twice for the seamless -50% scroll trick.
+    const oneCopy = enriched.map(tickHtml).join('');
+    $ticker.innerHTML = oneCopy + oneCopy;
+
+    // Speed scale: roughly 80s per copy. For very small/large lists,
+    // tweak so the visual speed stays comfortable.
+    const desiredPxPerSec = 60;
+    requestAnimationFrame(() => {
+      const trackWidth = $ticker.scrollWidth / 2;  // one copy
+      const seconds = Math.max(40, Math.round(trackWidth / desiredPxPerSec));
+      $ticker.style.animationDuration = seconds + 's';
+    });
+  }
+  function renderGrid(gods) {
+    if (!gods.length) {
+      $grid.innerHTML = '<div class="empty">Market is empty · waiting for first match</div>';
+      $count.textContent = '0 LISTINGS';
+      return;
+    }
+    $count.textContent = gods.length + ' LISTINGS';
+    $grid.innerHTML = '';
+    for (const g of gods) {
+      const a = document.createElement('a');
+      a.className = 'god-tile';
+      a.href = '/god/' + encodeURIComponent(g.name);
+      const icon = document.createElement('img');
+      icon.className = 'icon';
+      icon.src = iconUrl(g.name, g.slug);
+      icon.alt = g.name;
+      icon.loading = 'lazy';
+      icon.onerror = () => {
+        icon.style.opacity = 0.3;
+        icon.src = '';
+      };
+      const name = document.createElement('div');
+      name.className = 'name';
+      name.textContent = g.name;
+      const price = document.createElement('div');
+      price.className = 'price';
+      price.textContent = Math.round(g.price);
+
+      a.appendChild(icon);
+      a.appendChild(name);
+      a.appendChild(price);
+
+      if (g.games > 0) {
+        const wl = document.createElement('div');
+        wl.className = 'wl';
+        wl.innerHTML =
+          `<span class="w">${g.wins}W</span>` +
+          `<span class="sep">/</span>` +
+          `<span class="l">${g.losses}L</span>`;
+        a.appendChild(wl);
+
+        const kda = document.createElement('div');
+        kda.className = 'kda';
+        const [k, d, ax] = g.kda_total || [0, 0, 0];
+        kda.textContent = `${k}/${d}/${ax}`;
+        a.appendChild(kda);
+      } else {
+        const nd = document.createElement('div');
+        nd.className = 'nodata';
+        nd.textContent = 'No data';
+        a.appendChild(nd);
+      }
+
+      if (g.sparkline && g.sparkline.length >= 2) {
+        a.appendChild(makeSparkline(g.sparkline));
+      }
+
+      $grid.appendChild(a);
+    }
+  }
+
+  function makeSparkline(values) {
+    const w = 120, h = 16;
+    const min = Math.min.apply(null, values);
+    const max = Math.max.apply(null, values);
+    const range = (max - min) || 1;
+    const step = w / (values.length - 1);
+    const points = values.map((v, i) => {
+      const x = i * step;
+      const y = h - ((v - min) / range) * h;
+      return x.toFixed(1) + ',' + y.toFixed(1);
+    }).join(' ');
+    const last = values[values.length - 1];
+    const first = values[0];
+    const color = last >= first ? 'var(--green)' : 'var(--red)';
+    const svgNs = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNs, 'svg');
+    svg.setAttribute('class', 'spark');
+    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    svg.setAttribute('preserveAspectRatio', 'none');
+    const polyline = document.createElementNS(svgNs, 'polyline');
+    polyline.setAttribute('points', points);
+    polyline.setAttribute('fill', 'none');
+    polyline.setAttribute('stroke', color);
+    polyline.setAttribute('stroke-width', '1.4');
+    polyline.setAttribute('stroke-linecap', 'round');
+    polyline.setAttribute('stroke-linejoin', 'round');
+    svg.appendChild(polyline);
+    return svg;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[c]);
+  }
+</script>
+</body>
+</html>

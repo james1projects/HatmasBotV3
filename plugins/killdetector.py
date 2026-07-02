@@ -545,6 +545,10 @@ class KillDeathDetector:
                 password=OBS_WS_PASSWORD,
             )
             _log("[KillDetector] Connected to OBS WebSocket")
+        except (ConnectionRefusedError, OSError):
+            _log("[KillDetector] OBS not reachable — is OBS running with its "
+                 "WebSocket server enabled? (kill detection will stay idle)")
+            self.obs_client = None
         except Exception as e:
             _log(f"[KillDetector] OBS connection failed: {e}")
             self.obs_client = None

@@ -102,7 +102,12 @@ public class EntryPoint
     // in the dialog — this is just the starting point. The actual
     // `source_video` path comes from inside whichever JSON you pick,
     // so the JSON + MP4 can live in any folder you like.
-    const string EVENTS_FOLDER = @"C:\Users\james\Videos";
+    // Where HatmasBot lives on THIS machine. This is the only in-repo
+    // path you set per PC. PRESET_FILE / RECORDINGS_FOLDER /
+    // HORIZONTAL_PRESET_FILE below are all derived from it.
+    const string REPO_ROOT = @"C:\Projects\HatmasBot";
+
+    const string EVENTS_FOLDER = REPO_ROOT + @"\recordings";
 
     // Set this to false to skip the picker and always auto-pick the
     // newest *.events.json in EVENTS_FOLDER — the old behaviour.
@@ -136,7 +141,7 @@ public class EntryPoint
     // The orchestrator's ProcessVideo.cs overrides this via jobs/current.json;
     // this standalone path is for manual runs of HighlightBuilder.
     const string PRESET_FILE =
-        @"C:\Users\james\HatmasBot\vegas_presets\vertical_tiktok.tune.json";
+        REPO_ROOT + @"\vegas_presets\vertical_tiktok.tune.json";
 
 
     // ────────────────────────────────────────────────────────────────────────
@@ -208,12 +213,12 @@ public class EntryPoint
     // recordings\mixed\ and recordings\unknown\ written by
     // process_recordings.py).
     const string RECORDINGS_FOLDER =
-        @"C:\Users\james\HatmasBot\recordings";
+        REPO_ROOT + @"\recordings";
 
     // 1920x1080 horizontal preset captured by TuneFrame.cs. Used only by
     // god-folder mode; events_file mode still loads PRESET_FILE.
     const string HORIZONTAL_PRESET_FILE =
-        @"C:\Users\james\HatmasBot\vegas_presets\horizontal_full.tune.json";
+        REPO_ROOT + @"\vegas_presets\horizontal_full.tune.json";
 
     // Event types kept in god-folder mode. tools/vod_detector.py emits
     // exactly three type strings: "kill", "death", "assist". Multikills

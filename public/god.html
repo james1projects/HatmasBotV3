@@ -316,10 +316,15 @@
 </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="brand-band">
+  <a class="skip-link" href="#maincontent">Skip to content</a>
+  <div class="wrap" id="maincontent" role="main" tabindex="-1">
+    <div class="brand-band" role="banner">
       <a class="left" href="/"><img class="brand-hat" src="/hat.png" alt="">// HATMASTER.TV</a>
       <div class="right-cluster">
+        <a href="/market" class="icon-toggle" style="text-decoration: none;"
+           title="All god prices + the full market">
+          [MARKET]
+        </a>
         <div class="status"><span class="dot" id="live-dot"></span><span id="status">connecting…</span></div>
       </div>
     </div>
@@ -945,6 +950,7 @@
       body.innerHTML =
         '<div class="trade-row">' +
         '  <input class="t-amount" id="trade-amount"' +
+        '         aria-label="Number of Hats to trade"' +
         '         placeholder="Hats (or \'all\')" autocomplete="off">' +
         '  <button class="trade-btn buy" id="trade-buy">BUY</button>' +
         '  <button class="trade-btn sell" id="trade-sell">SELL</button>' +

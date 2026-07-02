@@ -371,6 +371,8 @@ class GodPoolPlugin:
 
         if not rows:
             print("[GodPool] do_spin: pool empty — nothing to spin")
+            await self._emit_spin_toast(
+                "Spin pool is empty — !nominate a god first")
             return {"ok": False, "reason": "pool_empty"}
 
         # Exclude gods already pending in the request queue. Prevents
@@ -385,6 +387,8 @@ class GodPoolPlugin:
         if not candidates:
             print("[GodPool] do_spin: every pool god is already queued — "
                   "play one before spinning again")
+            await self._emit_spin_toast(
+                "Every pool god is already queued — play one first")
             return {"ok": False, "reason": "all_queued"}
 
         # Weighted random — gods with more votes are more likely to win.
@@ -500,6 +504,27 @@ class GodPoolPlugin:
             })
         except Exception as e:
             print(f"[GodPool] overlay emit failed: {e}")
+
+    async def _emit_spin_toast(self, text: str):
+        """Flash a short message on the OBS spin overlay when a spin
+        can't proceed (empty pool, or every god already queued).
+
+        Reuses the existing ``god_pool_spin`` browser source — the
+        overlay renders this as a toast card instead of the reel — so
+        no extra OBS setup is needed. The point is feedback: a Stream
+        Deck press that no-ops otherwise looks broken, since there's
+        no chat message and no browser window to read the result JSON.
+        """
+        # Mirrors the guard in _emit_spin_overlay above.
+        if not self.bot or not getattr(self.bot, "web_server", None):
+            return
+        overlay_mgr = getattr(self.bot.web_server, "overlay", None)
+        if not overlay_mgr:
+            return
+        try:
+            await overlay_mgr.emit("god_pool_spin", {"toast": text})
+        except Exception as e:
+            print(f"[GodPool] toast emit failed: {e}")
 
     async def cmd_pool_clear(self, message, args, whisper=False):
         """!poolclear — mod-only. Wipe the pool (does not touch the

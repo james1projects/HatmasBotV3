@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "stub-site",
+      "runtimeExecutable": "C:\\Users\\james\\AppData\\Local\\Programs\\Python\\Python314\\python.exe",
+      "runtimeArgs": ["tools\\dev_stub_site.py"],
+      "port": 8071
+    }
+  ]
+}

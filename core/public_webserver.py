@@ -181,6 +181,13 @@ class PublicWebServer:
         # Twitch platforms; the page itself reads location.pathname to
         # know which platform it's serving.
         self.app.router.add_get("/", self._handle_landing)
+        # Hatmas Market — split off the landing page. Routes are
+        # case-sensitive; /Market redirects so the capitalized URL
+        # can be shared on stream/socials.
+        self.app.router.add_get("/market", self._handle_market)
+        self.app.router.add_get(
+            "/Market",
+            lambda r: web.HTTPMovedPermanently("/market"))
         self.app.router.add_get("/yt/{channel_id}", self._handle_portfolio_page)
         self.app.router.add_get("/twitch/{username}", self._handle_portfolio_page)
         self.app.router.add_get("/god/{name}", self._handle_god_page)
@@ -393,6 +400,13 @@ class PublicWebServer:
         if not path.exists():
             return web.Response(
                 text="Landing page missing.", status=500)
+        return web.FileResponse(path, headers={"Cache-Control": "no-cache"})
+
+    async def _handle_market(self, request: web.Request) -> web.Response:
+        path = PUBLIC_DIR / "market.html"
+        if not path.exists():
+            return web.Response(
+                text="Market page missing.", status=500)
         return web.FileResponse(path, headers={"Cache-Control": "no-cache"})
 
     # ──────────────────────────────────────────────────────────────────

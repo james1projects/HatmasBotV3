@@ -20,12 +20,14 @@ from core.bot import HatmasBot
 from core.log_quiet import quiet_known_connection_errors
 from core.webserver import WebServer
 from core.public_webserver import PublicWebServer
+from core.cloudflared import CloudflaredTunnel
 from core.token_manager import TokenManager
 from core import db as shared_db
 from core.config import (
     TWITCH_BOT_TOKEN, TWITCH_BOT_REFRESH_TOKEN,
     TWITCH_BROADCASTER_TOKEN, TWITCH_BROADCASTER_REFRESH_TOKEN,
-    TWITCH_BOT_ID, TWITCH_OWNER_ID
+    TWITCH_BOT_ID, TWITCH_OWNER_ID,
+    CLOUDFLARED_ENABLED, CLOUDFLARED_TUNNEL_NAME, CLOUDFLARED_PATH,
 )
 from plugins.basic import BasicPlugin
 from plugins.smite import SmitePlugin
@@ -333,6 +335,17 @@ async def main():
                                   bot=bot)  # /mod command matrix
     await public_web.start()
 
+    # ── Cloudflare Tunnel (hatmaster.tv) ──
+    # Launch cloudflared as a child process so `python main.py` also
+    # brings the public site online. Started AFTER public_web so the
+    # tunnel's origin (localhost:8070) is already listening. Fails soft
+    # if cloudflared isn't installed. Disable via CLOUDFLARED_ENABLED
+    # in config_local.py if you run the cloudflared Windows service.
+    tunnel = None
+    if CLOUDFLARED_ENABLED:
+        tunnel = CloudflaredTunnel(CLOUDFLARED_TUNNEL_NAME, CLOUDFLARED_PATH)
+        await tunnel.start()
+
     print("[HatmasBot] Starting...")
     print()
 
@@ -350,6 +363,10 @@ async def main():
         stops accepting requests before we close its DB handle.
         """
         print("\n[HatmasBot] Shutting down...")
+        # Cut the public tunnel first so no new external requests arrive
+        # while plugins and the DB are being torn down.
+        if tunnel is not None:
+            await tunnel.stop()
         for name, plugin in bot.plugins.items():
             if hasattr(plugin, "cleanup"):
                 try:

@@ -1,14 +1,14 @@
 {
-  "_comment": "Central config for the Vegas automation pipeline. All paths absolute, Windows-style. Render template names must match exactly what appears in Vegas's File -> Render As dialog (case-insensitive match at runtime).",
+  "_comment": "Central config for the Vegas automation pipeline. In-repo dirs are RELATIVE to the repo root (resolved by tools/process_vods.py at load time); vegas_exe stays absolute since it points at your Vegas install. Render template names must match exactly what appears in Vegas's File -> Render As dialog (case-insensitive match at runtime).",
 
   "vegas_exe":      "C:\\Program Files\\VEGAS\\VEGAS Pro 21.0\\vegas210.exe",
 
-  "inbox_dir":      "C:\\Users\\james\\HatmasBot\\inbox",
-  "rendered_dir":   "C:\\Users\\james\\HatmasBot\\rendered",
-  "highlight_dir":  "C:\\Users\\james\\HatmasBot\\highlight",
-  "preset_dir":     "C:\\Users\\james\\HatmasBot\\vegas_presets",
-  "jobs_dir":       "C:\\Users\\james\\HatmasBot\\jobs",
-  "scripts_dir":    "C:\\Users\\james\\HatmasBot\\vegas_scripts",
+  "inbox_dir":      "inbox",
+  "rendered_dir":   "rendered",
+  "highlight_dir":  "highlight",
+  "preset_dir":     "vegas_presets",
+  "jobs_dir":       "jobs",
+  "scripts_dir":    "vegas_scripts",
 
   "render_templates": {
     "full_gameplay": "Youtube HD",

@@ -290,6 +290,20 @@ TTS_DISPLAY_SECONDS = 0             # 0 = auto (stays visible until speech ends)
 WEB_HOST = "localhost"
 WEB_PORT = 8069
 
+# === CLOUDFLARE TUNNEL ===
+# When enabled, main.py launches `cloudflared tunnel run <name>` as a
+# child process tied to the bot's lifetime, so `python main.py` also
+# brings hatmaster.tv online (and takes it down on shutdown). See
+# core/cloudflared.py.
+#
+# The documented production setup is the auto-starting cloudflared
+# Windows service (HatmasBot.md → "Cloudflare Tunnel"). If that service
+# is healthy, set CLOUDFLARED_ENABLED = False in config_local.py to
+# avoid running a redundant second tunnel replica.
+CLOUDFLARED_ENABLED = True
+CLOUDFLARED_TUNNEL_NAME = "HatBot"       # matches `cloudflared tunnel create HatBot`
+CLOUDFLARED_PATH = ""                     # "" = auto-detect (PATH, then MSI install dirs)
+
 # === GOD ECONOMY (Stock Market) ===
 ECONOMY_DB_PATH = DATA_DIR / "economy.db"
 ECONOMY_STARTING_PRICE = 100           # Hats per share for new gods

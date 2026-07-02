@@ -523,4 +523,87 @@ class _MatchMixin:
         # Future launches will only see matches AFTER the marker.
         if not seen_ids:
             latest = history[0]  # tracker.gg returns newest-first
-            await self._db.execute
+            await self._db.execute("""
+                INSERT INTO processed_matches
+                    (match_id, god_name, outcome, kills, deaths, assists,
+                     price_change, source)
+                VALUES (?, '<bootstrap>', 'none', 0, 0, 0, 0, 'bootstrap')
+            """, (latest["match_id"],))
+            await self._db.commit()
+            summary["bootstrap"] = True
+            print(f"[Economy] backfill: bootstrap marker written "
+                  f"(latest match {latest['match_id']}). "
+                  f"Future launches will backfill from here.")
+            return summary
+
+        # ─── Normal backfill: process new matches in chronological order
+        if not new_matches:
+            print("[Economy] backfill: no new matches since last run")
+            return summary
+
+        # Safety cap. Keep the NEWEST cap-many matches so the most
+        # recent state is accurate; older overflow gets dropped (and
+        # won't be retried — once processed_matches advances past them,
+        # future launches won't see them either). Loud warning so the
+        # user knows. Cap is rarely hit (means 200+ matches between
+        # bot runs).
+        if len(new_matches) > self.BACKFILL_CAP:
+            print(f"[Economy] WARNING: backfill found {len(new_matches)} "
+                  f"new matches, capping at {self.BACKFILL_CAP} (newest). "
+                  f"Older overflow will not be backfilled. Investigate "
+                  f"if this number looks wrong (tracker.gg API hiccup?).")
+            # `new_matches` is newest-first (from tracker.gg). Slice
+            # from the front to keep the newest cap-many.
+            new_matches = new_matches[:self.BACKFILL_CAP]
+
+        # Process oldest → newest so price compounding follows real time.
+        new_matches.reverse()
+
+        print(f"[Economy] backfill: settling {len(new_matches)} match(es) "
+              f"from tracker.gg history…")
+
+        for entry in new_matches:
+            mid = entry["match_id"]
+            try:
+                # Try the LISTING entry first — same path the replay tool
+                # uses successfully. The detail endpoint /matches/{id}
+                # currently 401s on ?authlevel=user, so listing parse is
+                # the primary path. Fall back to detail only if the
+                # listing entry can't be parsed (handles rare cases
+                # where the listing schema changes).
+                parsed = smite_plugin.parse_listing_entry(
+                    entry.get("raw_entry"))
+                if not parsed:
+                    detail = await smite_plugin._fetch_match_detail(mid)
+                    parsed = smite_plugin.parse_match_for_settlement(detail)
+                if not parsed:
+                    print(f"[Economy] backfill: couldn't parse match {mid}, "
+                          f"skipping")
+                    summary["skipped"] += 1
+                    continue
+                god_name, outcome, kills, deaths, assists = parsed
+
+                ok = await self.settle_match(
+                    match_id=mid,
+                    god_name=god_name,
+                    outcome=outcome,
+                    kills=kills,
+                    deaths=deaths,
+                    assists=assists,
+                    source="backfill",
+                )
+                if ok:
+                    summary["settled"] += 1
+                else:
+                    summary["skipped"] += 1
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                summary["errors"] += 1
+                print(f"[Economy] backfill: error on match {mid}: {e}")
+
+        print(f"[Economy] backfill complete: "
+              f"settled {summary['settled']}, "
+              f"skipped {summary['skipped']}, "
+              f"errors {summary['errors']}")
+        return summary

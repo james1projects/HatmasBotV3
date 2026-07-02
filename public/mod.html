@@ -84,7 +84,8 @@
 </style>
 </head>
 <body>
-<div class="wrap">
+<a class="skip-link" href="#maincontent">Skip to content</a>
+<div class="wrap" id="maincontent" role="main" tabindex="-1">
   <h1>MOD CONSOLE</h1>
   <p class="sub">Command availability and per-user cooldowns. Changes apply
   live; Discord slash commands re-sync within seconds. 0s = no cooldown.
@@ -93,15 +94,15 @@
   <div class="status" id="status"></div>
 
   <div class="addbox">
-    <input type="text" class="name" id="newName" placeholder="!name" maxlength="33" autocomplete="off">
-    <input type="text" class="resp" id="newResp" placeholder="Response text" maxlength="450" autocomplete="off">
+    <input type="text" class="name" id="newName" aria-label="Command name" placeholder="!name" maxlength="33" autocomplete="off">
+    <input type="text" class="resp" id="newResp" aria-label="Command response text" placeholder="Response text" maxlength="450" autocomplete="off">
     <button id="addBtn">Add command</button>
     <span class="hint">Custom text commands. Placeholders: {user} = who ran it,
     {args} = text after the command. Name: a-z 0-9 _ - only.</span>
   </div>
 
   <div class="toolbar">
-    <input type="search" id="filter" placeholder="Filter commands…" autocomplete="off">
+    <input type="search" id="filter" aria-label="Filter commands" placeholder="Filter commands…" autocomplete="off">
     <span class="me" id="me"></span>
   </div>
 
