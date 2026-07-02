@@ -117,9 +117,19 @@ class _DividendsMixin:
                     holders.append((username, payout))
                     total_hats += payout
 
-        # Twitch payouts (skipped silently if no Twitch holders).
+        # Twitch payouts (skipped silently if no Twitch holders). Only
+        # ledger payouts MixItUp actually accepted - a failed credit
+        # must not show up in the books as paid.
+        paid_holders = []
+        paid_hats = 0
         for username, payout in holders:
-            await self._adjust_balance(username, payout)
+            ok = await self._adjust_balance(username, payout)
+            if not ok:
+                print(f"[Economy] Dividend credit FAILED for {username} "
+                      f"({payout} hats, {god_name}) - not recorded")
+                continue
+            paid_holders.append((username, payout))
+            paid_hats += payout
             await self._db.execute("""
                 INSERT INTO transactions (username, god_name, type, shares, price, total, fee)
                 VALUES (?, ?, 'dividend', 0, ?, ?, 0)
@@ -129,9 +139,15 @@ class _DividendsMixin:
         yt_holders, yt_bonus_total = await self._pay_youtube_dividend(
             god_name, price)
 
-        # Bail only if BOTH sides are empty.
-        if not holders and yt_holders == 0:
-            print(f"[Economy] No holders for {god_name} dividend")
+        # Bail if nothing was actually paid on either side. Also skips
+        # writing the dividends row, so the match_id stays unclaimed and
+        # the settle-time catch-up can retry (e.g. MixItUp was down).
+        if not paid_holders and yt_holders == 0:
+            if holders:
+                print(f"[Economy] Dividend for {god_name}: every MixItUp "
+                      f"credit failed - leaving match unclaimed for catch-up")
+            else:
+                print(f"[Economy] No holders for {god_name} dividend")
             return
 
         # Record the dividend event (covers both sides - total_hats is
@@ -143,7 +159,7 @@ class _DividendsMixin:
                 (god_name, rate, price, total_hats, holders, match_id)
             VALUES (?, ?, ?, ?, ?, ?)
         """, (god_name, ECONOMY_DIVIDEND_RATE, price,
-              total_hats, len(holders) + yt_holders, match_id))
+              paid_hats, len(paid_holders) + yt_holders, match_id))
         await self._db.commit()
 
         self._last_dividend = {
@@ -151,8 +167,8 @@ class _DividendsMixin:
             "rate": ECONOMY_DIVIDEND_RATE,
             "price": price,
             "per_share": dividend_per_share,
-            "total_hats": total_hats,
-            "holders": len(holders),
+            "total_hats": paid_hats,
+            "holders": len(paid_holders),
             "yt_holders": yt_holders,
             "yt_bonus_shares": yt_bonus_total,
             "match_id": match_id,
@@ -160,7 +176,7 @@ class _DividendsMixin:
         }
 
         print(f"[Economy] Dividend: {god_name} - "
-              f"{len(holders)} Twitch holders ({total_hats:,} hats), "
+              f"{len(paid_holders)} Twitch holders ({paid_hats:,} hats), "
               f"{yt_holders} YouTube holders ({yt_bonus_total:.3f} bonus shares), "
               f"{ECONOMY_DIVIDEND_RATE*100:.0f}%")
 
