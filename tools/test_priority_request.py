@@ -126,10 +126,19 @@ class FakeBot:
         self.chat.append(msg)
 
 
+# Connections opened by make_plugin, closed by the _run_test wrapper
+# after each test. aiosqlite connections own a NON-DAEMON worker
+# thread; leaking one per test made the whole process hang at exit
+# (with the PASS lines stuck in the stdio buffer, so it looked like
+# the suite produced no output at all when run unattended).
+_OPEN_DBS = []
+
+
 async def make_plugin(with_godreq=True):
     plugin = PriorityRequestPlugin()
     plugin._enabled = True
     db = await aiosqlite.connect(":memory:")
+    _OPEN_DBS.append(db)
     await plugin._init_schema(db)  # also stores db on plugin._db
     bot = FakeBot()
     if with_godreq:
@@ -440,6 +449,21 @@ TESTS = [
 ]
 
 
+async def _run_test(fn):
+    """Run one test, then close every aiosqlite connection it opened
+    while its event loop still exists (see _OPEN_DBS note above)."""
+    _OPEN_DBS.clear()
+    try:
+        await fn()
+    finally:
+        for db in _OPEN_DBS:
+            try:
+                await db.close()
+            except Exception:
+                pass
+        _OPEN_DBS.clear()
+
+
 def main() -> int:
     name_filter = sys.argv[1] if len(sys.argv) > 1 else ""
     passed = failed = 0
@@ -447,7 +471,7 @@ def main() -> int:
         if name_filter and name_filter not in fn.__name__:
             continue
         try:
-            asyncio.run(fn())
+            asyncio.run(_run_test(fn))
         except AssertionError as e:
             print(f"FAIL  {fn.__name__}: {e}")
             failed += 1
