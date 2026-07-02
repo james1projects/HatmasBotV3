@@ -191,14 +191,25 @@ class GamblePlugin:
         display_name = message.chatter.display_name or message.chatter.name
         now = time.time()
 
-        # Cooldown check
+        # Cooldown check. The slot is CLAIMED here, before the awaited
+        # balance fetch below - previously it was only recorded after
+        # all validation, so two rapid !gamble messages from the same
+        # user could both pass this check and double-bet a balance
+        # that covers only one wager. Validation failures release the
+        # claim (see _release_cooldown call sites) so a typo doesn't
+        # burn the cooldown.
         last_use = self._cooldowns.get(username, 0)
         if now - last_use < GAMBLE_COOLDOWN:
             remaining = int(GAMBLE_COOLDOWN - (now - last_use))
             await self.bot.send_reply(message, f"Cooldown: {remaining}s", whisper)
             return
+        self._cooldowns[username] = now
+
+        def _release_cooldown():
+            self._cooldowns[username] = last_use
 
         if not args:
+            _release_cooldown()
             await self.bot.send_reply(
                 message,
                 f"Usage: !gamble <amount|all|half|quarter> (min: {GAMBLE_MIN_BET} hats)",
@@ -209,12 +220,14 @@ class GamblePlugin:
         # Get current balance
         balance = await self._get_balance(username)
         if balance is None:
+            _release_cooldown()
             await self.bot.send_reply(message, "Couldn't check your balance. Try again.", whisper)
             return
 
         # Parse wager amount
         wager = self._parse_wager(args.strip().lower(), balance)
         if wager is None:
+            _release_cooldown()
             await self.bot.send_reply(
                 message,
                 f"Invalid amount. Use a number, 'all', 'half', or 'quarter'.",
@@ -223,6 +236,7 @@ class GamblePlugin:
             return
 
         if wager < GAMBLE_MIN_BET:
+            _release_cooldown()
             await self.bot.send_reply(
                 message,
                 f"Minimum bet is {GAMBLE_MIN_BET} hats. You tried to bet {wager}.",
@@ -231,15 +245,13 @@ class GamblePlugin:
             return
 
         if wager > balance:
+            _release_cooldown()
             await self.bot.send_reply(
                 message,
                 f"You only have {balance:,} hats but tried to bet {wager:,}.",
                 whisper
             )
             return
-
-        # Set cooldown
-        self._cooldowns[username] = now
 
         # Add wager to jackpot pool
         self.jackpot_pool += wager
