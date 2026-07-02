@@ -18,6 +18,7 @@ Usage:
 """
 
 import asyncio
+import os
 import time
 import json
 import aiohttp
@@ -102,15 +103,20 @@ class TokenManager:
             print(f"[TokenManager] Could not load broadcaster token file: {e}")
 
     def _persist_token(self, token_file, access_token, refresh_token):
-        """Save a refreshed token to disk."""
+        """Save a refreshed token to disk atomically (temp file +
+        os.replace). Twitch rotates refresh tokens on every use, so a
+        crash mid-write would corrupt the only copy of the current
+        refresh token and force a manual re-auth."""
         try:
             token_file.parent.mkdir(exist_ok=True)
-            with open(token_file, "w") as f:
+            tmp_file = token_file.with_suffix(token_file.suffix + ".tmp")
+            with open(tmp_file, "w") as f:
                 json.dump({
                     "access_token": access_token,
                     "refresh_token": refresh_token,
                     "refreshed_at": time.time(),
                 }, f, indent=2)
+            os.replace(tmp_file, token_file)
         except Exception as e:
             print(f"[TokenManager] Failed to persist token to {token_file}: {e}")
 
