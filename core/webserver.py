@@ -270,7 +270,17 @@ class WebServer:
         return web.json_response(queue)
 
     def trigger_tts(self, display_name, message):
-        """Generate TTS audio with gTTS and queue it for the overlay."""
+        """Generate TTS audio with gTTS and queue it for the overlay.
+
+        Generation runs as a background task with the blocking work in
+        a worker thread — gTTS.save() performs a synchronous HTTPS call
+        to Google's TTS endpoint plus a file write, which used to stall
+        the entire event loop (chat, overlays, both web servers) for
+        the duration of the request on every highlighted message.
+        """
+        asyncio.create_task(self._tts_generate_task(display_name, message))
+
+    async def _tts_generate_task(self, display_name, message):
         import time
         try:
             from gtts import gTTS
@@ -278,8 +288,14 @@ class WebServer:
             filename = f"tts_{audio_id}.mp3"
             filepath = TTS_AUDIO_DIR / filename
 
-            tts = gTTS(text=message, lang='en', slow=False)
-            tts.save(str(filepath))
+            def _generate():
+                # Blocking: HTTPS call to Google + mp3 write + old-file
+                # cleanup. Runs in a worker thread via to_thread.
+                tts = gTTS(text=message, lang='en', slow=False)
+                tts.save(str(filepath))
+                self._cleanup_tts_audio()
+
+            await asyncio.to_thread(_generate)
 
             self._state["tts_queue"].append({
                 "user": display_name,
@@ -291,15 +307,12 @@ class WebServer:
             if len(self._state["tts_queue"]) > 20:
                 self._state["tts_queue"] = self._state["tts_queue"][-20:]
 
-            # Clean up old audio files (keep last 30)
-            self._cleanup_tts_audio()
-
             print(f"[WebServer] TTS queued: {display_name} — {message[:60]}...")
-            asyncio.create_task(self.overlay.emit("tts_message", {
+            await self.overlay.emit("tts_message", {
                 "user": display_name,
                 "message": message,
                 "audio": f"/api/tts_audio/{filename}",
-            }))
+            })
         except Exception as e:
             print(f"[WebServer] TTS generation failed: {e}")
 
