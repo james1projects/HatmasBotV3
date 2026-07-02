@@ -1052,18 +1052,23 @@ def main(argv: list[str] | None = None) -> int:
     # used by --reprocess-all.
     _per_video = reprocess_one if args.reprocess_all else process_one
     t_start = time.time()
-    results = [
-        _per_video(
-            video, i, len(mp4s), detector, args.source,
-            dry_run=args.dry_run,
-        )
-        for i, video in enumerate(mp4s, 1)
-    ]
+    try:
+        results = [
+            _per_video(
+                video, i, len(mp4s), detector, args.source,
+                dry_run=args.dry_run,
+            )
+            for i, video in enumerate(mp4s, 1)
+        ]
+    finally:
+        # --- Dashboard: mark batch complete --------------------------
+        # In a finally so an uncaught crash (or Ctrl+C) mid-batch can't
+        # leave the dashboard's VOD-processor panel stuck at
+        # "processing" forever. Per-video errors are already caught
+        # inside process_one/reprocess_one and reported as status rows.
+        if _dashboard_enabled:
+            _dashboard_post("/api/vod_processor/stop", {"state": "done"})
     elapsed = time.time() - t_start
-
-    # --- Dashboard: mark batch complete -----------------------------
-    if _dashboard_enabled:
-        _dashboard_post("/api/vod_processor/stop", {"state": "done"})
 
     # --- Summary ------------------------------------------------------
     moved = sum(1 for r in results if r["status"] == "moved")
