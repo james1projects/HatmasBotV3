@@ -313,8 +313,16 @@ class _DBMixin:
         prices.reverse()  # Chronological order
         return prices
 
-    async def _update_price(self, god_name: str, new_price: float, event: str = "update"):
-        """Update god price in DB and memory cache."""
+    async def _update_price(self, god_name: str, new_price: float,
+                            event: str = "update", *, commit: bool = True):
+        """Update god price in DB and memory cache.
+
+        commit=False lets settle_match defer the commit to the end of
+        the whole settlement, so the aggregate update + price move +
+        processed_matches claim land atomically. A mid-settlement
+        commit here used to open a crash window where the aggregates
+        were persisted without the dedup claim - a retry would then
+        double-count the match into god_prices."""
         new_price = max(new_price, ECONOMY_PRICE_FLOOR)
         old_price = self._prices.get(god_name, ECONOMY_STARTING_PRICE)
 
@@ -347,7 +355,8 @@ class _DBMixin:
             "INSERT INTO price_history (god_name, price, event) VALUES (?, ?, ?)",
             (god_name, new_price, event)
         )
-        await self._db.commit()
+        if commit:
+            await self._db.commit()
 
         return old_price, new_price
 

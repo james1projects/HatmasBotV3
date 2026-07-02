@@ -366,8 +366,13 @@ class _MatchMixin:
         settlement_price = calculate_fair_value(
             agg_wins, agg_losses, agg_k, agg_d, agg_a)
 
+        # commit=False: the settlement's writes (aggregates, price,
+        # history, processed_matches claim) all land in the single
+        # commit below, so a crash can't persist the stat bump without
+        # the dedup claim (which would double-count on retry).
         await self._update_price(
-            god_name, settlement_price, event=f"match_{outcome}_{source}")
+            god_name, settlement_price, event=f"match_{outcome}_{source}",
+            commit=False)
 
         actual_change_pct = (
             ((settlement_price - match_start_price) / match_start_price) * 100.0
