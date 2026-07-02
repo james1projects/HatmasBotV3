@@ -71,6 +71,12 @@ class HatmasBot(commands.Bot):
         )
         self.plugins = {}
         self.features = dict(DEFAULT_FEATURES)
+        # Dashboard feature toggles persist across restarts as a sparse
+        # override file (data/feature_overrides.json): only features the
+        # user has flipped away from their config default are stored, so
+        # editing DEFAULT_FEATURES still governs everything untouched.
+        self._feature_overrides = self._load_feature_overrides()
+        self.features.update(self._feature_overrides)
         self.web_server = web_server
         self.token_manager = token_manager
         self.start_time = datetime.now()
@@ -300,6 +306,10 @@ class HatmasBot(commands.Bot):
         by the /mod page API and the Discord slash-command sync."""
         out = []
         for name, cmd in sorted(self._custom_commands.items()):
+            # Space game toggled off = its commands disappear from the
+            # /mod page and the Discord slash sync entirely.
+            if cmd["plugin"] == "spacegame" and not self.is_feature_enabled("spacegame"):
+                continue
             out.append({
                 "name": name,
                 "plugin": cmd["plugin"],
@@ -368,9 +378,43 @@ class HatmasBot(commands.Bot):
     def is_feature_enabled(self, feature):
         return self.features.get(feature, False)
 
+    def _load_feature_overrides(self):
+        import json
+        path = DATA_DIR / "feature_overrides.json"
+        try:
+            if path.exists():
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    # Only keys still present in DEFAULT_FEATURES: a
+                    # renamed/removed feature doesn't haunt the file, and
+                    # plugin-registered features (youtube_live_badge)
+                    # keep their existing set-at-setup behavior.
+                    return {k: bool(v) for k, v in data.items()
+                            if k in DEFAULT_FEATURES}
+        except Exception as e:
+            print(f"[Feature] Could not load feature overrides: {e}")
+        return {}
+
+    def _save_feature_overrides(self):
+        import json
+        path = DATA_DIR / "feature_overrides.json"
+        try:
+            path.write_text(json.dumps(self._feature_overrides, indent=2,
+                                       sort_keys=True), encoding="utf-8")
+        except Exception as e:
+            print(f"[Feature] Could not save feature overrides: {e}")
+
     def set_feature(self, feature, enabled):
         if feature in self.features:
+            enabled = bool(enabled)
             self.features[feature] = enabled
+            # Persist as a diff: flipping back to the config default
+            # drops the override so DEFAULT_FEATURES governs again.
+            if enabled == DEFAULT_FEATURES.get(feature):
+                self._feature_overrides.pop(feature, None)
+            else:
+                self._feature_overrides[feature] = enabled
+            self._save_feature_overrides()
             print(f"[Feature] {feature} = {enabled}")
 
     # =============================================================

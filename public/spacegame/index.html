@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Streaming Space Game</title>
+<!-- Phaser 3 from CDN (needs internet the first time it loads). -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.80.1/phaser.min.js"></script>
+<link rel="stylesheet" href="src/styles.css" />
+</head>
+<body>
+<div id="wrap">
+  <div id="game"></div>
+  <div id="controls">
+    <div class="group">
+      <span class="tag">Spawn:</span>
+      <button class="red"    onclick="SG.spawn('red')">Red (1)</button>
+      <button class="green"  onclick="SG.spawn('green')">Green (2)</button>
+      <button class="yellow" onclick="SG.spawn('yellow')">Yellow (3)</button>
+      <button class="orange" onclick="SG.spawn('orange')">Orange (4)</button>
+    </div>
+    <div class="sep"></div>
+    <div class="group">
+      <button onclick="SG.toggleAuto()" id="autoBtn">Auto-wave: ON</button>
+      <button onclick="SG.toggleNames()" id="nameBtn">Name tags: ON</button>
+      <button onclick="SG.pause()" id="pauseBtn">Pause (P)</button>
+      <button onclick="SG.restart()">Restart (R)</button>
+    </div>
+    <div class="sep"></div>
+    <div class="group">
+      <span id="netStatus" class="tag">Chat: connecting…</span>
+    </div>
+  </div>
+  <div class="hint">
+    <b>Move:</b> Arrow keys / WASD &nbsp;·&nbsp; <b>Fire:</b> automatic &nbsp;·&nbsp;
+    <b>Test spawn:</b> buttons above or keys 1–4 &nbsp;·&nbsp;
+    You lose if <b>10 ships leak past the bottom</b> or your hull hits 0.<br />
+    <b>Twitch chat</b> spawns ships with <b>!red</b> / <b>!green</b> / <b>!yellow</b> / <b>!orange</b>
+    once the bot is running (watch the “Chat:” status on the right).
+  </div>
+</div>
+
+<!-- Game code, plain scripts loaded in order (they share globals):
+     config -> entities -> scene -> boot (starts the game) -> net (chat). -->
+<script src="src/config.js"></script>
+<script src="src/entities.js"></script>
+<script src="src/scene.js"></script>
+<script src="src/boot.js"></script>
+<script src="src/net.js"></script>
+</body>
+</html>

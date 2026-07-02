@@ -23,7 +23,7 @@ from aiohttp import web
 from pathlib import Path
 
 from core.config import (
-    WEB_HOST, WEB_PORT, OVERLAY_DIR, DATA_DIR,
+    WEB_HOST, WEB_PORT, OVERLAY_DIR, DATA_DIR, BASE_DIR,
     TITLE_TEMPLATE_GOD, TITLE_TEMPLATE_LOBBY,
     SR_PLAYLIST_AUTO_HIDE_SECONDS,
 )
@@ -32,6 +32,7 @@ from core.overlay_manager import OverlayManager
 TTS_AUDIO_DIR = DATA_DIR / "tts_audio"
 VOICELINE_DIR = DATA_DIR / "smite_voicelines"
 ANIMATION_DIR = DATA_DIR / "smite_animations"
+SPACEGAME_DIR = BASE_DIR / "public" / "spacegame"
 TTS_AUDIO_DIR.mkdir(exist_ok=True)
 
 
@@ -188,6 +189,19 @@ class WebServer:
         if GOD_ICONS_DIR.exists():
             self.app.router.add_static("/icons/gods/", GOD_ICONS_DIR)
 
+        # Streaming Space Game (Phase 1 prototype). Served over http so the
+        # browser actually loads its art — opening index.html as a file://
+        # is blocked by the browser's CORS policy. Open it at:
+        #     http://localhost:8069/spacegame
+        self.app.router.add_get("/spacegame", self.handle_spacegame)
+        self.app.router.add_get("/spacegame/", self.handle_spacegame)
+        _spacegame_src = SPACEGAME_DIR / "src"
+        if _spacegame_src.exists():
+            self.app.router.add_static("/spacegame/src/", _spacegame_src)
+        _spacegame_assets = SPACEGAME_DIR / "assets"
+        if _spacegame_assets.exists():
+            self.app.router.add_static("/spacegame/assets/", _spacegame_assets)
+
     # === ROOT HANDLER ===
 
     async def handle_control_panel(self, request):
@@ -198,6 +212,25 @@ class WebServer:
         if html_path.exists():
             return self._no_cache_file_response(html_path)
         return web.Response(text="Control panel not found", status=404)
+
+    async def handle_spacegame(self, request):
+        """Serve the Streaming Space Game prototype at /spacegame.
+
+        Redirect the bare /spacegame to /spacegame/ so the page's relative
+        asset paths (assets/...) resolve under /spacegame/assets/ rather
+        than the server root.
+        """
+        if not (self.bot and self.bot.is_feature_enabled("spacegame")):
+            return web.Response(
+                text="Space game is disabled. Flip the 'spacegame' feature "
+                     "toggle on the control panel to enable it.",
+                status=404)
+        if request.path == "/spacegame":
+            raise web.HTTPFound("/spacegame/")
+        index_path = SPACEGAME_DIR / "index.html"
+        if index_path.exists():
+            return self._no_cache_file_response(index_path)
+        return web.Response(text="Space game not found", status=404)
 
     # === API HANDLERS ===
 
@@ -491,6 +524,10 @@ class WebServer:
             feature = data.get("feature")
             enabled = data.get("enabled", True)
             self.bot.set_feature(feature, enabled)
+            if feature == "spacegame":
+                # Its commands just (dis)appeared from the catalog —
+                # let Discord re-sync its slash commands.
+                await self.bot.notify_catalog_changed()
             return web.json_response({"ok": True, "feature": feature, "enabled": enabled})
 
         elif action == "skip_song":

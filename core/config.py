@@ -6,6 +6,7 @@ Copy config_local_example.py to config_local.py and fill in your secrets.
 """
 
 import os
+import shutil
 from pathlib import Path
 
 BASE_DIR = Path(__file__).parent.parent
@@ -40,6 +41,9 @@ TWITCH_BROADCASTER_SCOPES = [
     "channel:read:subscriptions", "moderator:manage:shoutouts",
     "channel:manage:redemptions", "channel:read:redemptions",
     "moderator:read:chatters",
+    # Helix Get Moderators — lets /mod resolve the channel's live mod
+    # list instead of the hardcoded MODERATORS fallback.
+    "moderation:read",
 ]
 
 # === AUTO-SHOUTOUT ===
@@ -108,7 +112,7 @@ SMITE2_BACKFILL_POST_MATCH_DELAY = 30  # Seconds after an authoritative
                                        # the broadcaster to resolve the
                                        # prediction in the dashboard).
 SMITE2_STATE_FILE = DATA_DIR / "smite_state.json"
-SMITE2_GOD_IMAGES_DIR = ""       # Path to folder with god images (e.g., "C:/OBS/gods")
+SMITE2_GOD_IMAGES_DIR = str(CUSTOM_GOD_ICONS_DIR)       # Path to folder with god images (e.g., "C:/OBS/gods")
 
 
 # === OBS WEBSOCKET ===
@@ -125,7 +129,7 @@ OBS_SOURCE_GOD_IMAGE = "GodImage"
 OBS_SOURCE_GOD_BG = "GodBackground"  # Background image source behind the god portrait
 OBS_GOD_IMAGE_SCENE = ""          # Scene containing the god image (e.g., "Main Scene")
 OBS_GOD_IMAGE_GROUP = ""          # Group name if source is inside a group (e.g., "God Portrait Group")
-SMITE2_GOD_BG_DIR = ""            # Path to god portrait backgrounds folder
+SMITE2_GOD_BG_DIR = str(CUSTOM_GOD_ICONS_DIR / "Backgrounds")            # Path to god portrait backgrounds folder
 
 # === STREAM TITLE ===
 TITLE_AUTO_UPDATE = True          # Enable/disable auto title updates
@@ -273,7 +277,7 @@ KILL_DETECT_OBS_SCENE = "-Main Game Capture"  # OBS scene containing the source
 KILL_DETECT_INTERVAL = 1.5               # Seconds between screenshot analysis
 KILL_DETECT_KILL_COOLDOWN = 4.0          # Seconds between kill detections
 KILL_DETECT_DEATH_COOLDOWN = 8.0         # Seconds between death detections
-TESSERACT_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"  # Path to Tesseract binary
+TESSERACT_PATH = shutil.which("tesseract") or r"C:\Program Files\Tesseract-OCR\tesseract.exe"  # Path to Tesseract binary
 
 # === TTS (Text-to-Speech for Highlighted Messages) ===
 TTS_ENABLED = True                   # Enable/disable TTS for highlighted messages
@@ -425,6 +429,10 @@ FACTORIO_CARD_MAP = {
 }
 
 # === FEATURE TOGGLES ===
+# Defaults only. The dashboard's features card flips these live, and
+# flips persist across restarts in data/feature_overrides.json (sparse:
+# only toggles moved away from these defaults are stored there; flipping
+# one back to its default removes it from the file).
 DEFAULT_FEATURES = {
     "song_requests": True, "predictions": False, "snap": True,
     "claude_chat": True, "smite_tracking": True, "gamble": True,
@@ -438,6 +446,7 @@ DEFAULT_FEATURES = {
     "web_trading": True,   # dashboard kill-switch; WEB_TRADING_ENABLED still gates
     "streamloots": True,   # gates event dispatch; connection stays up
     "factorio": True,      # gates card handling + chat announcements
+    "spacegame": False,    # off = commands silent + hidden from /mod, game page 404s
 }
 
 # === DISCORD (plugins/discord_bridge.py) ===

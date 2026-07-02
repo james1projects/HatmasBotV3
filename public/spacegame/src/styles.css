@@ -1,0 +1,20 @@
+:root { --bg:#05060f; --panel:#0c1024; --ink:#cfe3ff; --accent:#33e1ff; }
+* { box-sizing: border-box; }
+html, body { margin:0; height:100%; background:var(--bg); color:var(--ink);
+  font-family: ui-monospace, Menlo, Consolas, monospace; }
+#wrap { display:flex; flex-direction:column; align-items:center; gap:10px; padding:14px; }
+#game { width:min(96vw, 1100px); aspect-ratio:1920/1080; box-shadow:0 0 40px #000a;
+  border:1px solid #1b2350; border-radius:10px; overflow:hidden; }
+#game canvas { display:block; width:100% !important; height:100% !important; }
+#controls { width:min(96vw,1100px); display:flex; flex-wrap:wrap; gap:8px;
+  background:var(--panel); border:1px solid #1b2350; border-radius:10px; padding:10px; }
+.group { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+.sep { width:1px; align-self:stretch; background:#1b2350; margin:0 4px; }
+button { cursor:pointer; border:1px solid #2a356b; background:#141a3a; color:var(--ink);
+  padding:7px 10px; border-radius:7px; font:inherit; font-size:13px; }
+button:hover { border-color:var(--accent); }
+button.red    { border-color:#ff5a5a; } button.green  { border-color:#56e06a; }
+button.yellow { border-color:#ffd24a; } button.orange { border-color:#ff9a3c; }
+.hint { width:min(96vw,1100px); font-size:12px; color:#8ea2cf; line-height:1.5; }
+.hint b { color:var(--ink); }
+.tag { font-size:11px; color:#8ea2cf; }

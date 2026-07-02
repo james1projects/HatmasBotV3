@@ -87,6 +87,21 @@ class OverlayManager:
             if not self._ws_clients[overlay_name]:
                 del self._ws_clients[overlay_name]
 
+    def client_count(self, overlay_name: str) -> int:
+        """How many WebSocket clients are currently connected for an overlay."""
+        return len(self._ws_clients.get(overlay_name, ()))
+
+    async def broadcast(self, overlay_name: str, action: str, data: Optional[Any] = None) -> None:
+        """Push a custom action straight to an overlay's WS clients.
+
+        Bypasses the show/hide rules engine (overlay_rules.json) and does
+        NOT touch visibility/auto-hide state. Intended for app-style
+        overlays — like the Streaming Space Game — that manage their own
+        lifecycle and just need a live event stream. A client that isn't
+        connected simply misses the event (we never replay old spawns).
+        """
+        await self._send(overlay_name, action, data)
+
     async def _send(self, overlay_name: str, action: str, data: Optional[Any] = None) -> None:
         """Send a command to all websocket clients for an overlay.
 

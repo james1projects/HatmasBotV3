@@ -17,6 +17,7 @@ import threading
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
 
 from core.bot import HatmasBot
+from core.log_quiet import quiet_known_connection_errors
 from core.webserver import WebServer
 from core.public_webserver import PublicWebServer
 from core.token_manager import TokenManager
@@ -43,6 +44,7 @@ from plugins.stream_status import StreamStatusPlugin
 from plugins.youtube_live_badge import YouTubeLiveBadgePlugin
 from plugins.backup_manager import BackupManagerPlugin
 from plugins.god_pool import GodPoolPlugin
+from plugins.spacegame import SpaceGamePlugin
 from plugins.priority_request import PriorityRequestPlugin
 from plugins.streamloots import StreamlootsPlugin
 from plugins.factorio import FactorioPlugin
@@ -51,6 +53,10 @@ from plugins.custom_commands import CustomCommandsPlugin
 
 
 async def main():
+    # Mute "service isn't running" tracebacks (OBS/MixItUp closed) — our own
+    # code prints a friendly one-line warning for those instead.
+    quiet_known_connection_errors()
+
     print("=" * 50)
     print("  HatmasBot v2.5")
     print("  Built by Hatmaster & Claude")
@@ -230,6 +236,11 @@ async def main():
     # Adds !nominate / !pool / !spin / !poolclear chat commands and
     # exposes the current pool via /api/community for the website.
     bot.register_plugin("god_pool", GodPoolPlugin())
+
+    # ── Streaming Space Game (chat spawns ships at localhost:8069/spacegame) ──
+    # Gated behind the "spacegame" feature toggle (default OFF): commands
+    # go silent + vanish from /mod, and the game page 404s, when disabled.
+    bot.register_plugin("spacegame", SpaceGamePlugin())
 
     # ── Streamloots event hub ──
     # SSE listener on the Streamloots alert overlay stream (the same
