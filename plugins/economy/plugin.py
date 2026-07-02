@@ -220,4 +220,33 @@ class EconomyPlugin(
         """Persist state and release per-plugin resources."""
         # Cancel the backfill task if it's still running. Backfill is
         # idempotent (dedup via processed_matches), so a partial cancel
-        # mid-loop is safe — already-settled matches stay settl
+        # mid-loop is safe — already-settled matches stay settled and
+        # anything unsettled is picked up on the next launch.
+        #
+        # NOTE (2026-07-02): this file was truncated on disk mid-comment
+        # right here for several releases — the file-tool desync that
+        # HATMASBOT.md warns about. It still compiled because the
+        # docstring alone is a valid function body, so cleanup silently
+        # did NOTHING (backfill task never cancelled, aiohttp session
+        # never closed). Body reconstructed below.
+        if self._backfill_task is not None:
+            self._backfill_task.cancel()
+            try:
+                await self._backfill_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._backfill_task = None
+
+        # Close our own aiohttp session (the MixItUp API client).
+        if self.session is not None:
+            try:
+                await self.session.close()
+            except Exception as e:
+                print(f"[Economy] Session close error: {e}")
+            self.session = None
+        self._connected = False
+
+        # The shared aiosqlite connection is closed by main.py AFTER
+        # every plugin's cleanup has run — just drop our reference.
+        self._db = None
+        print("[Economy] Cleaned up")
