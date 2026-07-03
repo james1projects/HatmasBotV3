@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <meta name="theme-color" content="#0b0f14">
+<link rel="manifest" href="/findit.webmanifest">
+<link rel="apple-touch-icon" href="/findit-icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="FindIt">
 <title>FindIt - Hatmaster.tv</title>
 <style>
   * { box-sizing: border-box; }
@@ -123,6 +128,7 @@
 <div id="bottombar">
   <label>Sensitivity <input id="conf" type="range" min="0.05" max="0.6" step="0.05" value="0.2"></label>
   <label><input id="beep" type="checkbox" checked> Sound</label>
+  <label id="torchLabel" style="display:none"><input id="torch" type="checkbox"> 🔦</label>
   <span id="status">tap a found box to name it</span>
 </div>
 
@@ -294,6 +300,7 @@ async function start() {
     });
     video.srcObject = stream;
     await video.play();
+    setupTorch(stream);
   } catch (e) { status('camera error: ' + e.message); return; }
   audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
   audioCtx.resume();
@@ -453,6 +460,21 @@ function celebrate(matchedBoxes) {
     if (beepEl.checked) beep(Math.min(1, 0.35 + 0.65 * bestConf));
     if (navigator.vibrate) navigator.vibrate(80);
   }
+}
+
+// flashlight for dark-room searches — only shown where the camera supports it
+function setupTorch(stream) {
+  const label = document.getElementById('torchLabel');
+  const box = document.getElementById('torch');
+  const track = stream.getVideoTracks()[0];
+  const caps = track.getCapabilities ? track.getCapabilities() : {};
+  if (!caps.torch) { label.style.display = 'none'; return; }
+  label.style.display = 'flex';
+  box.checked = false;
+  box.onchange = () => {
+    track.applyConstraints({ advanced: [{ torch: box.checked }] })
+      .catch(() => { box.checked = false; statusFlash('flashlight not available'); });
+  };
 }
 
 function beep(volume) {
