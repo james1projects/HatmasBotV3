@@ -10,6 +10,7 @@ Checks:
   2. toggle ON  -> /FindIt serves the page, /findit redirects
   3. WebSocket proxy end-to-end: query + JPEG frame -> detections
   4. enroll/forget round-trip through the proxy
+  4b. v2 protocol: hello/profiles, list_items, locations, rename, error replies
   5. toggle OFF mid-run -> reconciler kills the worker; page 404s again
 
 Run:  python tools\\test_findit_public.py     (system python, bot env)
@@ -117,6 +118,59 @@ async def run():
         await ws.send_str(json.dumps({"type": "forget", "name": "Test Bus"}))
         msg = json.loads((await ws.receive(timeout=60)).data)
         check("forget through proxy", msg.get("type") == "forgot", str(msg))
+
+        # ── 4b. v2 protocol: hello/profiles, list_items, locations, rename, error replies ──
+        await ws.send_str(json.dumps(
+            {"type": "hello", "profile": "test-device-1", "name": "Tester"}))
+        msg = json.loads((await ws.receive(timeout=60)).data)
+        check("hello handshake", msg.get("type") == "hello_ok" and
+              msg.get("profile_id") == "test-device-1" and
+              isinstance(msg.get("items"), list), str(msg))
+
+        # re-enroll the bus AFTER hello
+        await ws.send_str(json.dumps(
+            {"type": "enroll", "name": "Profile Bus", "base": "bus", "image": b64}))
+        msg = json.loads((await ws.receive(timeout=60)).data)
+        item_id = msg.get("item_id")
+        check("v2 enroll returns item_id", bool(item_id), str(msg))
+        thumb = msg.get("thumb")
+        check("v2 enroll returns thumb", thumb and thumb.startswith("data:image/jpeg;base64,"), str(msg))
+
+        await ws.send_str(json.dumps({"type": "list_items"}))
+        msg = json.loads((await ws.receive(timeout=60)).data)
+        check("list_items sees the enrollment", msg.get("type") == "items", str(msg))
+        items = msg.get("items", [])
+        bus_item = next((i for i in items if i.get("name") == "Profile Bus"), None)
+        check("list_items sees the enrollment", bool(bus_item and
+              bus_item.get("views") == 1 and bus_item.get("locations") == []), str(msg))
+
+        await ws.send_str(json.dumps(
+            {"type": "log_location", "item_id": item_id, "place": "garage shelf"}))
+        msg = json.loads((await ws.receive(timeout=60)).data)
+        check("log_location round-trip", msg.get("type") == "location_logged" and
+              msg.get("locations") and msg["locations"][0]["place"] == "garage shelf" and
+              len(msg["locations"]) == 1, str(msg))
+
+        await ws.send_str(json.dumps(
+            {"type": "rename", "item_id": item_id, "name": "Renamed Bus"}))
+        msg = json.loads((await ws.receive(timeout=60)).data)
+        check("rename round-trip", msg.get("type") == "renamed" and
+              msg.get("name") == "Renamed Bus", str(msg))
+
+        await ws.send_str(json.dumps(
+            {"type": "log_location", "item_id": "nonexistent99", "place": "x"}))
+        msg = json.loads((await ws.receive(timeout=60)).data)
+        check("unknown item -> error reply", msg.get("type") == "error", str(msg))
+
+        await ws.send_str("not json{{")
+        msg = json.loads((await ws.receive(timeout=60)).data)
+        check("malformed message -> error reply", msg.get("type") == "error", str(msg))
+
+        await ws.send_str(json.dumps(
+            {"type": "forget", "item_id": item_id}))
+        msg = json.loads((await ws.receive(timeout=60)).data)
+        check("v2 forget by item_id", msg.get("type") == "forgot", str(msg))
+
         await ws.close()
 
         # ── 5. toggle off mid-run -> reconciler kills worker ──
