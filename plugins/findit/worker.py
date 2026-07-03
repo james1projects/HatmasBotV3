@@ -59,6 +59,8 @@ _infer_lock = threading.Lock()
 _loaded_classes: list[str] = []
 _store: ItemsStore | None = None
 _ready = False
+_dino = None
+_dino_tf = None
 
 # When the searched terms include a custom item, the detector runs at this
 # floor instead of the user's confidence: CLIP-embedding verification acts
@@ -119,6 +121,47 @@ def _clip():
     return clip
 
 
+def _get_dino():
+    """DINOv2-small — instance-level embedder. The 2026-07-03 benchmark
+    (tools/embed_bench.py) showed a 3x wider gap between same-object and
+    different-object-same-class similarities than the CLIP path, which is
+    exactly the 'MY keys, not any keys' problem. ~90 MB, cached by
+    torch.hub under the user profile after the first download."""
+    global _dino, _dino_tf
+    if _dino is None:
+        import torch
+        import torchvision.transforms as T
+        _dino = torch.hub.load("facebookresearch/dinov2", "dinov2_vits14")
+        if torch.cuda.is_available():
+            _dino = _dino.to("cuda")
+        _dino.eval()
+        # Straight resize (no center-crop): inputs are already tight object
+        # crops, and cropping a non-square box loses the object's edges —
+        # enroll and detect would then see different parts of the item.
+        _dino_tf = T.Compose([
+            T.Resize((224, 224)), T.ToTensor(),
+            T.Normalize(mean=[0.485, 0.456, 0.406],
+                        std=[0.229, 0.224, 0.225]),
+        ])
+    return _dino
+
+
+def _embed_pil(pil):
+    """Unit-norm embedding of a crop with the configured embed model.
+    Call under _infer_lock (shares the GPU with detection)."""
+    if app.state.embed_model == "dinov2":
+        import torch
+        dino = _get_dino()
+        batch = _dino_tf(pil.convert("RGB")).unsqueeze(0)
+        if next(dino.parameters()).is_cuda:
+            batch = batch.to("cuda")
+        with torch.no_grad():
+            feat = dino(batch)[0]
+        feat = feat / feat.norm()
+        return feat.cpu().numpy()
+    return _clip().encode_image(pil)[0].cpu().numpy()
+
+
 def _crop_pil(img_bgr, x1, y1, x2, y2, margin=0.12):
     """Crop a box (with a little context margin) as a PIL image, or None if tiny."""
     from PIL import Image
@@ -142,16 +185,26 @@ def _make_thumb(img_bgr, max_side=128):
     return buf.tobytes() if ok else None
 
 
+def _usable(item):
+    """An item can only match if it was enrolled with the ACTIVE embed
+    model — mixing CLIP (512-d) and DINOv2 (384-d) vectors is meaningless.
+    Items from the other model stay in the gallery but need re-adding."""
+    return (item["embeds"]
+            and item.get("embed_model", "clip") == app.state.embed_model)
+
+
 def _rank_items(vec, items):
     """Cosine similarity of vec against every view of every item; returns
-    (best_item, best_sim, runner_up_sim). CLIP image embeddings from
-    ultralytics are unit-norm, so the dot product IS the cosine."""
+    (best_item, best_sim, runner_up_sim). Both embedders emit unit-norm
+    vectors, so the dot product IS the cosine."""
     best, best_sim, second = None, 0.0, 0.0
+    dim = vec.shape[0]
     for item in items.values():
-        if not item["embeds"]:
+        embeds = [e for e in item["embeds"] if len(e) == dim]
+        if not embeds:
             continue
         sim = max(float(np.dot(vec, np.asarray(e, dtype=np.float32)))
-                  for e in item["embeds"])
+                  for e in embeds)
         if sim > best_sim:
             best, best_sim, second = item, sim, best_sim
         elif sim > second:
@@ -177,10 +230,10 @@ def detect(jpeg: bytes, terms: list[str], conf: float, profile_id: str = "shared
     visible = _store.visible_items(profile_id) if _store else {}
     by_name = {it["name"].lower(): it for it in visible.values()}
     custom_searched = [by_name[t] for t in requested if t in by_name]
-    # base classes of ALL visible items — boxes of these classes are the
-    # only ones worth CLIP-checking for a custom relabel
-    relabel_bases = {it["base_class"].lower() for it in visible.values()
-                     if it["embeds"]}
+    # items enrolled with the active embed model are the only ones that can
+    # relabel a box; their base classes are the only crops worth embedding
+    matchable = {k: v for k, v in visible.items() if _usable(v)}
+    relabel_bases = {it["base_class"].lower() for it in matchable.values()}
 
     # Build detector prompts: canonical term + synonym phrasings, with a map
     # back so every output box carries the canonical label the user typed.
@@ -230,8 +283,8 @@ def detect(jpeg: bytes, terms: list[str], conf: float, profile_id: str = "shared
             pil = _crop_pil(img, box["x1"], box["y1"], box["x2"], box["y2"])
             if pil is None:
                 continue
-            vec = _clip().encode_image(pil)[0].cpu().numpy()
-            item, sim, second = _rank_items(vec, visible)
+            vec = _embed_pil(pil)
+            item, sim, second = _rank_items(vec, matchable)
             if (item is not None and sim >= app.state.sim_threshold
                     and sim - second >= MATCH_MARGIN):
                 box["label"] = item["name"]
@@ -266,7 +319,7 @@ def enroll(profile_id: str, name: str, base: str, jpeg: bytes,
     from PIL import Image
     pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
     with _infer_lock:
-        vec = _clip().encode_image(pil)[0].cpu().tolist()
+        vec = _embed_pil(pil).tolist()
     thumb = _make_thumb(img)
 
     if item_id:
@@ -281,9 +334,14 @@ def enroll(profile_id: str, name: str, base: str, jpeg: bytes,
         item = _store.find_by_name(profile_id, name)
         if item is None:
             try:
-                item = _store.create_item(profile_id, name, base_class)
+                item = _store.create_item(profile_id, name, base_class,
+                                          embed_model=app.state.embed_model)
             except ValueError as e:
                 return {"type": "error", "message": str(e)}
+    if item["embeds"] and item.get("embed_model", "clip") != app.state.embed_model:
+        return {"type": "error",
+                "message": f'"{item["name"]}" was saved with an older '
+                           f"recognition model — forget it and add it again"}
     views = _store.add_view(item["id"], vec, thumb)
     reply = {"type": "enrolled", "item_id": item["id"],
              "name": item["name"], "views": views, "thumb": None}
@@ -304,8 +362,14 @@ async def warmup():
         global _ready
         dummy = cv2.imencode(".jpg", np.zeros((480, 640, 3), np.uint8))[1].tobytes()
         detect(dummy, ["warmup object"], 0.5)
+        if app.state.embed_model == "dinov2":
+            # load + one dummy embed so the first real enroll isn't slow
+            from PIL import Image
+            with _infer_lock:
+                _embed_pil(Image.new("RGB", (64, 64)))
         _ready = True
-        print("[worker] model warmed up and ready", flush=True)
+        print("[worker] model warmed up and ready "
+              f"(embed={app.state.embed_model})", flush=True)
     threading.Thread(target=_warm, daemon=True).start()
 
 
@@ -460,18 +524,26 @@ def main():
                    help="Ultralytics open-vocab model. Resolved relative to the "
                         "process cwd (the plugin sets cwd=data/findit so weights "
                         "download there, not into the repo root).")
-    p.add_argument("--sim-threshold", type=float, default=0.80,
-                   help="CLIP cosine similarity needed to relabel a box as a "
-                        "custom item (lower = matches more eagerly)")
+    p.add_argument("--embed-model", choices=["clip", "dinov2"], default="dinov2",
+                   help="Embedder for custom-item recognition. dinov2 is "
+                        "instance-level (YOUR keys, not any keys); clip is "
+                        "the legacy path. Items only match under the model "
+                        "they were enrolled with.")
+    p.add_argument("--sim-threshold", type=float, default=0.55,
+                   help="cosine similarity needed to relabel a box as a "
+                        "custom item (lower = matches more eagerly). "
+                        "Suggested: 0.55 for dinov2, 0.80 for clip.")
     p.add_argument("--items", default="items.json",
                    help="Path of the custom-item gallery JSON")
     args = p.parse_args()
     app.state.model_name = args.model
+    app.state.embed_model = args.embed_model
     app.state.sim_threshold = args.sim_threshold
     app.state.items_path = args.items
 
     print(f"[worker] starting on 127.0.0.1:{args.port} "
-          f"(model={args.model}, sim>={args.sim_threshold})", flush=True)
+          f"(model={args.model}, embed={args.embed_model}, "
+          f"sim>={args.sim_threshold})", flush=True)
     uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
 
 

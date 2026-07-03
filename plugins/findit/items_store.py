@@ -51,6 +51,10 @@ class ItemsStore:
         if "shared" not in self._data["profiles"]:
             self._data["profiles"]["shared"] = {"name": "Shared", "created": 0}
 
+        # Items enrolled before the embedder became configurable were CLIP
+        for item in self._data["items"].values():
+            item.setdefault("embed_model", "clip")
+
     def _migrate_v1_to_v2(self, raw):
         """
         Convert legacy v1 flat structure to v2.
@@ -141,7 +145,7 @@ class ItemsStore:
                     return dict(item)
         return None
 
-    def create_item(self, profile_id, name, base_class):
+    def create_item(self, profile_id, name, base_class, embed_model="clip"):
         """Create a new item. Raises ValueError if name conflicts case-insensitively."""
         with self._lock:
             trimmed_name = name.strip()
@@ -159,6 +163,7 @@ class ItemsStore:
                 "name": trimmed_name,
                 "owner": profile_id,
                 "base_class": base_class,
+                "embed_model": embed_model,
                 "embeds": [],
                 "thumbs": [],
                 "locations": [],
