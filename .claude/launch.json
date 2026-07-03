@@ -14,6 +14,12 @@
       "port": 8077
     },
     {
+      "name": "findit-dev",
+      "runtimeExecutable": "C:\\Users\\james\\AppData\\Local\\Programs\\Python\\Python314\\python.exe",
+      "runtimeArgs": ["tools\\findit_devserver.py", "--port", "8090", "--worker-port", "8475"],
+      "port": 8090
+    },
+    {
       "name": "overlay-static",
       "runtimeExecutable": "C:\\Users\\james\\AppData\\Local\\Programs\\Python\\Python314\\python.exe",
       "runtimeArgs": ["-m", "http.server", "8123", "--directory", "C:\\Projects\\HatmasBot"],

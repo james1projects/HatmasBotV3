@@ -474,7 +474,14 @@ DEFAULT_FEATURES = {
 FINDIT_PYTHON = str(BASE_DIR / ".venv-findit" / "Scripts" / "python.exe")
 FINDIT_WORKER_PORT = 8474            # localhost-only detection worker
 FINDIT_MODEL = "yolov8l-worldv2.pt"  # resolved in data/findit/ (worker cwd)
-FINDIT_SIM_THRESHOLD = 0.80          # CLIP cosine sim to relabel a custom item
+FINDIT_EMBED_MODEL = "dinov2"        # custom-item embedder: "dinov2" (instance-
+                                     # level, 2026-07-03 benchmark: hard-AUC 1.0
+                                     # vs CLIP 0.995, 3x wider pos/neg gap) or
+                                     # "clip" (legacy, ultralytics' ViT-B/32)
+FINDIT_SIM_THRESHOLD = 0.55          # cosine sim to relabel a custom item.
+                                     # Swept 2026-07-03 (tools/findit_bench.py):
+                                     # 0.55 = best recall/FP balance for dinov2;
+                                     # use 0.80 for clip
 FINDIT_MAX_SESSIONS = 3              # concurrent phone connections allowed
 FINDIT_IDLE_TIMEOUT = 900            # secs with no phones before worker stops
 FINDIT_STARTUP_TIMEOUT = 240         # secs to wait for model warmup (first-ever

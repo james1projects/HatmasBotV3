@@ -334,6 +334,12 @@ class PublicWebServer:
             "/findit",
             lambda r: web.HTTPMovedPermanently("/FindIt"))
         self.app.router.add_get("/ws/findit", self._handle_findit_ws)
+        # PWA bits (same invisibility gate as the page)
+        self.app.router.add_get("/findit.webmanifest",
+                                self._handle_findit_manifest)
+        for icon in ("findit-icon-192.png", "findit-icon-512.png"):
+            self.app.router.add_get(
+                f"/{icon}", self._make_findit_asset_handler(icon))
 
         self.app.router.add_get("/ws/yt/{channel_id}", self._handle_ws)
         self.app.router.add_get("/ws/twitch/{username}",
@@ -2589,6 +2595,34 @@ class PublicWebServer:
         if not path.exists():
             return web.Response(text="FindIt page missing.", status=500)
         return web.FileResponse(path, headers={"Cache-Control": "no-cache"})
+
+    async def _handle_findit_manifest(self, request: web.Request):
+        """PWA manifest so the page installs to the home screen. Gated by
+        the toggle like everything else FindIt."""
+        if not self._findit_on():
+            raise web.HTTPNotFound()
+        return web.json_response({
+            "name": "FindIt", "short_name": "FindIt",
+            "start_url": "/FindIt", "display": "standalone",
+            "background_color": "#0b0f14", "theme_color": "#0b0f14",
+            "icons": [
+                {"src": "/findit-icon-192.png", "sizes": "192x192",
+                 "type": "image/png"},
+                {"src": "/findit-icon-512.png", "sizes": "512x512",
+                 "type": "image/png"},
+            ],
+        }, headers={"Cache-Control": "no-cache"})
+
+    def _make_findit_asset_handler(self, fname: str):
+        async def handler(request: web.Request):
+            if not self._findit_on():
+                raise web.HTTPNotFound()
+            path = PUBLIC_DIR / fname
+            if not path.exists():
+                raise web.HTTPNotFound()
+            return web.FileResponse(
+                path, headers={"Cache-Control": "public, max-age=86400"})
+        return handler
 
     async def _handle_findit_ws(self, request: web.Request):
         if not self._findit_on():

@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <meta name="theme-color" content="#0b0f14">
+<link rel="manifest" href="/findit.webmanifest">
+<link rel="apple-touch-icon" href="/findit-icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="FindIt">
 <title>FindIt - Hatmaster.tv</title>
 <style>
   * { box-sizing: border-box; }
@@ -11,34 +16,96 @@
                font-family: system-ui, -apple-system, sans-serif; overflow: hidden; }
 
   #stage { position: fixed; inset: 0; }
-  /* video and canvas share the same aspect ratio, so identical object-fit
-     rules keep the overlay perfectly aligned with the picture */
-  #video, #overlay { position: absolute; inset: 0; width: 100%; height: 100%;
-                     object-fit: contain; }
+  #video, #overlay { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
   #flash { position: absolute; inset: 0; pointer-events: none; opacity: 0;
            box-shadow: inset 0 0 0 6px #22e06c; transition: opacity .5s; }
   #flash.on { opacity: 1; transition: opacity .05s; }
 
   #topbar { position: fixed; top: 0; left: 0; right: 0; display: flex; gap: 8px;
             padding: max(10px, env(safe-area-inset-top)) 12px 10px;
-            background: rgba(11,15,20,.72); backdrop-filter: blur(10px); }
+            background: rgba(11,15,20,.72); backdrop-filter: blur(10px); z-index: 50; }
   #query { flex: 1; min-width: 0; font-size: 16px; padding: 10px 12px;
            border-radius: 10px; border: 1px solid #2a3644;
            background: #121a24; color: #e8eef4; outline: none; }
   #query:focus { border-color: #3b82f6; }
-  #toggle { font-size: 16px; font-weight: 600; padding: 10px 18px; border: 0;
-            border-radius: 10px; background: #22c55e; color: #06281a; }
+  #toggle, #itemsBtn, #addBtn { font-size: 16px; font-weight: 600; padding: 10px 18px; border: 0;
+            border-radius: 10px; cursor: pointer; }
+  #toggle { background: #22c55e; color: #06281a; }
   #toggle.running { background: #ef4444; color: #fff; }
+  #itemsBtn, #addBtn { background: #2a3644; color: #e8eef4; min-width: 44px; padding: 10px; }
+
+  #usualBanner { position: fixed; top: calc(max(10px, env(safe-area-inset-top)) + 54px);
+                 left: 0; right: 0; padding: 8px 14px;
+                 background: rgba(11,15,20,.72); backdrop-filter: blur(10px);
+                 font-size: 13px; color: #9fb1c1; display: none; z-index: 55; }
 
   #bottombar { position: fixed; bottom: 0; left: 0; right: 0; display: flex;
                align-items: center; gap: 14px;
                padding: 10px 14px max(10px, env(safe-area-inset-bottom));
                background: rgba(11,15,20,.72); backdrop-filter: blur(10px);
-               font-size: 13px; color: #9fb1c1; }
+               font-size: 13px; color: #9fb1c1; z-index: 40; }
   #bottombar label { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
   #conf { width: 90px; accent-color: #3b82f6; }
   #status { margin-left: auto; text-align: right; font-variant-numeric: tabular-nums; }
   #status.found { color: #22e06c; font-weight: 700; }
+
+  #nameModal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+               background: rgba(0,0,0,.5); z-index: 80; }
+  #nameModal .card { background: #121a24; border: 1px solid #2a3644; border-radius: 10px; padding: 20px;
+                     width: 90%; max-width: 320px; text-align: center; }
+  #nameModal input { width: 100%; padding: 8px; margin: 10px 0; border-radius: 8px; border: 1px solid #2a3644; background: #0b0f14; color: #e8eef4; }
+  #nameModal button { background: #3b82f6; color: white; border: none; padding: 8px 16px; border-radius: 8px; cursor: pointer; }
+  #nameModal .skip { display: block; margin-top: 10px; font-size: 12px; color: #9fb1c1; text-decoration: underline; cursor: pointer; }
+
+  #itemsDrawer { position: fixed; left: 0; right: 0; bottom: 0; max-height: 62vh; overflow-y: auto;
+                 background: rgba(13,18,25,.97); border-top: 1px solid #2a3644; border-radius: 16px 16px 0 0;
+                 padding-bottom: env(safe-area-inset-bottom); transform: translateY(100%); transition: transform .2s; z-index: 60; }
+  #itemsDrawer.open { transform: translateY(0); }
+  #itemsDrawer header { display: flex; align-items: center; justify-content: space-between; padding: 14px; border-bottom: 1px solid #2a3644; font-weight: 600; }
+  #itemsDrawer .close-btn { background: none; border: none; color: #9fb1c1; font-size: 20px; cursor: pointer; }
+  #editBtn { background: #2a3644; color: #e8eef4; border: none; padding: 4px 10px; border-radius: 6px; margin-right: 8px; font-size: 12px; cursor: pointer; }
+  #editBtn.active { background: #3b82f6; color: white; }
+  #itemsGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; padding: 14px; }
+  .item-tile { background: #121a24; border-radius: 8px; padding: 8px; text-align: center; cursor: pointer; }
+  .item-tile img, .item-tile .placeholder { width: 64px; height: 64px; object-fit: cover; margin: 0 auto 6px; display: block; border-radius: 6px; background: #2a3644; }
+  .item-tile .placeholder { font-size: 32px; line-height: 64px; }
+  .item-tile .name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; }
+  .item-tile .meta { font-size: 11px; color: #9fb1c1; }
+
+  #itemMenu { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; z-index: 70; background: rgba(0,0,0,.6); pointer-events: auto; }
+  #itemMenu .card { background: #121a24; border: 1px solid #2a3644; border-radius: 10px; padding: 16px; width: 90%; max-width: 300px; max-height: 80vh; overflow-y: auto; }
+  #itemMenu h3 { margin: 0 0 12px; font-size: 16px; text-align: center; }
+  #itemMenu button, #itemMenu .menu-btn { display: block; width: 100%; padding: 10px; margin-bottom: 8px; background: #2a3644; color: #e8eef4; border: none; border-radius: 8px; font-size: 14px; cursor: pointer; text-align: left; }
+  #itemMenu button:last-child { margin-bottom: 0; }
+  #itemMenu .locations-list { max-height: 200px; overflow-y: auto; margin-bottom: 10px; font-size: 13px; color: #9fb1c1; }
+
+  #foundPill { position: fixed; display: none; z-index: 45; background: #22e06c; color: #06281a;
+               font-weight: 700; font-size: 15px; border: 0; border-radius: 999px;
+               padding: 9px 16px; box-shadow: 0 4px 14px rgba(0,0,0,.45); }
+  #captureBar { position: fixed; left: 0; right: 0; bottom: 64px; display: none; z-index: 46;
+                align-items: center; justify-content: center; gap: 14px;
+                padding: 10px 14px calc(env(safe-area-inset-bottom) + 10px); }
+  #captureBar .dots { color: #e8eef4; font-size: 18px; letter-spacing: 4px;
+                      text-shadow: 0 1px 4px rgba(0,0,0,.8); }
+  #captureBtn { font-size: 17px; font-weight: 700; padding: 14px 26px; border: 0;
+                border-radius: 999px; background: #3b82f6; color: #fff;
+                box-shadow: 0 4px 14px rgba(0,0,0,.45); }
+  #captureCancel { background: none; border: 0; color: #cdd7e1; font-size: 14px;
+                   text-decoration: underline; text-shadow: 0 1px 4px rgba(0,0,0,.8); }
+  #locationSheet { position: fixed; left: 0; right: 0; bottom: 0; transform: translateY(105%);
+                   transition: transform .2s; z-index: 75; background: rgba(13,18,25,.97);
+                   border-top: 1px solid #2a3644; border-radius: 16px 16px 0 0;
+                   padding: 16px 16px calc(env(safe-area-inset-bottom) + 16px); }
+  #locationSheet.open { transform: translateY(0); }
+  #locationSheet h3 { margin: 0 0 12px; font-size: 16px; }
+  #locationSheet select, #locationSheet input { width: 100%; font-size: 16px; padding: 10px 12px;
+                   margin-bottom: 10px; border-radius: 10px; border: 1px solid #2a3644;
+                   background: #121a24; color: #e8eef4; }
+  #locationSheet .row { display: flex; gap: 10px; }
+  #locationSheet .row button { flex: 1; font-size: 16px; font-weight: 600; padding: 12px;
+                   border: 0; border-radius: 10px; cursor: pointer; }
+  #saveLocation { background: #22c55e; color: #06281a; }
+  #cancelLocation { background: #2a3644; color: #e8eef4; }
 </style>
 </head>
 <body>
@@ -49,15 +116,66 @@
 </div>
 
 <div id="topbar">
+  <button id="itemsBtn">📦</button>
+  <button id="addBtn" title="Add an item">➕</button>
   <input id="query" type="text" placeholder="Find... e.g. ketchup bottle"
          autocapitalize="off" autocomplete="off" enterkeyhint="search">
   <button id="toggle">Start</button>
 </div>
 
+<div id="usualBanner"></div>
+
 <div id="bottombar">
   <label>Sensitivity <input id="conf" type="range" min="0.05" max="0.6" step="0.05" value="0.2"></label>
   <label><input id="beep" type="checkbox" checked> Sound</label>
+  <label id="torchLabel" style="display:none"><input id="torch" type="checkbox"> 🔦</label>
   <span id="status">tap a found box to name it</span>
+</div>
+
+<div id="nameModal">
+  <div class="card">
+    <p>What's your name? So your saved items are yours.</p>
+    <input id="nameInput" type="text" placeholder="Your name">
+    <button id="saveName">Save</button>
+    <span id="skipName" class="skip">Skip (use "Someone")</span>
+  </div>
+</div>
+
+<div id="itemsDrawer">
+  <header>
+    <span id="drawerTitle">Items</span>
+    <div>
+      <button id="editBtn">Edit</button>
+      <button id="closeDrawer" class="close-btn">×</button>
+    </div>
+  </header>
+  <div id="itemsGrid"></div>
+</div>
+
+<div id="itemMenu">
+  <div class="card">
+    <h3 id="menuTitle"></h3>
+    <div id="menuBody"></div>
+  </div>
+</div>
+
+<button id="foundPill">Found it! 📍</button>
+
+<div id="captureBar">
+  <button id="captureCancel">cancel</button>
+  <button id="captureBtn">Capture</button>
+  <span class="dots" id="captureDots"></span>
+</div>
+
+<div id="locationSheet">
+  <h3 id="locTitle"></h3>
+  <select id="placeSelect"></select>
+  <input id="placeInput" type="text" placeholder="e.g. kitchen drawer"
+         autocapitalize="off" autocomplete="off">
+  <div class="row">
+    <button id="cancelLocation">Cancel</button>
+    <button id="saveLocation">Save</button>
+  </div>
 </div>
 
 <script>
@@ -71,15 +189,85 @@ const confEl = document.getElementById('conf');
 const beepEl = document.getElementById('beep');
 const statusEl = document.getElementById('status');
 
+const profileId = localStorage.getItem('findit_profile') || (localStorage.setItem('findit_profile', crypto.randomUUID()), localStorage.getItem('findit_profile'));
+let profileName = localStorage.getItem('findit_name') || '';
+// last-known items so the drawer isn't empty before the first connect
+let myItems = [];
+try { myItems = JSON.parse(localStorage.getItem('findit_items_cache') || '[]'); } catch (e) {}
+
+// item names and places are user text (and shared items come from OTHER
+// people's phones) — never let them into innerHTML unescaped
+function esc(s) {
+  return String(s).replace(/[&<>"']/g,
+    c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function safeSend(obj) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    statusFlash('start the camera first'); return false;
+  }
+  ws.send(JSON.stringify(obj));
+  return true;
+}
+let editingMode = false;
+let currentMenuItem = null;
+
+const nameModal = document.getElementById('nameModal');
+const nameInput = document.getElementById('nameInput');
+const itemsBtn = document.getElementById('itemsBtn');
+const itemsDrawer = document.getElementById('itemsDrawer');
+const editBtn = document.getElementById('editBtn');
+const closeDrawerBtn = document.getElementById('closeDrawer');
+const itemsGrid = document.getElementById('itemsGrid');
+const itemMenu = document.getElementById('itemMenu');
+const menuTitle = document.getElementById('menuTitle');
+const menuBody = document.getElementById('menuBody');
+const usualBanner = document.getElementById('usualBanner');
+const foundPill = document.getElementById('foundPill');
+const addBtn = document.getElementById('addBtn');
+const captureBar = document.getElementById('captureBar');
+const captureBtn = document.getElementById('captureBtn');
+const captureCancel = document.getElementById('captureCancel');
+const captureDots = document.getElementById('captureDots');
+const locationSheet = document.getElementById('locationSheet');
+const locTitle = document.getElementById('locTitle');
+const placeSelect = document.getElementById('placeSelect');
+const placeInput = document.getElementById('placeInput');
+
+// temporal smoothing: FOUND only after 3 consecutive matched frames, and it
+// takes 2 consecutive misses to lose it — hysteresis kills the flicker that
+// made single-frame false positives feel unreliable
+let matchStreak = 0, missStreak = 0, foundStable = false;
+let stableBox = null;           // the box the Found! pill is anchored to
+let pendingLocationItem = null; // pill-initiated naming -> ask "where?" after save
+let locItemId = null;           // item the location sheet is open for
+// guided add-item mode
+let addMode = false, addModeItemId = null, addModeName = '', addModeBase = '';
+let addModeViews = 0, prevQuery = '';
+const ADD_VIEWS_TARGET = 4;
+
+if (!profileName) nameModal.style.display = 'flex';
+document.getElementById('saveName').onclick = () => {
+  profileName = nameInput.value.trim() || 'Someone';
+  localStorage.setItem('findit_name', profileName);
+  nameModal.style.display = 'none';
+  if (ws && ws.readyState === WebSocket.OPEN) sendHello();
+};
+document.getElementById('skipName').onclick = () => {
+  profileName = 'Someone';
+  localStorage.setItem('findit_name', profileName);
+  nameModal.style.display = 'none';
+  if (ws && ws.readyState === WebSocket.OPEN) sendHello();
+};
+
 let ws = null, running = false, busy = false, audioCtx = null;
 let lastBeep = 0, frames = 0, fpsT0 = performance.now(), fps = 0;
-let lastBoxes = [];         // boxes of the most recent server reply
-let statusHold = 0;         // keep transient messages (saved/forgot) visible
-let retries = 0;            // consecutive failed connects (server may be waking)
-const cap = document.createElement('canvas');       // capture buffer being sent
+let lastBoxes = [];
+let statusHold = 0;
+let retries = 0;
+const cap = document.createElement('canvas');
 const capCtx = cap.getContext('2d');
-const inflight = document.createElement('canvas');  // frame awaiting its reply
-const result = document.createElement('canvas');    // frame the reply belongs to
+const inflight = document.createElement('canvas');
+const result = document.createElement('canvas');
 
 function status(text, found) {
   if (performance.now() < statusHold) return;
@@ -93,57 +281,58 @@ function statusFlash(text) {
 }
 
 toggleBtn.onclick = () => running ? stop() : start();
-queryEl.addEventListener('change', sendQuery);
+queryEl.addEventListener('change', () => { sendQuery(); updateUsualBanner(); });
 confEl.addEventListener('change', sendQuery);
 queryEl.addEventListener('keydown', e => { if (e.key === 'Enter') queryEl.blur(); });
 overlay.addEventListener('click', onTap);
+
+function sendHello() {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({type: "hello", profile: profileId, name: profileName || 'Someone'}));
+  }
+}
 
 async function start() {
   if (!queryEl.value.trim()) { queryEl.focus(); status('type what to find first'); return; }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: 'environment' },
-               width: { ideal: 1280 }, height: { ideal: 720 } },
-      audio: false
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false
     });
     video.srcObject = stream;
     await video.play();
+    setupTorch(stream);
   } catch (e) { status('camera error: ' + e.message); return; }
-  // AudioContext must be created/resumed inside a user gesture (iOS rule)
   audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
   audioCtx.resume();
-  running = true;
-  retries = 0;
-  toggleBtn.textContent = 'Stop';
-  toggleBtn.classList.add('running');
+  running = true; retries = 0;
+  toggleBtn.textContent = 'Stop'; toggleBtn.classList.add('running');
   status('connecting... (first start loads the detector, ~30s)');
   connect();
 }
 
 function stop() {
   running = false; busy = false;
-  toggleBtn.textContent = 'Start';
-  toggleBtn.classList.remove('running');
+  toggleBtn.textContent = 'Start'; toggleBtn.classList.remove('running');
   if (ws) ws.close();
   if (video.srcObject) { video.srcObject.getTracks().forEach(t => t.stop()); video.srcObject = null; }
   ctx.clearRect(0, 0, overlay.width, overlay.height);
-  lastBoxes = [];
-  flash.classList.remove('on');
-  status('stopped');
+  lastBoxes = []; flash.classList.remove('on'); status('stopped');
+  matchStreak = 0; missStreak = 0; foundStable = false; stableBox = null;
+  updateFoundPill();
+  if (addMode) finishAddMode(false);
 }
 
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}/ws/findit`);
   ws.binaryType = 'arraybuffer';
-  ws.onopen = () => { retries = 0; sendQuery(); busy = false; status('searching...'); pump(); };
+  ws.onopen = () => { retries = 0; sendHello(); sendQuery(); busy = false; status('searching...'); pump(); };
   ws.onmessage = ev => handle(JSON.parse(ev.data));
   ws.onclose = () => {
     if (!running) return;
     retries++;
     if (retries > 40) { status('cannot reach the server - is FindIt enabled?'); stop(); return; }
-    status(retries < 4 ? 'reconnecting...'
-                       : 'waiting for the detector to start...');
+    status(retries < 4 ? 'reconnecting...' : 'waiting for the detector to start...');
     setTimeout(connect, 2000);
   };
   ws.onerror = () => ws.close();
@@ -151,16 +340,10 @@ function connect() {
 
 function sendQuery() {
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({
-      type: 'query',
-      classes: queryEl.value.split(',').map(s => s.trim()).filter(Boolean),
-      conf: parseFloat(confEl.value)
-    }));
+    ws.send(JSON.stringify({ type: 'query', classes: queryEl.value.split(',').map(s => s.trim()).filter(Boolean), conf: parseFloat(confEl.value) }));
   }
 }
 
-// Self-pacing loop: exactly one frame in flight; the server's reply triggers
-// the next capture, so the rate adapts to network + inference latency.
 function pump() {
   if (!running || busy || !ws || ws.readyState !== WebSocket.OPEN) return;
   if (!video.videoWidth) { setTimeout(pump, 100); return; }
@@ -169,7 +352,7 @@ function pump() {
   cap.width = Math.round(video.videoWidth * scale);
   cap.height = Math.round(video.videoHeight * scale);
   capCtx.drawImage(video, 0, 0, cap.width, cap.height);
-  copyCanvas(cap, inflight);   // remember exactly what this reply will describe
+  copyCanvas(cap, inflight);
   cap.toBlob(async blob => {
     if (!blob || !ws || ws.readyState !== WebSocket.OPEN) { busy = false; return; }
     ws.send(await blob.arrayBuffer());
@@ -182,23 +365,66 @@ function copyCanvas(src, dst) {
 }
 
 function handle(msg) {
-  if (msg.type === 'enrolled') { statusFlash(`saved "${msg.name}" (${msg.views} view${msg.views > 1 ? 's' : ''})`); return; }
-  if (msg.type === 'forgot')   { statusFlash(`forgot "${msg.name}"`); return; }
+  if (msg.type === 'hello_ok' || msg.type === 'items') {
+    myItems = msg.items || [];
+    try { localStorage.setItem('findit_items_cache', JSON.stringify(myItems)); } catch (e) {}
+    renderItems();
+    updateUsualBanner();
+    return;
+  }
+  if (msg.type === 'enrolled') {
+    statusFlash(`saved "${msg.name}" (${msg.views} view${msg.views > 1 ? 's' : ''})`);
+    requestItemList();
+    if (addMode) {
+      addModeItemId = msg.item_id;
+      addModeName = msg.name;
+      addModeViews = msg.views;
+      renderCaptureDots();
+      if (msg.views >= ADD_VIEWS_TARGET) finishAddMode(true);
+    } else if (pendingLocationItem === 'await') {
+      pendingLocationItem = null;
+      openLocationSheet(msg.item_id, msg.name);
+    }
+    return;
+  }
+  if (msg.type === 'location_logged') {
+    const it = myItems.find(i => i.id === msg.item_id);
+    if (it) it.locations = msg.locations;
+    try { localStorage.setItem('findit_items_cache', JSON.stringify(myItems)); } catch (e) {}
+    statusFlash('remembered 📍');
+    renderItems();
+    updateUsualBanner();
+    return;
+  }
+  if (msg.type === 'forgot')   { statusFlash(`forgot "${msg.name}"`); requestItemList(); return; }
+  if (msg.type === 'renamed')  { statusFlash(`renamed to "${msg.name}"`); requestItemList(); return; }
+  if (msg.type === 'shared_set'){ statusFlash('sharing updated'); requestItemList(); return; }
   if (msg.type === 'error')    { statusFlash('error: ' + msg.message); return; }
   if (msg.type !== 'detections') return;
   busy = false;
-  copyCanvas(inflight, result);   // the frame these boxes belong to
+  copyCanvas(inflight, result);
   lastBoxes = msg.boxes;
   draw(msg);
   frames++;
   const now = performance.now();
   if (now - fpsT0 > 1000) { fps = frames * 1000 / (now - fpsT0); frames = 0; fpsT0 = now; }
   const matched = msg.boxes.filter(b => b.match);
-  status(`${matched.length ? 'FOUND' : 'searching'} - ${fps.toFixed(1)} fps - ${msg.ms} ms`,
-         matched.length > 0);
-  if (matched.length) celebrate(matched);
-  else flash.classList.remove('on');
+  if (matched.length) { matchStreak++; missStreak = 0; }
+  else { missStreak++; if (missStreak >= 2) { matchStreak = 0; foundStable = false; stableBox = null; } }
+  if (matchStreak >= 3) foundStable = true;
+  status(`${foundStable ? 'FOUND' : 'searching'} - ${fps.toFixed(1)} fps - ${msg.ms} ms`, foundStable);
+  if (foundStable && matched.length) {
+    stableBox = matched.reduce((a, b) => (b.conf > a.conf ? b : a), matched[0]);
+    celebrate(matched);
+  } else {
+    flash.classList.remove('on');
+  }
+  updateFoundPill();
   if (running) pump();
+}
+
+function requestItemList() {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({type:'list_items'}));
 }
 
 function draw(msg) {
@@ -209,9 +435,7 @@ function draw(msg) {
   const lw = Math.max(2, overlay.width / 240);
   ctx.font = `bold ${Math.max(14, overlay.width / 40)}px system-ui`;
   for (const b of msg.boxes) {
-    const color = !b.match ? 'rgba(160,170,180,.55)'   // detected but not what you asked for
-                : b.custom ? '#ffd54a'                  // your named item
-                : '#22e06c';                            // generic match
+    const color = !b.match ? 'rgba(160,170,180,.55)' : b.custom ? '#ffd54a' : '#22e06c';
     ctx.strokeStyle = color;
     ctx.lineWidth = b.match ? lw : Math.max(1, lw / 2);
     ctx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
@@ -227,6 +451,7 @@ function draw(msg) {
 }
 
 function celebrate(matchedBoxes) {
+  if (locationSheet.classList.contains('open')) return;  // no beeping under the sheet
   flash.classList.add('on');
   const now = performance.now();
   if (now - lastBeep > 800) {
@@ -235,6 +460,21 @@ function celebrate(matchedBoxes) {
     if (beepEl.checked) beep(Math.min(1, 0.35 + 0.65 * bestConf));
     if (navigator.vibrate) navigator.vibrate(80);
   }
+}
+
+// flashlight for dark-room searches — only shown where the camera supports it
+function setupTorch(stream) {
+  const label = document.getElementById('torchLabel');
+  const box = document.getElementById('torch');
+  const track = stream.getVideoTracks()[0];
+  const caps = track.getCapabilities ? track.getCapabilities() : {};
+  if (!caps.torch) { label.style.display = 'none'; return; }
+  label.style.display = 'flex';
+  box.checked = false;
+  box.onchange = () => {
+    track.applyConstraints({ advanced: [{ torch: box.checked }] })
+      .catch(() => { box.checked = false; statusFlash('flashlight not available'); });
+  };
 }
 
 function beep(volume) {
@@ -249,11 +489,8 @@ function beep(volume) {
   o.stop(audioCtx.currentTime + 0.2);
 }
 
-// ---- tap-to-name -----------------------------------------------------------
-
 function onTap(ev) {
   if (!lastBoxes.length || !result.width) return;
-  // screen -> frame coordinates (undo the object-fit:contain letterboxing)
   const r = overlay.getBoundingClientRect();
   const scale = Math.min(r.width / overlay.width, r.height / overlay.height);
   const dx = (r.width - overlay.width * scale) / 2;
@@ -277,13 +514,21 @@ function nameBox(box) {
              `Entering the same name adds another view (helps recognition).`, box.label)
     : prompt(`Name this ${box.label} (e.g. "my lucky pen"). ` +
              `You'll then be able to search for it by that name.`);
-  if (name === null || !ws || ws.readyState !== WebSocket.OPEN) return;
+  if (name === null || !ws || ws.readyState !== WebSocket.OPEN) {
+    pendingLocationItem = null;   // pill-initiated naming was cancelled
+    return;
+  }
   const trimmed = name.trim();
   if (!trimmed) {
+    pendingLocationItem = null;
     if (box.custom) ws.send(JSON.stringify({ type: 'forget', name: box.label }));
     return;
   }
-  // crop the tapped box (with margin) from the frame those boxes belong to
+  sendEnrollCrop(box, { name: trimmed, base: box.label });
+}
+
+// crop the box (with margin) from the frame those boxes belong to and enroll it
+function sendEnrollCrop(box, fields) {
   const m = 0.12, bw = box.x2 - box.x1, bh = box.y2 - box.y1;
   const xa = Math.max(0, box.x1 - bw * m), ya = Math.max(0, box.y1 - bh * m);
   const xb = Math.min(result.width, box.x2 + bw * m), yb = Math.min(result.height, box.y2 + bh * m);
@@ -291,9 +536,304 @@ function nameBox(box) {
   c.width = Math.max(1, Math.round(xb - xa));
   c.height = Math.max(1, Math.round(yb - ya));
   c.getContext('2d').drawImage(result, xa, ya, xb - xa, yb - ya, 0, 0, c.width, c.height);
-  ws.send(JSON.stringify({ type: 'enroll', name: trimmed, base: box.label,
-                           image: c.toDataURL('image/jpeg', 0.85) }));
+  return safeSend(Object.assign({ type: 'enroll', image: c.toDataURL('image/jpeg', 0.85) }, fields));
 }
+
+// ---- Items & Drawer Logic --------------------------------------------------
+
+itemsBtn.onclick = () => itemsDrawer.classList.toggle('open');
+closeDrawerBtn.onclick = () => itemsDrawer.classList.remove('open');
+editBtn.onclick = () => {
+  editingMode = !editingMode;
+  editBtn.classList.toggle('active', editingMode);
+  renderItems();
+};
+
+function ago(ts) {
+  if (!ts) return '';
+  const diff = Math.floor(Date.now() / 1000) - ts;
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;
+  return `${Math.floor(diff/86400)}d ago`;
+}
+
+function updateUsualBanner() {
+  const term = queryEl.value.split(',')[0].trim().toLowerCase();
+  if (!term) { usualBanner.style.display = 'none'; return; }
+  const found = myItems.find(i => i.name.toLowerCase() === term);
+  if (found && found.locations && found.locations.length) {
+    const top3 = found.locations.slice(0, 3).map(l => `${l.place} (${l.count}×, ${ago(l.last_ts)})`);
+    usualBanner.textContent = 'Usually in: ' + top3.join(' · ');
+    usualBanner.style.display = 'block';
+  } else {
+    usualBanner.style.display = 'none';
+  }
+}
+
+function renderItems() {
+  document.getElementById('drawerTitle').textContent = profileName ? `${profileName}'s items` : 'Items';
+  if (!myItems.length) {
+    itemsGrid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:#9fb1c1;padding:20px;">No saved items yet — find something, tap its box, give it a name.</div>';
+    return;
+  }
+  itemsGrid.innerHTML = '';
+  myItems.forEach(item => {
+    const tile = document.createElement('div');
+    tile.className = 'item-tile';
+    let imgHtml = (item.thumb && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(item.thumb))
+      ? `<img src="${item.thumb}">` : `<div class="placeholder">📦</div>`;
+    tile.innerHTML = `${imgHtml}<div class="name">${esc(item.name)}</div><div class="meta">${item.views || 0} view(s)${item.shared ? ' 👥' : ''}</div>`;
+    tile.onclick = () => handleTileTap(item);
+    itemsGrid.appendChild(tile);
+  });
+}
+
+function handleTileTap(item) {
+  if (!editingMode) {
+    queryEl.value = item.name;
+    sendQuery();
+    itemsDrawer.classList.remove('open');
+    updateUsualBanner();
+    return;
+  }
+  currentMenuItem = item;
+  showItemMenu(item);
+}
+
+function showItemMenu(item) {
+  menuTitle.textContent = item.name;
+  menuBody.innerHTML = '';
+  
+  const btnRename = document.createElement('button');
+  btnRename.textContent = 'Rename';
+  btnRename.onclick = () => {
+    const newName = prompt('New name', item.name);
+    if (newName && newName.trim()) {
+      safeSend({type:'rename', item_id: item.id, name: newName.trim()});
+      closeMenu();
+    }
+  };
+  
+  const btnView = document.createElement('button');
+  btnView.textContent = 'Add a view';
+  btnView.onclick = () => {
+    itemsDrawer.classList.remove('open');
+    queryEl.value = item.name;
+    sendQuery();
+    updateUsualBanner();
+    statusFlash('point the camera at it and tap its box');
+    closeMenu();
+  };
+  
+  const btnShare = document.createElement('button');
+  btnShare.textContent = item.shared ? 'Make private' : 'Share with household';
+  btnShare.onclick = () => {
+    safeSend({type:'set_shared', item_id: item.id, shared: !item.shared});
+    closeMenu();
+  };
+  
+  const btnLocs = document.createElement('button');
+  btnLocs.textContent = 'Where I\'ve found it';
+  btnLocs.onclick = () => {
+    menuBody.innerHTML = '';
+    if (item.locations && item.locations.length) {
+      const list = document.createElement('div');
+      list.className = 'locations-list';
+      list.innerHTML = item.locations.map(l => `<div>${esc(l.place)} (${l.count}×, ${ago(l.last_ts)})</div>`).join('');
+      menuBody.appendChild(list);
+    } else {
+      menuBody.innerHTML = '<div style="text-align:center;color:#9fb1c1;padding:10px;">No locations recorded.</div>';
+    }
+    const backBtn = document.createElement('button');
+    backBtn.textContent = 'Back';
+    backBtn.onclick = () => showItemMenu(item);
+    menuBody.appendChild(backBtn);
+  };
+  
+  const btnForget = document.createElement('button');
+  btnForget.textContent = 'Forget';
+  btnForget.style.color = '#ef4444';
+  btnForget.onclick = () => {
+    if (confirm(`Forget "${item.name}"?`)) {
+      safeSend({type:'forget', item_id: item.id});
+      closeMenu();
+    }
+  };
+  
+  const btnCancel = document.createElement('button');
+  btnCancel.textContent = 'Cancel';
+  btnCancel.onclick = closeMenu;
+
+  // Only the person who added an item can change it. On someone else's
+  // shared item you can still see it and log where you found it, but the
+  // rename/add-view/share/forget controls are hidden (the server enforces
+  // this too — this just keeps the UI honest).
+  const mine = item.mine !== false;
+  if (mine) {
+    menuBody.appendChild(btnRename);
+    menuBody.appendChild(btnView);
+    menuBody.appendChild(btnShare);
+  }
+  menuBody.appendChild(btnLocs);
+  if (mine) menuBody.appendChild(btnForget);
+  if (!mine) {
+    const note = document.createElement('div');
+    note.style.cssText = 'font-size:12px;color:#9fb1c1;text-align:center;margin-bottom:8px;';
+    note.textContent = `Shared by ${esc(item.owner_name || 'someone')} — tap Found to log where you saw it.`;
+    menuBody.insertBefore(note, menuBody.firstChild);
+  }
+  menuBody.appendChild(btnCancel);
+
+  itemMenu.style.display = 'flex';
+}
+
+function closeMenu() {
+  itemMenu.style.display = 'none';
+  currentMenuItem = null;
+}
+
+// ---- Found! pill + location memory -----------------------------------------
+
+function updateFoundPill() {
+  if (!foundStable || !stableBox || addMode || locationSheet.classList.contains('open')) {
+    foundPill.style.display = 'none';
+    return;
+  }
+  // frame -> screen coordinates (inverse of the onTap math)
+  const b = stableBox;
+  const r = overlay.getBoundingClientRect();
+  const scale = Math.min(r.width / overlay.width, r.height / overlay.height);
+  const dx = (r.width - overlay.width * scale) / 2;
+  const dy = (r.height - overlay.height * scale) / 2;
+  const cx = r.left + dx + ((b.x1 + b.x2) / 2) * scale;
+  const topY = r.top + dy + b.y1 * scale;
+  foundPill.textContent = b.custom ? 'Found it! 📍' : 'Save this find 📍';
+  foundPill.style.display = 'block';
+  const pw = foundPill.offsetWidth, ph = foundPill.offsetHeight;
+  let px = Math.max(8, Math.min(window.innerWidth - pw - 8, cx - pw / 2));
+  let py = topY - ph - 10;
+  if (py < 70) py = r.top + dy + b.y2 * scale + 10;   // below the box if near the top
+  foundPill.style.left = px + 'px';
+  foundPill.style.top = py + 'px';
+}
+
+foundPill.onclick = () => {
+  if (!stableBox) return;
+  if (stableBox.custom && stableBox.item_id) {
+    openLocationSheet(stableBox.item_id, stableBox.label);
+  } else {
+    // generic box: name it first, then the enrolled reply opens the sheet
+    pendingLocationItem = 'await';
+    nameBox(stableBox);
+  }
+};
+
+function openLocationSheet(itemId, name) {
+  locItemId = itemId;
+  locTitle.textContent = `Where did you find "${name}"?`;
+  const item = myItems.find(i => i.id === itemId);
+  const places = (item && item.locations) ? item.locations : [];
+  placeSelect.innerHTML = '';
+  if (places.length) {
+    for (const l of places) {
+      const o = document.createElement('option');
+      o.value = l.place;
+      o.textContent = `${l.place} (${l.count}×)`;
+      placeSelect.appendChild(o);
+    }
+    const o = document.createElement('option');
+    o.value = '__new__';
+    o.textContent = '➕ Somewhere new…';
+    placeSelect.appendChild(o);
+    placeSelect.style.display = 'block';
+    placeInput.style.display = 'none';
+  } else {
+    placeSelect.style.display = 'none';
+    placeInput.style.display = 'block';
+  }
+  placeInput.value = '';
+  locationSheet.classList.add('open');
+  updateFoundPill();
+}
+
+placeSelect.onchange = () => {
+  const isNew = placeSelect.value === '__new__';
+  placeInput.style.display = isNew ? 'block' : 'none';
+  if (isNew) placeInput.focus();
+};
+
+document.getElementById('saveLocation').onclick = () => {
+  const place = (placeSelect.style.display === 'none' || placeSelect.value === '__new__')
+    ? placeInput.value.trim() : placeSelect.value;
+  if (!place) { placeInput.focus(); return; }
+  if (safeSend({ type: 'log_location', item_id: locItemId, place })) closeLocationSheet();
+};
+document.getElementById('cancelLocation').onclick = closeLocationSheet;
+
+function closeLocationSheet() {
+  locationSheet.classList.remove('open');
+  locItemId = null;
+}
+
+// ---- guided add-item mode ---------------------------------------------------
+
+addBtn.onclick = () => addMode ? finishAddMode(true) : startAddMode();
+
+async function startAddMode() {
+  addMode = true; addModeItemId = null; addModeName = ''; addModeBase = ''; addModeViews = 0;
+  prevQuery = queryEl.value;
+  queryEl.value = 'object';
+  if (!running) await start(); else sendQuery();
+  if (!running) {   // camera refused — bail out cleanly
+    addMode = false; queryEl.value = prevQuery;
+    return;
+  }
+  captureBar.style.display = 'flex';
+  addBtn.textContent = '✔';
+  renderCaptureDots();
+  statusFlash('point at your item, then tap Capture');
+}
+
+function finishAddMode(completed) {
+  addMode = false;
+  captureBar.style.display = 'none';
+  addBtn.textContent = '➕';
+  queryEl.value = addModeName || prevQuery;
+  sendQuery();
+  updateUsualBanner();
+  if (completed && addModeName) statusFlash(`saved "${addModeName}" (${addModeViews} view${addModeViews > 1 ? 's' : ''})`);
+}
+
+captureCancel.onclick = () => finishAddMode(false);
+
+function renderCaptureDots() {
+  const n = Math.min(addModeViews, ADD_VIEWS_TARGET);
+  captureDots.textContent = '●'.repeat(n) + '○'.repeat(ADD_VIEWS_TARGET - n);
+}
+
+captureBtn.onclick = () => {
+  if (!lastBoxes.length || !result.width) { statusFlash('no object in view yet'); return; }
+  // the box closest to frame center is what you're pointing at
+  const ccx = overlay.width / 2, ccy = overlay.height / 2;
+  const box = lastBoxes.reduce((best, b) => {
+    const d = Math.hypot((b.x1 + b.x2) / 2 - ccx, (b.y1 + b.y2) / 2 - ccy);
+    return (!best || d < best.d) ? { b, d } : best;
+  }, null).b;
+  if (!addModeItemId) {
+    const base = prompt('What is it? (e.g. keys, wallet, remote)');
+    if (!base || !base.trim()) return;
+    const name = prompt('Name it (e.g. "my car keys")');
+    if (!name || !name.trim()) return;
+    addModeBase = base.trim();
+    addModeName = name.trim();
+    if (sendEnrollCrop(box, { name: addModeName, base: addModeBase }))
+      statusFlash('captured! now turn it a bit and capture again');
+  } else {
+    if (sendEnrollCrop(box, { item_id: addModeItemId, name: addModeName, base: addModeBase }))
+      statusFlash('captured — another angle helps');
+  }
+};
 </script>
 </body>
 </html>

@@ -34,7 +34,7 @@ import aiohttp
 from core.config import (
     BASE_DIR, DATA_DIR,
     FINDIT_PYTHON, FINDIT_WORKER_PORT, FINDIT_MODEL, FINDIT_SIM_THRESHOLD,
-    FINDIT_IDLE_TIMEOUT, FINDIT_STARTUP_TIMEOUT,
+    FINDIT_EMBED_MODEL, FINDIT_IDLE_TIMEOUT, FINDIT_STARTUP_TIMEOUT,
 )
 
 WORKER_SCRIPT = Path(__file__).resolve().parent / "worker.py"
@@ -118,6 +118,7 @@ class FindItPlugin:
                 python, str(WORKER_SCRIPT),
                 "--port", str(FINDIT_WORKER_PORT),
                 "--model", FINDIT_MODEL,
+                "--embed-model", FINDIT_EMBED_MODEL,
                 "--sim-threshold", str(FINDIT_SIM_THRESHOLD),
                 "--items", str(WORKER_DIR / "items.json"),
                 cwd=str(WORKER_DIR),

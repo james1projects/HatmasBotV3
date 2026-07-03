@@ -2088,12 +2088,28 @@ main.py                              banner v2.8
 
 ## FindIt — Ctrl+F for Real Life (hatmaster.tv/FindIt, early development)
 
-Migrated 2026-07-02 from the standalone prototype at C:\Users\james\FindIt.
+Migrated 2026-07-02 from the standalone prototype at C:\Users\james\FindIt;
+protocol v2 (profiles, gallery, location memory, DINOv2 instance
+recognition) added on the 2026-07-03 overnight run.
 Type what you're looking for on the phone page, point the camera around,
 and get a bounding box + beep (volume scales with confidence) when it's
-spotted. Tap a detected box to enroll it as a named custom item ("my lucky
-pen") — the worker stores a CLIP image embedding and from then on relabels
-that specific object and lets you search for it by name.
+spotted. Tap a detected box (or use the ➕ guided add mode) to enroll it as
+a named custom item ("my lucky pen") — the worker stores DINOv2 image
+embeddings and from then on recognizes that *specific* object. When a
+found item is stable on screen a "Found it! 📍" pill appears; tapping it
+logs WHERE it was found (dropdown of past places + "somewhere new"), and
+searching that item later immediately shows "Usually in: kitchen drawer
+(4×, 2d ago)" — the check-there-first hint, which works even before the
+camera finds anything.
+
+Each phone is a **profile** (localStorage uuid + display name, sent in the
+WS `hello`); items belong to the enrolling profile and can be toggled
+shared with the household. The 📦 drawer lists your items as thumbnail
+tiles (tap = search; Edit mode = rename / add view / share / locations /
+forget). All item state lives in `data/findit/items.json` (v2 schema,
+managed by plugins/findit/items_store.py — GPU-free, unit-tested; v1
+files migrate automatically with an items.v1.bak backup) plus thumbnail
+JPEGs under `data/findit/thumbs/<item_id>/`.
 
 ### Architecture
 
@@ -2120,9 +2136,25 @@ Phone -> https://hatmaster.tv/FindIt          (public/findit.html)
   process exists. Flip it live from the control panel features card.
 - **Worker cwd is `data/findit/`** — model weights (yolov8l-worldv2.pt,
   weights/clip/ViT-B-32.pt) live there, plus items.json (the custom-item
-  embedding gallery, atomic tmp+replace writes). First-ever start
-  auto-installs ultralytics' CLIP fork into .venv-findit and downloads
-  any missing weights; later starts are ~10-20s to model-warm.
+  store, atomic tmp+replace writes). First-ever start auto-installs
+  ultralytics' CLIP fork into .venv-findit and downloads any missing
+  weights; later starts are ~10-20s to model-warm. DINOv2 weights cache
+  under C:\Users\james\.cache\torch\hub (~90 MB, first start downloads).
+- **Instance recognition = DINOv2-small** (FINDIT_EMBED_MODEL, threshold
+  FINDIT_SIM_THRESHOLD 0.60). Benchmarked 2026-07-03 vs the CLIP path
+  (tools/embed_bench.py, COCO crops + augments): hard-AUC 1.000 vs 0.995,
+  same-object sim ~0.93 vs different-object-same-class ~0.26 (CLIP: 0.95
+  vs 0.73 — its 0.80 threshold sat inside the confusion zone). Items are
+  tagged with the embedder that enrolled them; a mismatched item stays in
+  the gallery but can't match until re-added (the worker replies with a
+  clear error if you try to add views to it).
+- **Custom-search recall trick:** when a searched term is an enrolled
+  item, the detector runs at a 0.12 conf floor (not the user's slider) and
+  the embedding check gates the extra boxes — the v1 pipeline could never
+  find an item whose base class the detector missed. Boxes only relabel
+  when best-sim clears the threshold AND beats the runner-up item by 0.04
+  (MATCH_MARGIN). Base classes expand through a SYNONYMS prompt table
+  ("keys" → key/keychain/key ring) mapped back to canonical labels.
 
 ### WebSocket protocol (client <-> worker, proxied verbatim)
 
