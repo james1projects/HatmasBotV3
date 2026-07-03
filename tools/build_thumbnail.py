@@ -39,7 +39,11 @@ solid     : pos, size (default full canvas), color, opacity
 gradient  : pos, size (default full canvas), direction (horizontal|vertical|diagonal),
             stops: [{at, color, opacity?}, ...]
 image     : src (path or {placeholder}), pos, size, fit (cover|contain|stretch),
-            anchor, flip_h, opacity, fallback_text
+            anchor, flip_h, opacity, fallback_text. Optional
+            source_window_px [x0, y0, x1, y1] (post-flip source px):
+            show exactly that rect of the source in the panel,
+            bypassing crop_source/fit/fit_anchor — set per-render by
+            thumbnail_studio's drag-to-reposition.
 icon      : god ({my_god}|{vs_god}|literal name), pos, size (square px),
             border {color, width}, shadow {color, offset, blur, opacity}
 text      : value (string with placeholders), pos, anchor, font, size, fill,
@@ -49,15 +53,18 @@ text      : value (string with placeholders), pos, anchor, font, size, fill,
 Placeholders resolved at render time
 ------------------------------------
 {my_god}         Display name passed via --god
-{my_god2}        Display name passed via --god2 (or empty) — used by 2matches / 2gods presets
+{my_god2}        Display name passed via --god2 (or empty) — used by 2matches / 2gods / 3gods presets
+{my_god3}        Display name passed via --god3 (or empty) — used by the 3gods preset
 {vs_god}         Display name passed via --vs (or empty)
 {vs2_god}        Display name passed via --vs2 (or empty) — used by 1v2 / 2matches presets
 {my_god_card}    Resolved card path (Custom God Cards override > auto-downloaded base)
-{my_god2_card}   Same, for --god2 — used by 2matches / 2gods
+{my_god2_card}   Same, for --god2 — used by 2matches / 2gods / 3gods
+{my_god3_card}   Same, for --god3 — used by 3gods
 {vs_god_card}    Resolved card path (auto-downloaded base art)
 {vs2_god_card}   Same — used by 1v2 / 2matches
 {my_god_icon}    Resolved file path of best available icon (custom > data/god_icons)
-{my_god2_icon}   Same, for --god2 — used by 2matches / 2gods
+{my_god2_icon}   Same, for --god2 — used by 2matches / 2gods / 3gods
+{my_god3_icon}   Same, for --god3 — used by 3gods
 {vs_god_icon}    Same for the vs god
 {vs2_god_icon}   Same for the second vs god (1v2 / 2matches presets)
 {text}           Free text from --text
@@ -90,7 +97,8 @@ opponent and you want them looking at each other:
 
     --flip-god     mirror --god's card
     --flip-vs      mirror --vs's card
-    --flip-god2    mirror --god2's card  (2matches / 2gods)
+    --flip-god2    mirror --god2's card  (2matches / 2gods / 3gods)
+    --flip-god3    mirror --god3's card  (3gods)
     --flip-vs2     mirror --vs2's card   (1v2 / 2matches)
 
 Usage
@@ -101,6 +109,7 @@ Usage
     python tools/build_thumbnail.py --god Awilix --preset 1v2 --vs Eset --vs2 Chiron --result win --result2 loss
     python tools/build_thumbnail.py --god Thanatos --vs "Baron Samedi" --god2 "Baron Samedi" --vs2 Awilix --preset 2matches
     python tools/build_thumbnail.py --god Sylvanus --god2 Atlas --preset 2gods --skin "Forest Lord"
+    python tools/build_thumbnail.py --god Sylvanus --god2 Atlas --god3 Ymir --preset 3gods
     python tools/build_thumbnail.py --god Ymir --vs Loki --preset 1v1 --flip-god --flip-vs   # both face inward
 """
 
@@ -417,16 +426,21 @@ def _normalize_result(value):
     return value.upper()
 
 
-def build_placeholders(args):
+def build_placeholders(args, preset=None):
     """
     Build the {placeholder: value} map used for both text substitution
     and src-path substitution.
+
+    `preset` (the loaded preset dict) is optional; when given and it sets
+    "auto_headline": false, the headline no longer defaults to my god's
+    name — {text} stays empty unless --text is passed explicitly.
     """
     # Skin selectors. Empty string when not given; passed to
     # resolve_god_card() which auto-falls-back through the lookup chain
     # (skin variant → default custom override → auto-downloaded base).
     skin1 = getattr(args, "skin", "") or ""
     skin2 = getattr(args, "skin2", "") or ""
+    skin3 = getattr(args, "skin3", "") or ""
 
     my_card = resolve_god_card(args.god, skin=skin1)
     vs_card = resolve_god_card(args.vs) if args.vs else None
@@ -448,18 +462,28 @@ def build_placeholders(args):
     my_god2_card = resolve_god_card(my_god2_name, skin=skin2) if my_god2_name else None
     my_god2_icon = resolve_god_icon(my_god2_name) if my_god2_name else None
 
+    # User's third god (3gods preset). Skin selector --skin3 applies to
+    # this god, mirroring --skin / --skin2.
+    my_god3_name = getattr(args, "god3", "") or ""
+    my_god3_card = resolve_god_card(my_god3_name, skin=skin3) if my_god3_name else None
+    my_god3_icon = resolve_god_icon(my_god3_name) if my_god3_name else None
+
     result = _normalize_result(args.result)
     result2 = _normalize_result(getattr(args, "result2", ""))
 
     # Headline defaults to my god's name; subtext defaults to vs god's
     # name. Explicit --text / --subtext overrides; --no-text / --no-subtext
     # disables the corresponding label.
+    auto_headline = True
+    if preset is not None and preset.get("auto_headline") is False:
+        auto_headline = False
+
     if getattr(args, "no_text", False):
         text_value = ""
     elif args.text is not None:
         text_value = args.text
     else:
-        text_value = args.god or ""
+        text_value = (args.god or "") if auto_headline else ""
 
     if getattr(args, "no_subtext", False):
         subtext_value = ""
@@ -481,6 +505,7 @@ def build_placeholders(args):
     return {
         "my_god": args.god or "",
         "my_god2": my_god2_name,
+        "my_god3": my_god3_name,
         "vs_god": args.vs or "",
         "vs2_god": vs2_name,
         "item1": item1_name,
@@ -491,10 +516,12 @@ def build_placeholders(args):
         "item3_icon": str(item3_icon) if item3_icon else "",
         "my_god_card": str(my_card) if my_card else "",
         "my_god2_card": str(my_god2_card) if my_god2_card else "",
+        "my_god3_card": str(my_god3_card) if my_god3_card else "",
         "vs_god_card": str(vs_card) if vs_card else "",
         "vs2_god_card": str(vs2_card) if vs2_card else "",
         "my_god_icon": str(my_icon) if my_icon else "",
         "my_god2_icon": str(my_god2_icon) if my_god2_icon else "",
+        "my_god3_icon": str(my_god3_icon) if my_god3_icon else "",
         "vs_god_icon": str(vs_icon) if vs_icon else "",
         "vs2_god_icon": str(vs2_icon) if vs2_icon else "",
         "text": text_value,
@@ -524,6 +551,7 @@ _FLIP_FLAG_TO_CARD_TOKEN = {
     "flip_god":  "{my_god_card}",
     "flip_vs":   "{vs_god_card}",
     "flip_god2": "{my_god2_card}",
+    "flip_god3": "{my_god3_card}",
     "flip_vs2":  "{vs2_god_card}",
 }
 
@@ -916,6 +944,50 @@ def _fit_image(img, target_w, target_h, fit, fit_anchor="center"):
     return resized.crop((left, top, left + target_w, top + target_h))
 
 
+def compute_cover_window(layer, canvas_size, src_size, crop_override=None):
+    """
+    Compute the visible source window for an image layer with fit=cover:
+    the exact sub-rect of the full source image that ends up shown in
+    the layer's panel after crop_source + cover-fit + fit_anchor.
+
+    Returns (x0, y0, win_w, win_h) as floats in post-flip full-source
+    pixel coords, or None when the layer isn't fit=cover (contain and
+    stretch have no crop, so there's nothing to pan).
+
+    This is the forward calculation matching render_image's
+    `source_window_px` override — thumbnail_studio uses it to seed the
+    browser-side card dragging with the preset's default position.
+    `crop_override` takes the per-god crop from god_card_crops.json,
+    mirroring render_image's override lookup.
+    """
+    if (layer.get("fit") or "cover").lower() != "cover":
+        return None
+    sw, sh = src_size
+    cs = crop_override if crop_override else layer.get("crop_source")
+    l = t = 0.0
+    r = b = 1.0
+    if cs:
+        l = max(0.0, min(1.0, float(cs.get("left", 0.0))))
+        t = max(0.0, min(1.0, float(cs.get("top", 0.0))))
+        r = max(0.0, min(1.0, float(cs.get("right", 1.0))))
+        b = max(0.0, min(1.0, float(cs.get("bottom", 1.0))))
+    crop_x0, crop_y0 = int(l * sw), int(t * sh)
+    crop_x1 = max(crop_x0 + 1, int(r * sw))
+    crop_y1 = max(crop_y0 + 1, int(b * sh))
+    cw, ch = crop_x1 - crop_x0, crop_y1 - crop_y0
+    _, _, w, h = _resolve_pos_size(layer, canvas_size)
+    if w <= 0 or h <= 0:
+        return None
+    scale = max(w / cw, h / ch)
+    win_w, win_h = w / scale, h / scale
+    fx, fy = _fit_anchor_to_xy(layer.get("fit_anchor") or "center")
+    x0 = crop_x0 + (cw - win_w) * fx
+    y0 = crop_y0 + (ch - win_h) * fy
+    if layer.get("flip_h"):
+        x0 = sw - (x0 + win_w)
+    return (x0, y0, win_w, win_h)
+
+
 def _apply_edge_feather(img, *, left=0, right=0, top=0, bottom=0):
     """
     Soften image edges with linear alpha ramps. Edge widths in pixels.
@@ -989,50 +1061,68 @@ def render_image(layer, canvas_size, placeholders):
         print(f"  [warn] could not open {src}: {exc}")
         return img
 
-    # Optional pre-fit source crop. Useful for zooming into a specific
-    # region of the source (e.g. the face on a god card) before the
-    # fit/cover step scales it onto the canvas. Coords are normalized
-    # to [0, 1]; preset key:
-    #   crop_source: {left: 0.0, top: 0.0, right: 1.0, bottom: 0.4}
-    # would keep only the top 40% of the source.
-    cs = layer.get("crop_source")
-    # Per-god override: if this layer's src is a *_god_card placeholder,
-    # look up that god in data/god_card_crops.json and use its override
-    # in place of the preset's default crop_source. Lets outliers like
-    # Ymir get dialed in without creating one preset variant per god.
-    raw_src = layer.get("src", "")
-    if isinstance(raw_src, str):
-        for key_god, key_card in (("my_god", "my_god_card"),
-                                   ("my_god2", "my_god2_card"),
-                                   ("vs_god",  "vs_god_card"),
-                                   ("vs2_god", "vs2_god_card")):
-            if "{" + key_card + "}" in raw_src:
-                gname = placeholders.get(key_god, "")
-                override = _GOD_CARD_CROP_OVERRIDES.get(gname)
-                if override:
-                    cs = override
-                break
-    if cs:
-        sw, sh = src_img.size
-        l = max(0.0, min(1.0, float(cs.get("left", 0.0))))
-        t = max(0.0, min(1.0, float(cs.get("top", 0.0))))
-        r = max(0.0, min(1.0, float(cs.get("right", 1.0))))
-        b = max(0.0, min(1.0, float(cs.get("bottom", 1.0))))
-        # Reject inverted boxes — keep at least 1px in each axis to
-        # avoid PIL exceptions; the preset author can fix the values.
-        x0 = int(l * sw)
-        y0 = int(t * sh)
-        x1 = max(x0 + 1, int(r * sw))
-        y1 = max(y0 + 1, int(b * sh))
-        src_img = src_img.crop((x0, y0, x1, y1))
-
-    if layer.get("flip_h"):
-        src_img = src_img.transpose(Image.FLIP_LEFT_RIGHT)
-
     x, y, w, h = _resolve_pos_size(layer, canvas_size)
-    fit = layer.get("fit") or "cover"
-    fit_anchor = layer.get("fit_anchor") or "center"
-    fitted = _fit_image(src_img, w, h, fit, fit_anchor=fit_anchor)
+
+    win = layer.get("source_window_px")
+    if win and len(win) == 4 and w > 0 and h > 0:
+        # Explicit visible-source window: [x0, y0, x1, y1] in post-flip,
+        # full-source pixel coords. Shows exactly that rect in the panel,
+        # replacing the crop_source + fit + fit_anchor pipeline. Set
+        # per-render by thumbnail_studio's drag-to-reposition;
+        # compute_cover_window() is the matching forward calculation.
+        if layer.get("flip_h"):
+            src_img = src_img.transpose(Image.FLIP_LEFT_RIGHT)
+        sw, sh = src_img.size
+        wx0 = max(0, min(int(round(float(win[0]))), sw - 1))
+        wy0 = max(0, min(int(round(float(win[1]))), sh - 1))
+        wx1 = max(wx0 + 1, min(int(round(float(win[2]))), sw))
+        wy1 = max(wy0 + 1, min(int(round(float(win[3]))), sh))
+        fitted = src_img.crop((wx0, wy0, wx1, wy1)).resize((w, h), Image.LANCZOS)
+    else:
+        # Optional pre-fit source crop. Useful for zooming into a specific
+        # region of the source (e.g. the face on a god card) before the
+        # fit/cover step scales it onto the canvas. Coords are normalized
+        # to [0, 1]; preset key:
+        #   crop_source: {left: 0.0, top: 0.0, right: 1.0, bottom: 0.4}
+        # would keep only the top 40% of the source.
+        cs = layer.get("crop_source")
+        # Per-god override: if this layer's src is a *_god_card placeholder,
+        # look up that god in data/god_card_crops.json and use its override
+        # in place of the preset's default crop_source. Lets outliers like
+        # Ymir get dialed in without creating one preset variant per god.
+        raw_src = layer.get("src", "")
+        if isinstance(raw_src, str):
+            for key_god, key_card in (("my_god", "my_god_card"),
+                                       ("my_god2", "my_god2_card"),
+                                       ("my_god3", "my_god3_card"),
+                                       ("vs_god",  "vs_god_card"),
+                                       ("vs2_god", "vs2_god_card")):
+                if "{" + key_card + "}" in raw_src:
+                    gname = placeholders.get(key_god, "")
+                    override = _GOD_CARD_CROP_OVERRIDES.get(gname)
+                    if override:
+                        cs = override
+                    break
+        if cs:
+            sw, sh = src_img.size
+            l = max(0.0, min(1.0, float(cs.get("left", 0.0))))
+            t = max(0.0, min(1.0, float(cs.get("top", 0.0))))
+            r = max(0.0, min(1.0, float(cs.get("right", 1.0))))
+            b = max(0.0, min(1.0, float(cs.get("bottom", 1.0))))
+            # Reject inverted boxes — keep at least 1px in each axis to
+            # avoid PIL exceptions; the preset author can fix the values.
+            x0 = int(l * sw)
+            y0 = int(t * sh)
+            x1 = max(x0 + 1, int(r * sw))
+            y1 = max(y0 + 1, int(b * sh))
+            src_img = src_img.crop((x0, y0, x1, y1))
+
+        if layer.get("flip_h"):
+            src_img = src_img.transpose(Image.FLIP_LEFT_RIGHT)
+
+        fit = layer.get("fit") or "cover"
+        fit_anchor = layer.get("fit_anchor") or "center"
+        fitted = _fit_image(src_img, w, h, fit, fit_anchor=fit_anchor)
 
     # Optional edge feathering — used to blend overlapping cards across
     # a seam. preset key: feather_edges: {left, right, top, bottom}.
@@ -1428,6 +1518,8 @@ def _default_stem(args):
         bits.append("then_" + safe_filename(args.god2))
     if getattr(args, "vs2", ""):
         bits.append("vs_" + safe_filename(args.vs2))
+    if getattr(args, "god3", ""):
+        bits.append("then_" + safe_filename(args.god3))
     return "_".join(bits)
 
 
@@ -1450,9 +1542,12 @@ def main():
     parser.add_argument("--item3", default="",
                         help="Item 3 display name (build_guide preset).")
     parser.add_argument("--god2", default="",
-                        help="My second god display name (2matches preset only — "
-                             "for videos covering two matches where I switched gods "
-                             "between matches). Empty for 1v1 / 1v2 / single.")
+                        help="My second god display name (2matches / 2gods / 3gods "
+                             "presets — for videos covering multiple matches where "
+                             "I switched gods). Empty for 1v1 / 1v2 / single.")
+    parser.add_argument("--god3", default="",
+                        help="My third god display name (3gods preset only — for "
+                             "videos covering three gods I played). Empty otherwise.")
     parser.add_argument("--skin", default="",
                         help="Optional skin variant for --god. Looks for "
                              "'Custom God Cards/<God>-<Skin>.png' first, falling "
@@ -1462,7 +1557,10 @@ def main():
                              "instead of the default god card.")
     parser.add_argument("--skin2", default="",
                         help="Optional skin variant for --god2 (same lookup rules "
-                             "as --skin). Used by 2matches and 2gods presets.")
+                             "as --skin). Used by 2matches, 2gods and 3gods presets.")
+    parser.add_argument("--skin3", default="",
+                        help="Optional skin variant for --god3 (same lookup rules "
+                             "as --skin). Used by the 3gods preset.")
     parser.add_argument("--flip-god", dest="flip_god", action="store_true",
                         help="Mirror my god's card horizontally (toggles whatever "
                              "the preset already does — useful when the splash "
@@ -1473,7 +1571,10 @@ def main():
                              "(toggles the preset default).")
     parser.add_argument("--flip-god2", dest="flip_god2", action="store_true",
                         help="Mirror my second god's card horizontally "
-                             "(2matches / 2gods presets — toggles the preset default).")
+                             "(2matches / 2gods / 3gods presets — toggles the preset default).")
+    parser.add_argument("--flip-god3", dest="flip_god3", action="store_true",
+                        help="Mirror my third god's card horizontally "
+                             "(3gods preset — toggles the preset default).")
     parser.add_argument("--flip-vs2", dest="flip_vs2", action="store_true",
                         help="Mirror the second opposing god's card horizontally "
                              "(1v2 / 2matches presets — toggles the preset default).")
@@ -1525,7 +1626,7 @@ def main():
 
     preset = load_preset(args.preset)
     apply_flip_overrides(preset, args)
-    placeholders = build_placeholders(args)
+    placeholders = build_placeholders(args, preset=preset)
 
     if not placeholders["my_god_card"]:
         print(f"  [warn] No card found for '{args.god}'. Run "
@@ -1539,6 +1640,9 @@ def main():
     if args.god2 and not placeholders["my_god2_card"]:
         print(f"  [warn] No card found for '{args.god2}'. Run "
               f"`python tools/download_god_cards.py --add \"{args.god2}\"` to fetch it.")
+    if args.god3 and not placeholders["my_god3_card"]:
+        print(f"  [warn] No card found for '{args.god3}'. Run "
+              f"`python tools/download_god_cards.py --add \"{args.god3}\"` to fetch it.")
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 

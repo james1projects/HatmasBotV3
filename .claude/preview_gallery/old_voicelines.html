@@ -1,14 +1,14 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <title>Voice Line Overlay</title>
-<link rel="stylesheet" href="/overlays/hatmas_theme.css">
 <style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     background: transparent;
     overflow: hidden;
-    font-family: 'Inter', sans-serif;
+    font-family: 'Segoe UI', Arial, sans-serif;
   }
 
   #container {
@@ -26,38 +26,41 @@
   #animation {
     max-width: 400px;
     max-height: 400px;
-    border-radius: 10px;
+    border-radius: 12px;
     display: none;
   }
 
-  /* Text label below the video/audio — flat Jet Black pill; the
-     voiceline type speaks through border + text color from the
-     brand palette (joke = bronze, taunt = scarlet, laugh = steel). */
+  /* Text label below the video/audio */
   #label {
     margin-top: 12px;
     padding: 8px 24px;
     border-radius: 8px;
     font-size: 20px;
     font-weight: 600;
-    background: var(--hm-bg);
-    color: var(--hm-text);
-    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+    letter-spacing: 1px;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.7);
     display: inline-block;
   }
 
   #label.god_joke {
-    border: 1px solid rgba(223, 160, 110, 0.55);
-    color: var(--hm-gold);
+    background: linear-gradient(135deg, rgba(255,215,0,0.85), rgba(200,165,0,0.85));
+    color: #fff;
+    border: 2px solid rgba(255,225,100,0.6);
+    box-shadow: 0 0 20px rgba(255,215,0,0.4);
   }
 
   #label.god_taunt {
-    border: 1px solid rgba(223, 41, 53, 0.55);
-    color: var(--hm-red);
+    background: linear-gradient(135deg, rgba(255,68,68,0.85), rgba(200,40,40,0.85));
+    color: #fff;
+    border: 2px solid rgba(255,100,100,0.6);
+    box-shadow: 0 0 20px rgba(255,50,50,0.4);
   }
 
   #label.god_laugh {
-    border: 1px solid rgba(125, 152, 161, 0.55);
-    color: var(--hm-blue);
+    background: linear-gradient(135deg, rgba(155,89,182,0.85), rgba(120,60,150,0.85));
+    color: #fff;
+    border: 2px solid rgba(180,120,200,0.6);
+    box-shadow: 0 0 20px rgba(155,89,182,0.4);
   }
 
   @keyframes fadeIn {

@@ -21,9 +21,15 @@ Architecture
                          else data/item_icons/<slug>.png.
 - POST /api/render       Body = JSON form values. Calls build_thumbnail.compose()
                          and writes the flat PNG. Returns {png_url, png_path,
-                         stem, warnings}. Layered PNGs / PSD are written
-                         only when the user clicks "Save & Open in Paint.NET"
-                         (avoids ~50 file writes per preview render).
+                         stem, warnings, cards, canvas}. Layered PNGs / PSD are
+                         written only when the user clicks "Save & Open in
+                         Paint.NET" (avoids ~50 file writes per preview render).
+                         Optional body key `pans` ({slot: [x0, y0]}) repositions
+                         a god card inside its panel (drag-to-reposition).
+- GET /api/card          ?god=<display>&skin=<skin> -> the resolved full card
+                         art (Custom God Cards override > base art). Used by
+                         the front-end to show a live full-card ghost while
+                         dragging; the real re-render happens on drop.
 - POST /api/open_in_paint Body = {png_path, stem}. Looks up the cached
                          layer_outputs for that stem, writes the layered
                          PNGs + optional PSD, launches Paint.NET.
@@ -57,8 +63,10 @@ import types
 import webbrowser
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote
 
 from aiohttp import web
+from PIL import Image
 
 # Resolve repo root and add tools/ to sys.path so we can import build_thumbnail
 TOOLS_DIR = Path(__file__).resolve().parent
@@ -82,7 +90,7 @@ MAX_PORT_PROBE = 8089
 BIND_HOST = "127.0.0.1"
 
 # Presets to expose in the dropdown. Filters out experimental "_*" presets.
-ALLOWED_PRESETS = ("build_guide", "1v1", "1v2", "2matches", "2gods", "single")
+ALLOWED_PRESETS = ("build_guide", "1v1", "1v2", "2matches", "2gods", "3gods", "single")
 
 # Gods that have a card on disk but no Custom God Icons primary file.
 # Used so the dropdown shows the proper display name (and the icon
@@ -112,6 +120,9 @@ PRESET_FIELDS: Dict[str, List[str]] = {
     "2gods":      ["god", "skin", "god2", "skin2",
                    "text", "subtext",
                    "flip_god", "flip_god2"],
+    "3gods":      ["god", "skin", "god2", "skin2", "god3", "skin3",
+                   "text", "subtext",
+                   "flip_god", "flip_god2", "flip_god3"],
     "single":     ["god", "skin",
                    "text", "subtext", "kda", "result",
                    "flip_god"],
@@ -281,6 +292,88 @@ def _item_index() -> Dict[str, Dict[str, Any]]:
 
 
 # ============================================================
+# CARD DRAG-TO-REPOSITION
+# ============================================================
+
+# (slot, god-name placeholder, card-path placeholder, skin form field).
+# `slot` is the key the front-end uses in its `pans` dict.
+_CARD_SLOTS = [
+    ("god",  "my_god",  "my_god_card",  "skin"),
+    ("vs",   "vs_god",  "vs_god_card",  None),
+    ("vs2",  "vs2_god", "vs2_god_card", None),
+    ("god2", "my_god2", "my_god2_card", "skin2"),
+    ("god3", "my_god3", "my_god3_card", "skin3"),
+]
+
+
+def _apply_pans_and_collect_cards(preset, placeholders, ns, pans):
+    """
+    For every image layer whose src is a god-card placeholder:
+    apply the user's drag offset (pans[slot] = [x0, y0], the top-left
+    of the visible source window in post-flip source px) by setting the
+    layer's source_window_px override, and collect the geometry the
+    front-end needs to run the drag interaction (panel rect on canvas,
+    current window, source size, pan scale).
+
+    Must be called after bt.apply_flip_overrides so flip_h is final.
+    Mutates `preset` layers in place; returns a list of card dicts
+    (topmost matching layer per slot).
+    """
+    canvas_size = tuple(preset.get("size", [1280, 720]))
+    by_slot: Dict[str, Dict[str, Any]] = {}
+    for layer in preset.get("layers", []):
+        if layer.get("type") != "image":
+            continue
+        src = layer.get("src", "")
+        if not isinstance(src, str):
+            continue
+        hit = next((s for s in _CARD_SLOTS if "{" + s[2] + "}" in src), None)
+        if not hit:
+            continue
+        slot, god_key, card_key, skin_field = hit
+        card_path = placeholders.get(card_key) or ""
+        if not card_path or not Path(card_path).exists():
+            continue
+        try:
+            with Image.open(card_path) as im:
+                src_size = im.size
+        except Exception:
+            continue
+        god_name = placeholders.get(god_key, "")
+        crop_override = bt._GOD_CARD_CROP_OVERRIDES.get(god_name)
+        win = bt.compute_cover_window(layer, canvas_size, src_size,
+                                      crop_override)
+        if not win:
+            continue  # contain/stretch fit — nothing to pan
+        x0, y0, win_w, win_h = win
+        sw, sh = src_size
+        pan = pans.get(slot)
+        if isinstance(pan, (list, tuple)) and len(pan) == 2:
+            try:
+                x0 = max(0.0, min(float(pan[0]), sw - win_w))
+                y0 = max(0.0, min(float(pan[1]), sh - win_h))
+                layer["source_window_px"] = [x0, y0, x0 + win_w, y0 + win_h]
+            except (TypeError, ValueError):
+                pass
+        x, y, w, h = bt._resolve_pos_size(layer, canvas_size)
+        dx, dy = bt._resolve_anchor(layer.get("anchor"), w, h)
+        skin_val = (getattr(ns, skin_field, "") or "") if skin_field else ""
+        card_url = "/api/card?god=" + quote(god_name)
+        if skin_val:
+            card_url += "&skin=" + quote(skin_val)
+        by_slot[slot] = {
+            "slot": slot,
+            "panel": [x - dx, y - dy, w, h],
+            "flip": bool(layer.get("flip_h")),
+            "window": [x0, y0],
+            "win_size": [win_w, win_h],
+            "src_size": [sw, sh],
+            "card_url": card_url,
+        }
+    return list(by_slot.values())
+
+
+# ============================================================
 # ROUTE HANDLERS
 # ============================================================
 
@@ -343,6 +436,20 @@ async def serve_item_icon(request: web.Request) -> web.Response:
     return web.Response(status=404, text="Not found")
 
 
+async def serve_card_art(request: web.Request) -> web.Response:
+    """Full card art by god display name (+ optional skin), resolved the
+    same way api_render does. The drag interaction shows this as a live
+    ghost so the user pans the *full* art, not the panel-cropped copy."""
+    god = (request.query.get("god") or "").strip()
+    skin = (request.query.get("skin") or "").strip()
+    if not god:
+        return web.Response(status=400, text="god query param required")
+    p = bt.resolve_god_card(god, skin=skin or None)
+    if not p or not Path(p).exists():
+        return web.Response(status=404, text="No card found")
+    return _file_response(Path(p), cache_seconds=3600)
+
+
 async def serve_render(request: web.Request) -> web.Response:
     filename = request.match_info["filename"]
     # Path-traversal guard: only allow plain filenames.
@@ -395,8 +502,10 @@ async def api_render(request: web.Request) -> web.Response:
         vs=(data.get("vs") or "").strip(),
         vs2=(data.get("vs2") or "").strip(),
         god2=(data.get("god2") or "").strip(),
+        god3=(data.get("god3") or "").strip(),
         skin=(data.get("skin") or "").strip(),
         skin2=(data.get("skin2") or "").strip(),
+        skin3=(data.get("skin3") or "").strip(),
         item1=(data.get("item1") or "").strip(),
         item2=(data.get("item2") or "").strip(),
         item3=(data.get("item3") or "").strip(),
@@ -408,6 +517,7 @@ async def api_render(request: web.Request) -> web.Response:
         flip_god=bool(data.get("flip_god")),
         flip_vs=bool(data.get("flip_vs")),
         flip_god2=bool(data.get("flip_god2")),
+        flip_god3=bool(data.get("flip_god3")),
         flip_vs2=bool(data.get("flip_vs2")),
         no_text=bool(data.get("no_text")),
         no_subtext=bool(data.get("no_subtext")),
@@ -415,7 +525,7 @@ async def api_render(request: web.Request) -> web.Response:
     )
 
     bt.apply_flip_overrides(preset, ns)
-    placeholders = bt.build_placeholders(ns)
+    placeholders = bt.build_placeholders(ns, preset=preset)
 
     # Surface the same "no card found" warnings the CLI prints.
     warnings: List[str] = []
@@ -427,6 +537,8 @@ async def api_render(request: web.Request) -> web.Response:
         warnings.append(f"No card found for '{ns.vs2}'.")
     if ns.god2 and not placeholders["my_god2_card"]:
         warnings.append(f"No card found for '{ns.god2}'.")
+    if ns.god3 and not placeholders["my_god3_card"]:
+        warnings.append(f"No card found for '{ns.god3}'.")
     # Item icon warnings (build_guide-only fields)
     for label, name, key in (
         ("item1", ns.item1, "item1_icon"),
@@ -435,6 +547,13 @@ async def api_render(request: web.Request) -> web.Response:
     ):
         if name and not placeholders[key]:
             warnings.append(f"No icon found for {label}: '{name}'.")
+
+    # Drag-to-reposition: apply per-slot pan overrides to the card
+    # layers and collect the geometry the front-end drag needs.
+    pans = data.get("pans")
+    if not isinstance(pans, dict):
+        pans = {}
+    cards = _apply_pans_and_collect_cards(preset, placeholders, ns, pans)
 
     try:
         composite, layer_outputs = bt.compose(preset, placeholders)
@@ -462,6 +581,8 @@ async def api_render(request: web.Request) -> web.Response:
         "png_url": f"/render/{out_png.name}",
         "stem": stem,
         "warnings": warnings,
+        "cards": cards,
+        "canvas": list(canvas_size),
     })
 
 
@@ -756,6 +877,37 @@ INDEX_HTML = """<!doctype html>
     display: block;
     border-radius: 3px;
   }
+  .preview-box {
+    position: relative;
+    display: flex;
+    max-width: 100%;
+    max-height: 100%;
+  }
+  /* Drag-to-reposition overlays, one per god-card panel. Positioned in
+     percentages of the canvas so they track the preview img as it scales. */
+  .card-drag {
+    position: absolute;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+  }
+  .card-drag:hover {
+    outline: 2px dashed rgba(255, 210, 77, 0.6);
+    outline-offset: -2px;
+  }
+  .card-drag.dragging { cursor: grabbing; }
+  .card-drag .ghost {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+  }
+  .card-drag .ghost img {
+    position: absolute;
+    max-width: none;
+    max-height: none;
+    border-radius: 0;
+    pointer-events: none;
+  }
   .preview-wrap .placeholder {
     color: var(--muted);
     font-style: italic;
@@ -838,6 +990,20 @@ INDEX_HTML = """<!doctype html>
       </div>
     </div>
 
+    <div class="field-group" data-group="god3">
+      <div data-field="god3">
+        <label>My God 3 <button class="inline-clear" data-clear="god3" type="button">clear</button></label>
+        <div class="icondrop" data-name="god3" data-kind="god"></div>
+      </div>
+      <div data-field="skin3">
+        <label>Skin 3 (optional)</label>
+        <input type="text" id="skin3" placeholder="e.g. Tundra">
+      </div>
+      <div data-field="flip_god3" style="margin-top:8px">
+        <label class="radios"><input type="checkbox" id="flip_god3"> Flip my god 3</label>
+      </div>
+    </div>
+
     <div class="field-group" data-group="items">
       <div data-field="item1">
         <label>Item 1 <button class="inline-clear" data-clear="item1" type="button">clear</button></label>
@@ -895,7 +1061,9 @@ INDEX_HTML = """<!doctype html>
     <div class="warnings" id="warnings"></div>
     <div class="preview-wrap">
       <span class="placeholder" id="preview-placeholder">Click Render to build a thumbnail.</span>
-      <img id="preview" alt="" style="display:none">
+      <div class="preview-box" id="preview-box">
+        <img id="preview" alt="" style="display:none">
+      </div>
     </div>
   </div>
 </div>
@@ -930,13 +1098,16 @@ INDEX_HTML = """<!doctype html>
 
   // ---- State -------------------------------------------------------------
   const state = {
-    god: "", vs: "", vs2: "", god2: "",
+    god: "", vs: "", vs2: "", god2: "", god3: "",
     item1: "", item2: "", item3: "",
-    skin: "", skin2: "",
+    skin: "", skin2: "", skin3: "",
     text: "", subtext: "", kda: "",
     result: "", result2: "",
-    flip_god: false, flip_vs: false, flip_god2: false, flip_vs2: false,
+    flip_god: false, flip_vs: false, flip_god2: false, flip_god3: false, flip_vs2: false,
     preset: presetSel.value,
+    // slot -> [x0, y0]: top-left of the visible source window in
+    // post-flip source px (drag-to-reposition). Server clamps.
+    pans: {},
   };
   let lastRender = null; // { png_path, stem }
 
@@ -1109,10 +1280,11 @@ INDEX_HTML = """<!doctype html>
 
   // ---- Instantiate dropdowns --------------------------------------------
   const drops = {};
-  for (const name of ["god", "vs", "vs2", "god2"]) {
+  for (const name of ["god", "vs", "vs2", "god2", "god3"]) {
     const host = $(`.icondrop[data-name="${name}"]`);
     drops[name] = buildIconDrop(host, godOptions, (slug, display, url) => {
       state[name] = display;
+      delete state.pans[name]; // new art -> stale drag offset
       drops[name].setSelected(slug, display, url);
     });
   }
@@ -1131,17 +1303,26 @@ INDEX_HTML = """<!doctype html>
       e.stopPropagation();
       const f = btn.dataset.clear;
       state[f] = "";
+      delete state.pans[f];
       if (drops[f]) drops[f].setSelected("", "", "");
     });
   });
 
   // ---- Text inputs -------------------------------------------------------
-  for (const f of ["skin", "skin2", "text", "subtext", "kda"]) {
-    $("#" + f).addEventListener("input", () => { state[f] = $("#" + f).value; });
+  for (const f of ["skin", "skin2", "skin3", "text", "subtext", "kda"]) {
+    $("#" + f).addEventListener("input", () => {
+      state[f] = $("#" + f).value;
+      // skin -> god, skin2 -> god2, skin3 -> god3: new art, stale offset
+      if (f.startsWith("skin")) delete state.pans["god" + f.slice(4)];
+    });
   }
   // ---- Flip toggles ------------------------------------------------------
-  for (const f of ["flip_god", "flip_vs", "flip_god2", "flip_vs2"]) {
-    $("#" + f).addEventListener("change", () => { state[f] = $("#" + f).checked; });
+  for (const f of ["flip_god", "flip_vs", "flip_god2", "flip_god3", "flip_vs2"]) {
+    $("#" + f).addEventListener("change", () => {
+      state[f] = $("#" + f).checked;
+      // flip_<slot>: mirrored coords make the old offset meaningless
+      delete state.pans[f.slice(5)];
+    });
   }
   // ---- Result radios -----------------------------------------------------
   $$('input[name="result"]').forEach(r => r.addEventListener("change", () => {
@@ -1154,6 +1335,7 @@ INDEX_HTML = """<!doctype html>
   // ---- Preset-driven field visibility -----------------------------------
   function applyPresetVisibility() {
     state.preset = presetSel.value;
+    state.pans = {}; // panel layout changed; drag offsets are per-preset
     const enabled = PRESET_FIELDS[state.preset] || [];
     $$("[data-field]").forEach(div => {
       const f = div.dataset.field;
@@ -1168,8 +1350,114 @@ INDEX_HTML = """<!doctype html>
   presetSel.addEventListener("change", applyPresetVisibility);
   applyPresetVisibility();
 
+  // ---- Card drag-to-reposition -------------------------------------------
+  // Each render returns `cards`: the panel rect + visible-source-window
+  // geometry of every god card layer. We lay a transparent overlay over
+  // each panel; dragging it shows a live "ghost" of the FULL card art
+  // (served by /api/card) clipped to the panel, so you're panning the
+  // whole splash — exactly what Paint.NET's cropped layers can't do.
+  // On drop the new window top-left goes into state.pans[slot] and we
+  // re-render server-side so feathering/seams/text come back correct.
+  const previewBox = $("#preview-box");
+  let ghostEls = [];
+  function removeGhosts() {
+    ghostEls.forEach(g => g.remove());
+    ghostEls = [];
+  }
+  function clearOverlays() {
+    removeGhosts();
+    $$(".card-drag", previewBox).forEach(o => o.remove());
+  }
+
+  function buildOverlays(cards, canvas) {
+    clearOverlays();
+    if (!cards || !cards.length) return;
+    const cw = canvas[0], ch = canvas[1];
+    for (const c of cards) {
+      const ov = document.createElement("div");
+      ov.className = "card-drag";
+      ov.style.left   = (c.panel[0] / cw * 100) + "%";
+      ov.style.top    = (c.panel[1] / ch * 100) + "%";
+      ov.style.width  = (c.panel[2] / cw * 100) + "%";
+      ov.style.height = (c.panel[3] / ch * 100) + "%";
+      ov.title = "Drag to reposition " + c.slot + " (double-click to reset)";
+      ov.addEventListener("pointerdown", e => startCardDrag(e, ov, c));
+      ov.addEventListener("dblclick", () => {
+        delete state.pans[c.slot];
+        doRender();
+      });
+      previewBox.appendChild(ov);
+    }
+  }
+
+  function startCardDrag(e, ov, c) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const dispW = ov.clientWidth, dispH = ov.clientHeight;
+    if (!dispW || !dispH) return;
+    // Display px per source px. The window always fills the panel
+    // (cover fit), so panel/window gives the scale for both axes.
+    const s = dispW / c.win_size[0];
+    const imgW = c.src_size[0] * s, imgH = c.src_size[1] * s;
+
+    removeGhosts();
+    const ghost = document.createElement("div");
+    ghost.className = "ghost";
+    const gi = document.createElement("img");
+    gi.src = c.card_url;
+    gi.draggable = false;
+    gi.style.width = imgW + "px";
+    gi.style.height = imgH + "px";
+    // Mirroring in place keeps the element box fixed, so the ghost's
+    // left/top stay in post-flip coords — same space as c.window.
+    if (c.flip) gi.style.transform = "scaleX(-1)";
+    ghost.appendChild(gi);
+    ov.appendChild(ghost);
+    ghostEls.push(ghost);
+    ov.classList.add("dragging");
+    ov.setPointerCapture(e.pointerId);
+
+    const startX = e.clientX, startY = e.clientY;
+    const left0 = -c.window[0] * s, top0 = -c.window[1] * s;
+    const minLeft = Math.min(0, dispW - imgW);
+    const minTop = Math.min(0, dispH - imgH);
+    let left = left0, top = top0;
+    gi.style.left = left + "px";
+    gi.style.top = top + "px";
+
+    function onMove(ev) {
+      left = Math.min(0, Math.max(minLeft, left0 + (ev.clientX - startX)));
+      top  = Math.min(0, Math.max(minTop,  top0 + (ev.clientY - startY)));
+      gi.style.left = left + "px";
+      gi.style.top = top + "px";
+    }
+    function detach() {
+      ov.removeEventListener("pointermove", onMove);
+      ov.removeEventListener("pointerup", onUp);
+      ov.removeEventListener("pointercancel", onCancel);
+      ov.classList.remove("dragging");
+    }
+    function onUp() {
+      detach();
+      if (left !== left0 || top !== top0) {
+        state.pans[c.slot] = [-left / s, -top / s];
+        doRender(); // ghost stays up until the fresh preview loads
+      } else {
+        removeGhosts();
+      }
+    }
+    function onCancel() {
+      detach();
+      removeGhosts();
+    }
+    ov.addEventListener("pointermove", onMove);
+    ov.addEventListener("pointerup", onUp);
+    ov.addEventListener("pointercancel", onCancel);
+  }
+
   // ---- Render ------------------------------------------------------------
-  $("#render-btn").addEventListener("click", async () => {
+  let renderSeq = 0;
+  async function doRender() {
     $("#render-btn").disabled = true;
     $("#open-btn").disabled = true;
     $("#status").textContent = "Rendering...";
@@ -1183,28 +1471,40 @@ INDEX_HTML = """<!doctype html>
       });
       const j = await r.json();
       if (!j.ok) {
+        removeGhosts();
         $("#status").textContent = "Error: " + (j.error || "unknown");
         $("#status").classList.add("err");
         return;
       }
       const img = $("#preview");
       const ph = $("#preview-placeholder");
+      const mySeq = ++renderSeq;
+      img.addEventListener("load", () => {
+        if (mySeq !== renderSeq) return; // superseded by a newer render
+        removeGhosts();
+        buildOverlays(j.cards || [], j.canvas || [1280, 720]);
+      }, { once: true });
       img.src = j.png_url + "?t=" + Date.now();
       img.style.display = "";
       if (ph) ph.style.display = "none";
-      $("#status").textContent = "Rendered: " + j.png_path;
+      const dragHint = (j.cards && j.cards.length)
+        ? "  |  drag a god card in the preview to reposition it (double-click resets)"
+        : "";
+      $("#status").textContent = "Rendered: " + j.png_path + dragHint;
       if (j.warnings && j.warnings.length) {
         $("#warnings").textContent = j.warnings.join("  |  ");
       }
       lastRender = { png_path: j.png_path, stem: j.stem };
       $("#open-btn").disabled = false;
     } catch (e) {
+      removeGhosts();
       $("#status").textContent = "Render failed: " + e.message;
       $("#status").classList.add("err");
     } finally {
       $("#render-btn").disabled = false;
     }
-  });
+  }
+  $("#render-btn").addEventListener("click", doRender);
 
   // ---- Save & Open in Paint.NET ------------------------------------------
   $("#open-btn").addEventListener("click", async () => {
@@ -1267,6 +1567,7 @@ def build_app() -> web.Application:
     app.router.add_get("/api/options", api_options)
     app.router.add_get("/icon/god/{slug}", serve_god_icon)
     app.router.add_get("/icon/item/{slug}", serve_item_icon)
+    app.router.add_get("/api/card", serve_card_art)
     app.router.add_get("/render/{filename}", serve_render)
     app.router.add_post("/api/render", api_render)
     app.router.add_post("/api/open_in_paint", api_open_in_paint)

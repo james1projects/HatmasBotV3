@@ -71,6 +71,25 @@ python tools\build_thumbnail.py --god Sylvanus --god2 Atlas --preset 2gods --ski
 
 ---
 
+## 3gods — One video covering three of my gods, no opponents shown
+
+Three vertical panels left-to-right, each god card zoomed in on the face,
+with an icon badge and the god's name at the bottom of each panel.
+
+```
+python tools\build_thumbnail.py --god Sylvanus --god2 Atlas --god3 Ymir --preset 3gods
+python tools\build_thumbnail.py --god Sylvanus --god2 Atlas --god3 Ymir --preset 3gods --text "TRIPLE FEATURE"
+```
+
+With skin variants and flips (each flip toggles that god's card only):
+
+```
+python tools\build_thumbnail.py --god Sylvanus --god2 Atlas --god3 Ymir --preset 3gods --skin "High Noon" --skin3 "Tundra"
+python tools\build_thumbnail.py --god Sylvanus --god2 Atlas --god3 Ymir --preset 3gods --flip-god --flip-god3
+```
+
+---
+
 ## single — Single hero god (no opponent shown)
 
 ```
@@ -94,7 +113,8 @@ Custom God Cards\SylvanusHighNoon.webp       <- concatenated (what you usually g
 
 Supported extensions: `.png`, `.webp`, `.jpg`, `.jpeg`.
 
-Use `--skin "<name>"` for `--god` and `--skin2 "<name>"` for `--god2`.
+Use `--skin "<name>"` for `--god`, `--skin2 "<name>"` for `--god2`, and
+`--skin3 "<name>"` for `--god3`.
 The lookup chain is:
 
 1. `Custom God Cards\<God>-<Skin>.<ext>` (or concat form)

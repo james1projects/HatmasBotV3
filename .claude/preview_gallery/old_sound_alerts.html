@@ -1,13 +1,13 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <title>HatmasBot Sound &amp; Gamble Alerts</title>
-<link rel="stylesheet" href="/overlays/hatmas_theme.css">
 <style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
     background: transparent;
-    font-family: 'Inter', sans-serif;
+    font-family: 'Segoe UI', 'Inter', sans-serif;
     overflow: hidden;
   }
 
@@ -38,58 +38,54 @@
     transform: translateY(-10px) scale(0.95);
   }
 
-  /* Result type themes — flat Jet Black panel, the outcome speaks
-     through the border + text color. Escalation stays inside the
-     brand palette: win = bronze, big win = bright bronze, jackpot =
-     Lemon Chiffon (the reserved highlight-flash color), loss =
-     Scarlet Rush. */
+  /* Result type themes */
   #gamble-popup.jackpot {
-    background: var(--hm-bg);
-    border-color: rgba(245, 243, 187, 0.65);
-    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    background: linear-gradient(135deg, #1a0f00 0%, #2a1800 100%);
+    border-color: #f0b030;
+    box-shadow: 0 0 30px rgba(240, 176, 48, 0.4), 0 4px 20px rgba(0,0,0,0.5);
   }
   #gamble-popup.big_win {
-    background: var(--hm-bg);
-    border-color: var(--hm-gold-bright);
-    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    background: linear-gradient(135deg, #0a1a0a 0%, #0f2a0f 100%);
+    border-color: #40d060;
+    box-shadow: 0 0 20px rgba(64, 208, 96, 0.3), 0 4px 20px rgba(0,0,0,0.5);
   }
   #gamble-popup.win {
-    background: var(--hm-bg);
-    border-color: rgba(223, 160, 110, 0.55);
-    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    background: linear-gradient(135deg, #0a0f1a 0%, #0f1a2a 100%);
+    border-color: #50a0e0;
+    box-shadow: 0 0 15px rgba(80, 160, 224, 0.25), 0 4px 20px rgba(0,0,0,0.5);
   }
   #gamble-popup.loss {
-    background: var(--hm-bg);
-    border-color: rgba(223, 41, 53, 0.55);
-    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    background: linear-gradient(135deg, #1a0a0a 0%, #2a0f0f 100%);
+    border-color: #c04040;
+    box-shadow: 0 0 15px rgba(192, 64, 64, 0.25), 0 4px 20px rgba(0,0,0,0.5);
   }
 
   /* Neutral theme during rolling */
   #gamble-popup.rolling {
-    background: var(--hm-bg);
-    border-color: var(--hm-border-subtle);
-    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    background: linear-gradient(135deg, #0a0b12 0%, #151620 100%);
+    border-color: #888;
+    box-shadow: 0 0 15px rgba(136, 136, 136, 0.2), 0 4px 20px rgba(0,0,0,0.5);
   }
 
   .popup-label {
     font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.07em;
+    letter-spacing: 2px;
     margin-bottom: 6px;
     opacity: 0;
     transition: opacity 0.3s ease;
   }
   .popup-label.show { opacity: 1; }
-  .jackpot .popup-label { color: #F5F3BB; }
-  .big_win .popup-label { color: var(--hm-gold-bright); }
-  .win .popup-label     { color: var(--hm-gold); }
-  .loss .popup-label    { color: var(--hm-red); }
+  .jackpot .popup-label { color: #f0b030; }
+  .big_win .popup-label { color: #40d060; }
+  .win .popup-label     { color: #50a0e0; }
+  .loss .popup-label    { color: #c04040; }
 
   .popup-player {
     font-size: 18px;
     font-weight: 600;
-    color: var(--hm-text);
+    color: #e8e0d4;
     margin-bottom: 8px;
   }
 
@@ -101,37 +97,35 @@
   }
 
   .popup-roll {
-    font-family: 'JetBrains Mono', monospace;
     font-size: 32px;
-    font-weight: 700;
+    font-weight: 800;
     line-height: 1;
     font-variant-numeric: tabular-nums;
     min-width: 60px;
-    color: var(--hm-text);
+    color: #e8e0d4;
   }
-  .jackpot .popup-roll { color: #F5F3BB; }
-  .big_win .popup-roll { color: var(--hm-gold-bright); }
-  .win .popup-roll     { color: var(--hm-gold); }
-  .loss .popup-roll    { color: var(--hm-red); }
+  .jackpot .popup-roll { color: #f0b030; }
+  .big_win .popup-roll { color: #40d060; }
+  .win .popup-roll     { color: #50a0e0; }
+  .loss .popup-roll    { color: #c04040; }
 
   .popup-amount {
     font-size: 15px;
     font-weight: 600;
-    color: var(--hm-text-secondary);
+    color: #b0a898;
     text-align: right;
     opacity: 0;
     transition: opacity 0.3s ease;
   }
   .popup-amount.show { opacity: 1; }
   .popup-amount .value {
-    font-family: 'JetBrains Mono', monospace;
     font-size: 20px;
     display: block;
   }
-  .jackpot .popup-amount .value { color: #F5F3BB; }
-  .big_win .popup-amount .value { color: var(--hm-gold-bright); }
-  .win .popup-amount .value     { color: var(--hm-gold); }
-  .loss .popup-amount .value    { color: var(--hm-red); }
+  .jackpot .popup-amount .value { color: #f0b030; }
+  .big_win .popup-amount .value { color: #40d060; }
+  .win .popup-amount .value     { color: #50a0e0; }
+  .loss .popup-amount .value    { color: #c04040; }
 </style>
 </head>
 <body>

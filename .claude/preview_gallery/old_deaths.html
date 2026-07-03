@@ -1,21 +1,17 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <title>Daily Death Counter</title>
-<link rel="stylesheet" href="/overlays/hatmas_theme.css">
 <style>
   html, body {
+    margin: 0;
+    padding: 0;
     background: transparent;
-    /* Brand display face — same as the other overlay titles. */
-    font-family: 'BigNoodleTitling', 'Bebas Neue', 'Inter', sans-serif;
+    font-family: 'Impact', 'Arial Black', sans-serif;
     -webkit-font-smoothing: antialiased;
     user-select: none;
   }
-  /* This overlay floats bare text over gameplay (no panel), so the
-     text carries its own contrast: a real stroke drawn behind the
-     glyphs plus one soft shadow — cleaner than stacking offset
-     shadows into a halo. */
   #wrap {
     display: inline-block;
     padding: 12px 20px;
@@ -31,21 +27,23 @@
     font-size: 26px;
     letter-spacing: 2px;
     text-transform: uppercase;
-    color: var(--hm-red);
-    -webkit-text-stroke: 3px rgba(0, 0, 0, 0.85);
-    paint-order: stroke fill;
-    text-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+    color: #DF2935;
+    text-shadow:
+      -2px -2px 0 #000,
+       2px -2px 0 #000,
+      -2px  2px 0 #000,
+       2px  2px 0 #000;
   }
   #counter {
     display: block;
-    font-family: 'JetBrains Mono', monospace;
-    font-variant-numeric: tabular-nums;
-    font-weight: 700;
-    font-size: 72px;
-    color: var(--hm-text);
-    -webkit-text-stroke: 4px rgba(0, 0, 0, 0.85);
-    paint-order: stroke fill;
-    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+    font-size: 88px;
+    color: #ffffff;
+    text-shadow:
+      -3px -3px 0 #000,
+       3px -3px 0 #000,
+      -3px  3px 0 #000,
+       3px  3px 0 #000,
+       0 0 12px rgba(0, 0, 0, 0.6);
   }
 </style>
 </head>

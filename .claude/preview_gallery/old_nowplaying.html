@@ -1,9 +1,12 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<link rel="stylesheet" href="/overlays/hatmas_theme.css">
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500&family=Inter:wght@300;400;500&display=swap');
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
 body {
   background: transparent;
   overflow: hidden;
@@ -17,16 +20,16 @@ body {
   left: 10px;
   width: 430px;
   height: 100px;
-  background: var(--hm-bg);
-  border: 1px solid var(--hm-border);
-  border-radius: 10px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  background: rgba(10, 11, 18, 0.92);
+  border: 1px solid rgba(196, 168, 130, 0.2);
+  border-radius: 8px;
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 10px 14px;
   transform: translateX(-460px);
   transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  backdrop-filter: blur(10px);
 }
 
 .now-playing.visible {
@@ -37,7 +40,7 @@ body {
   width: 80px;
   height: 80px;
   border-radius: 6px;
-  background: var(--hm-icon-bg);
+  background: rgba(196, 168, 130, 0.1);
   flex-shrink: 0;
   object-fit: cover;
 }
@@ -54,9 +57,9 @@ body {
 .label {
   font-family: 'Inter', sans-serif;
   font-size: 10px;
-  font-weight: 600;
-  color: var(--hm-text-muted);
-  letter-spacing: 0.08em;
+  font-weight: 500;
+  color: rgba(196, 168, 130, 0.5);
+  letter-spacing: 2px;
   text-transform: uppercase;
 }
 
@@ -73,8 +76,8 @@ body {
 .artist {
   font-family: 'Inter', sans-serif;
   font-size: 12px;
-  font-weight: 400;
-  color: var(--hm-text-secondary);
+  font-weight: 300;
+  color: rgba(196, 168, 130, 0.7);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -90,13 +93,13 @@ body {
 .requester {
   font-family: 'Inter', sans-serif;
   font-size: 11px;
-  color: var(--hm-text-muted);
+  color: rgba(196, 168, 130, 0.5);
 }
 
 .likes {
   font-family: 'Inter', sans-serif;
   font-size: 11px;
-  color: var(--hm-gold);
+  color: rgba(232, 168, 124, 0.8);
   transition: transform 0.3s ease;
 }
 
@@ -105,11 +108,11 @@ body {
 }
 
 .like-cmd {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Inter', sans-serif;
   font-size: 10px;
   font-weight: 500;
-  color: var(--hm-text-muted);
-  border: 1px solid var(--hm-border-subtle);
+  color: rgba(196, 168, 130, 0.35);
+  border: 1px solid rgba(196, 168, 130, 0.15);
   border-radius: 3px;
   padding: 0 4px;
   letter-spacing: 0.5px;
@@ -121,24 +124,23 @@ body {
   left: 14px;
   right: 14px;
   height: 2px;
-  background: var(--hm-icon-bg);
+  background: rgba(196, 168, 130, 0.1);
   border-radius: 1px;
   overflow: hidden;
 }
 
 .progress-fill {
   height: 100%;
-  background: var(--hm-gold);
-  opacity: 0.6;
+  background: rgba(196, 168, 130, 0.5);
   border-radius: 1px;
   width: 0%;
   transition: width 1s linear;
 }
 
 .time {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: 'Inter', sans-serif;
   font-size: 10px;
-  color: var(--hm-text-muted);
+  color: rgba(196, 168, 130, 0.3);
   position: absolute;
   bottom: 6px;
   right: 14px;
@@ -153,7 +155,7 @@ body {
   height: 100%;
   pointer-events: none;
   overflow: hidden;
-  border-radius: 10px;
+  border-radius: 8px;
 }
 
 .floating-heart {
@@ -162,6 +164,7 @@ body {
   animation: floatHeart 1.8s ease-out forwards;
   pointer-events: none;
   opacity: 0;
+  filter: drop-shadow(0 0 4px rgba(232, 120, 100, 0.5));
 }
 
 @keyframes floatHeart {
@@ -247,12 +250,12 @@ function spawnHearts(count = 5) {
       heart.style.animationDelay = (Math.random() * 0.3) + 's';
       heart.style.animationDuration = (1.4 + Math.random() * 0.8) + 's';
 
-      // Brand palette only: Scarlet Rush + Light Bronze variants.
       const colors = [
-        'rgba(223, 41, 53, 0.9)',
-        'rgba(255, 107, 115, 0.9)',
-        'rgba(223, 160, 110, 0.9)',
-        'rgba(232, 181, 131, 0.85)',
+        'rgba(232, 120, 100, 0.9)',
+        'rgba(240, 140, 120, 0.9)',
+        'rgba(220, 100, 100, 0.9)',
+        'rgba(255, 150, 130, 0.85)',
+        'rgba(232, 168, 124, 0.9)',
       ];
       heart.style.color = colors[Math.floor(Math.random() * colors.length)];
 

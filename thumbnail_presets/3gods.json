@@ -1,0 +1,407 @@
+{
+  "schema_version": 1,
+  "name": "3gods",
+  "description": "One video covering three gods Hatmaster played — no opponents shown. Three vertical panels left-to-right ({my_god}, {my_god2}, {my_god3}), each card cropped to the top half of the splash art so every god is zoomed in on the face, feathered at the two seams. Each panel gets a cyan-glow icon badge and the god's name in a darkened bottom band. No VS marker — these are gods you played, not matchups. No auto headline (auto_headline: false) — the panel names already carry the god names; pass --text for an explicit headline. CLI: --god + --god2 + --god3 (skins via --skin/--skin2/--skin3, flips via --flip-god/--flip-god2/--flip-god3).",
+  "auto_headline": false,
+  "size": [
+    1280,
+    720
+  ],
+  "layers": [
+    {
+      "type": "gradient",
+      "name": "Background gradient",
+      "direction": "horizontal",
+      "stops": [
+        {
+          "at": 0.0,
+          "color": "#0a1530"
+        },
+        {
+          "at": 0.5,
+          "color": "#1a1f2c"
+        },
+        {
+          "at": 1.0,
+          "color": "#1a1530"
+        }
+      ]
+    },
+    {
+      "type": "image",
+      "name": "Left god card (my_god, zoomed)",
+      "src": "{my_god_card}",
+      "pos": [
+        0,
+        0
+      ],
+      "size": [
+        520,
+        720
+      ],
+      "fit": "cover",
+      "fit_anchor": "center",
+      "anchor": "topleft",
+      "crop_source": {
+        "top": 0.0,
+        "bottom": 0.5
+      },
+      "feather_edges": {
+        "right": 90
+      },
+      "fallback_text": "{my_god}"
+    },
+    {
+      "type": "image",
+      "name": "Center god card (my_god2, zoomed)",
+      "src": "{my_god2_card}",
+      "pos": [
+        380,
+        0
+      ],
+      "size": [
+        520,
+        720
+      ],
+      "fit": "cover",
+      "fit_anchor": "center",
+      "anchor": "topleft",
+      "crop_source": {
+        "top": 0.0,
+        "bottom": 0.5
+      },
+      "feather_edges": {
+        "left": 90,
+        "right": 90
+      },
+      "fallback_text": "{my_god2}"
+    },
+    {
+      "type": "image",
+      "name": "Right god card (my_god3, zoomed)",
+      "src": "{my_god3_card}",
+      "pos": [
+        760,
+        0
+      ],
+      "size": [
+        520,
+        720
+      ],
+      "fit": "cover",
+      "fit_anchor": "center",
+      "anchor": "topleft",
+      "flip_h": true,
+      "crop_source": {
+        "top": 0.0,
+        "bottom": 0.5
+      },
+      "feather_edges": {
+        "left": 90
+      },
+      "fallback_text": "{my_god3}"
+    },
+    {
+      "type": "gradient",
+      "name": "Left seam darkening",
+      "pos": [
+        360,
+        0
+      ],
+      "size": [
+        180,
+        720
+      ],
+      "direction": "horizontal",
+      "stops": [
+        {
+          "at": 0.0,
+          "color": "#000000",
+          "opacity": 0.0
+        },
+        {
+          "at": 0.5,
+          "color": "#000000",
+          "opacity": 0.5
+        },
+        {
+          "at": 1.0,
+          "color": "#000000",
+          "opacity": 0.0
+        }
+      ]
+    },
+    {
+      "type": "gradient",
+      "name": "Right seam darkening",
+      "pos": [
+        740,
+        0
+      ],
+      "size": [
+        180,
+        720
+      ],
+      "direction": "horizontal",
+      "stops": [
+        {
+          "at": 0.0,
+          "color": "#000000",
+          "opacity": 0.0
+        },
+        {
+          "at": 0.5,
+          "color": "#000000",
+          "opacity": 0.5
+        },
+        {
+          "at": 1.0,
+          "color": "#000000",
+          "opacity": 0.0
+        }
+      ]
+    },
+    {
+      "type": "gradient",
+      "name": "Bottom names darkening band",
+      "pos": [
+        0,
+        500
+      ],
+      "size": [
+        1280,
+        220
+      ],
+      "direction": "vertical",
+      "stops": [
+        {
+          "at": 0.0,
+          "color": "#000000",
+          "opacity": 0.0
+        },
+        {
+          "at": 0.55,
+          "color": "#000000",
+          "opacity": 0.55
+        },
+        {
+          "at": 1.0,
+          "color": "#000000",
+          "opacity": 0.8
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "name": "Headline",
+      "value": "{text}",
+      "pos": [
+        640,
+        100
+      ],
+      "anchor": "center",
+      "font": "Big Noodle Titling",
+      "size": 96,
+      "fill": "#ffffff",
+      "stroke": {
+        "color": "#000000",
+        "width": 10
+      },
+      "shadow": {
+        "color": "#ffd24d",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 28,
+        "opacity": 0.75
+      },
+      "max_width": 1150,
+      "skip_if_empty": true
+    },
+    {
+      "type": "text",
+      "name": "Subtext",
+      "value": "{subtext}",
+      "pos": [
+        640,
+        178
+      ],
+      "anchor": "center",
+      "font": "Big Noodle Titling",
+      "size": 50,
+      "fill": "#ffd24d",
+      "stroke": {
+        "color": "#000000",
+        "width": 6
+      },
+      "shadow": {
+        "color": "#000000",
+        "offset": [
+          3,
+          3
+        ],
+        "blur": 8,
+        "opacity": 0.85
+      },
+      "max_width": 900,
+      "skip_if_empty": true
+    },
+    {
+      "type": "icon",
+      "name": "Left god icon (my_god)",
+      "god": "{my_god}",
+      "pos": [
+        225,
+        565
+      ],
+      "size": 105,
+      "anchor": "center",
+      "border": {
+        "color": "#4dc3ff",
+        "width": 5
+      },
+      "shadow": {
+        "color": "#4dc3ff",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 24,
+        "opacity": 0.85
+      }
+    },
+    {
+      "type": "icon",
+      "name": "Center god icon (my_god2)",
+      "god": "{my_god2}",
+      "pos": [
+        640,
+        565
+      ],
+      "size": 105,
+      "anchor": "center",
+      "border": {
+        "color": "#4dc3ff",
+        "width": 5
+      },
+      "shadow": {
+        "color": "#4dc3ff",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 24,
+        "opacity": 0.85
+      }
+    },
+    {
+      "type": "icon",
+      "name": "Right god icon (my_god3)",
+      "god": "{my_god3}",
+      "pos": [
+        1055,
+        565
+      ],
+      "size": 105,
+      "anchor": "center",
+      "border": {
+        "color": "#4dc3ff",
+        "width": 5
+      },
+      "shadow": {
+        "color": "#4dc3ff",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 24,
+        "opacity": 0.85
+      }
+    },
+    {
+      "type": "text",
+      "name": "Left god name",
+      "value": "{my_god}",
+      "pos": [
+        225,
+        700
+      ],
+      "anchor": "center_bottom",
+      "font": "Big Noodle Titling",
+      "size": 54,
+      "fill": "#ffffff",
+      "stroke": {
+        "color": "#000000",
+        "width": 6
+      },
+      "shadow": {
+        "color": "#4dc3ff",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 20,
+        "opacity": 0.8
+      },
+      "max_width": 380,
+      "skip_if_empty": true
+    },
+    {
+      "type": "text",
+      "name": "Center god name",
+      "value": "{my_god2}",
+      "pos": [
+        640,
+        700
+      ],
+      "anchor": "center_bottom",
+      "font": "Big Noodle Titling",
+      "size": 54,
+      "fill": "#ffffff",
+      "stroke": {
+        "color": "#000000",
+        "width": 6
+      },
+      "shadow": {
+        "color": "#4dc3ff",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 20,
+        "opacity": 0.8
+      },
+      "max_width": 380,
+      "skip_if_empty": true
+    },
+    {
+      "type": "text",
+      "name": "Right god name",
+      "value": "{my_god3}",
+      "pos": [
+        1055,
+        700
+      ],
+      "anchor": "center_bottom",
+      "font": "Big Noodle Titling",
+      "size": 54,
+      "fill": "#ffffff",
+      "stroke": {
+        "color": "#000000",
+        "width": 6
+      },
+      "shadow": {
+        "color": "#4dc3ff",
+        "offset": [
+          0,
+          0
+        ],
+        "blur": 20,
+        "opacity": 0.8
+      },
+      "max_width": 380,
+      "skip_if_empty": true
+    }
+  ]
+}

@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Overlay restyle: before / after</title>
+<style>
+  body { margin: 0; padding: 20px; background: #14181d; font-family: Inter, 'Segoe UI', sans-serif; color: #eee; }
+  h1 { font-size: 16px; margin: 0 0 16px; font-weight: 600; }
+  .row { margin-bottom: 22px; }
+  .row h2 { font-size: 13px; font-weight: 600; color: #9fb4bb; margin: 0 0 6px; }
+  .pair { display: flex; gap: 14px; }
+  .cell { position: relative; }
+  .cell .tag { position: absolute; top: -1px; left: -1px; z-index: 2; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; padding: 2px 7px; border-radius: 0 0 4px 0; }
+  .cell.old .tag { background: #5a2430; color: #ffb3ba; }
+  .cell.new .tag { background: #2c4a33; color: #b8e6c1; }
+  iframe { border: 1px solid #333; border-radius: 4px; background: #46584c; display: block; }
+</style>
+</head>
+<body>
+<h1>HatmasBot overlays — before (HEAD) vs after (working tree), over gameplay-green backdrop</h1>
+<div id="rows"></div>
+
+<script>
+const BACKDROP = '<style>html,body{background:#46584c !important;}</style>';
+
+// Per-overlay: iframe size + a function that poses the stripped DOM
+// into a representative visible state with sample data.
+const OVERLAYS = [
+  {
+    name: 'god_overlay', w: 400, h: 140,
+    pose(d) {
+      const c = d.getElementById('container');
+      c.classList.add('visible'); c.style.display = 'block';
+      d.getElementById('godImg').src = '/overlays/hat.png';
+      const ti = d.getElementById('teamIndicator'); ti.className = 'team-indicator order';
+      const tl = d.getElementById('teamLabel'); tl.className = 'team-label order'; tl.textContent = 'ORDER';
+      d.getElementById('godName').textContent = 'Ymir';
+      d.getElementById('kda').innerHTML =
+        '<span class="kills">12</span><span class="slash">/</span>' +
+        '<span class="deaths">3</span><span class="slash">/</span>' +
+        '<span class="assists">8</span>';
+      d.getElementById('gold').innerHTML = '<span class="gold-icon"></span>14.3k';
+    }
+  },
+  {
+    name: 'tts', w: 640, h: 170,
+    pose(d) {
+      const c = d.getElementById('tts-container');
+      c.classList.add('visible'); c.style.display = 'block';
+      d.getElementById('tts-box').classList.add('speaking');
+      d.getElementById('sound-bars').classList.add('active');
+      d.getElementById('tts-username').textContent = 'hatviewer42';
+      d.getElementById('tts-message').textContent = 'Ymir top diff, trust the wall. GG';
+    }
+  },
+  {
+    name: 'sound_alerts', w: 430, h: 170,
+    pose(d) {
+      const p = d.getElementById('gamble-popup');
+      p.classList.add('visible', 'jackpot');
+      p.style.position = 'absolute';
+      const lbl = d.getElementById('popup-label');
+      lbl.textContent = 'JACKPOT'; lbl.classList.add('show');
+      d.getElementById('popup-player').textContent = 'hatviewer42';
+      d.getElementById('popup-roll').textContent = '100';
+      const amt = d.getElementById('popup-amount'); amt.classList.add('show');
+      d.getElementById('popup-amount-label').textContent = 'won';
+      d.getElementById('popup-amount-value').textContent = '+50,000 hats';
+    }
+  },
+  {
+    name: 'voicelines', w: 520, h: 120,
+    pose(d) {
+      const c = d.getElementById('container');
+      c.style.display = 'block';
+      const lbl = d.getElementById('label');
+      lbl.className = 'god_taunt';
+      lbl.textContent = 'Ymir Taunt';
+    }
+  },
+  {
+    name: 'nowplaying', w: 470, h: 140,
+    pose(d) {
+      d.getElementById('nowPlaying').classList.add('visible');
+      d.getElementById('albumArt').src = '/overlays/hat.png';
+      d.getElementById('songTitle').textContent = 'Carry Me Home';
+      d.getElementById('songArtist').textContent = 'The Hatters';
+      d.getElementById('requester').textContent = 'requested by hatviewer42';
+      d.getElementById('likes').textContent = '♡ 7';
+      d.getElementById('progressFill').style.width = '42%';
+      d.getElementById('timeDisplay').textContent = '1:24 / 3:20';
+    }
+  },
+  {
+    name: 'deaths', w: 340, h: 160,
+    pose(d) {
+      d.getElementById('wrap').classList.add('visible');
+      d.getElementById('counter').textContent = '23';
+    }
+  },
+];
+
+function makeCell(kind, url, ov) {
+  const cell = document.createElement('div');
+  cell.className = 'cell ' + kind;
+  cell.innerHTML = '<span class="tag">' + kind.toUpperCase() + '</span>';
+  const frame = document.createElement('iframe');
+  frame.width = ov.w; frame.height = ov.h;
+  frame.setAttribute('scrolling', 'no');
+  cell.appendChild(frame);
+  fetch(url).then(r => r.text()).then(html => {
+    const stripped = html.replace(/<script[\s\S]*?<\/script>/gi, '');
+    frame.srcdoc = stripped.replace('</head>', BACKDROP + '</head>');
+    frame.addEventListener('load', () => {
+      try { ov.pose(frame.contentDocument); }
+      catch (e) { console.error(ov.name, kind, e); }
+    });
+  });
+  return cell;
+}
+
+const rows = document.getElementById('rows');
+for (const ov of OVERLAYS) {
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.innerHTML = '<h2>' + ov.name + '.html</h2>';
+  const pair = document.createElement('div');
+  pair.className = 'pair';
+  pair.appendChild(makeCell('old', '/.claude/preview_gallery/old_' + ov.name + '.html', ov));
+  pair.appendChild(makeCell('new', '/overlays/' + ov.name + '.html', ov));
+  row.appendChild(pair);
+  rows.appendChild(row);
+}
+</script>
+</body>
+</html>
