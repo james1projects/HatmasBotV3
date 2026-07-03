@@ -135,11 +135,68 @@ was cutting the edges off non-square objects).
   8:30 AM at the latest, or when the 6:30 session finishes and deletes
   `keepawake.flag` in the session scratchpad.
 
-## 6:30 AM review
+## Morning review (done with James, ~8:15 AM)
 
-*(to be filled by the post-reset session: adversarial code review findings
-+ fixes, re-run test results)*
+The 6:33 cron never fired — the session it belonged to had ended, so it was
+session-only (my mistake; a durable/cloud schedule would've survived). Ran
+the review live instead: two background agents did an adversarial code
+review and the web research, and I fixed everything actionable while James
+was awake. Full writeups live alongside this file: `review_findings.md`,
+`research_findings.md`.
+
+**Review found 5 major + 11 minor. All majors fixed** (commit
+`6269b55` "Harden FindIt after adversarial review"):
+
+| # | What was wrong | Fix |
+|---|---|---|
+| F1 | A partial/hand-edited items.json (valid JSON, missing keys) KeyError'd in worker startup → /healthz stuck 503 for 240s → FindIt hard-down | Schema-validate on load; back up to `.corrupt.bak` and start fresh |
+| F6 | **"Make private" on a shared item you didn't create transferred it to you** — silent theft | Immutable `creator` field; un-share is creator-only |
+| F7 | Any device could rename/delete any *shared* item | Only the creator can mutate; others can still log locations |
+| F10 | `enroll` was the one message with no try/except — a concurrent forget (or any GPU error) killed the socket | Wrapped + `add_view` tolerates a vanished id |
+| F16 | First-ever start with no DINOv2 cache **and** no internet hung the worker at 503 forever | Degrade to detection-only, lazy-load embedder on first use |
+
+Minor fixes shipped too: view cap (F5, newest 12 — bounds disk + per-frame
+cost on a public endpoint), RecursionError on hostile nested JSON (F11),
+and a client state leak (F17). Verified clean by the review: XSS (F13 —
+esc() everywhere), generic-search behavior unchanged (F14), no PWA path
+traversal (F21).
+
+**Tests grew to cover the gaps the review named:** `test_items_store.py`
+26 → **40** (creator/mine flags, the F6 steal scenario, view cap,
+partial-v2 + non-dict recovery); `test_findit_public.py` 23 → **30** with a
+two-connection cross-profile section that proves — through the real proxy —
+that device-2 cannot see device-1's private item, cannot rename/forget/
+steal device-1's shared item, but *can* still log where it found it.
+
+Not fixed (documented, minor, your call): F8/F9 (the profile uuid is an
+unauthenticated bearer token — fine for a family LAN tool; would matter if
+FindIt goes truly public), F22 (icon cache-control vs the invisibility
+contract — cosmetic).
 
 ## Future FindIt ideas (research)
 
-*(to be filled by the post-reset session)*
+Full cited writeup in `research_findings.md`. The three highest-leverage:
+
+1. **YOLOE** (successor to our YOLO-World, already in ultralytics, AGPL):
+   +accuracy, 1.4× faster, and — the reason it matters — **visual
+   prompting**: prompt the detector with crops of your *actual* enrolled
+   remote instead of the word "remote". Directly attacks our ~70% recall
+   ceiling and the "detector must fire before recognition can" limitation.
+   Next run's headline candidate, benchmark-gated like DINOv2 was.
+2. **Free detection wins now:** run inference at 1280px (we have 14ms/frame
+   of headroom on the 5090) — helps small objects (remote, scissors);
+   optional SAHI tiled "sweep mode" for a slow deliberate room scan.
+3. **DINOv3 ViT-S+/16** (Aug 2025) — same family as what we shipped,
+   stronger dense features (what crop matching uses), near drop-in via
+   torch.hub. Custom license (commercial-OK-with-attribution) vs DINOv2's
+   Apache — fine for Hatmaster.tv.
+
+Also: a CVPR 2025 paper (**IDOW**) is literally FindIt's problem statement
+(few-shot personal-object re-ID in open scenes) with an adoptable recipe +
+real benchmarks (ORBIT, InsDet) to replace my homemade COCO instance bench.
+And the prior-art scan confirmed the **location memory is the
+differentiator** — Microsoft's Find My Things and the dead Lighthouse/Pixie
+apps validate the enrollment + query UX but none of them remember *where*.
+
+Suggested next-run order: YOLOE + visual-prompt enrollment + the 1280px
+bump (one run), then DINOv3 + IDOW rejection calibration (the run after).
