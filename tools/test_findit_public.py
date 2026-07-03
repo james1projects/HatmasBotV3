@@ -171,6 +171,69 @@ async def run():
         msg = json.loads((await ws.receive(timeout=60)).data)
         check("v2 forget by item_id", msg.get("type") == "forgot", str(msg))
 
+        # ── 4c. cross-profile isolation through the real proxy (two devices) ──
+        # device-1 enrolls a PRIVATE item, then SHARES a second one.
+        await ws.send_str(json.dumps(
+            {"type": "enroll", "name": "D1 Private", "base": "bus", "image": b64}))
+        priv = json.loads((await ws.receive(timeout=60)).data)
+        priv_id = priv.get("item_id")
+        await ws.send_str(json.dumps(
+            {"type": "enroll", "name": "D1 Shared", "base": "bus", "image": b64}))
+        shared = json.loads((await ws.receive(timeout=60)).data)
+        shared_id = shared.get("item_id")
+        await ws.send_str(json.dumps(
+            {"type": "set_shared", "item_id": shared_id, "shared": True}))
+        await ws.receive(timeout=60)
+
+        # device-2 connects as a different profile on a second socket
+        ws2 = await client.ws_connect("/ws/findit", timeout=60)
+        await ws2.send_str(json.dumps(
+            {"type": "hello", "profile": "test-device-2", "name": "Other"}))
+        hello2 = json.loads((await ws2.receive(timeout=60)).data)
+        names2 = {i["name"] for i in hello2.get("items", [])}
+        check("isolation: device-2 sees shared not private",
+              "D1 Shared" in names2 and "D1 Private" not in names2, str(names2))
+
+        # device-2 cannot forget device-1's private item (invisible → unknown)
+        await ws2.send_str(json.dumps({"type": "forget", "item_id": priv_id}))
+        r = json.loads((await ws2.receive(timeout=60)).data)
+        check("isolation: device-2 cannot forget private item",
+              r.get("type") == "error", str(r))
+
+        # device-2 cannot rename or delete device-1's SHARED item (not creator)
+        await ws2.send_str(json.dumps(
+            {"type": "rename", "item_id": shared_id, "name": "Hijacked"}))
+        r = json.loads((await ws2.receive(timeout=60)).data)
+        check("isolation: device-2 cannot rename shared item",
+              r.get("type") == "error", str(r))
+        await ws2.send_str(json.dumps({"type": "forget", "item_id": shared_id}))
+        r = json.loads((await ws2.receive(timeout=60)).data)
+        check("isolation: device-2 cannot forget shared item",
+              r.get("type") == "error", str(r))
+
+        # the "make private steals it" attack (F6) must be refused
+        await ws2.send_str(json.dumps(
+            {"type": "set_shared", "item_id": shared_id, "shared": False}))
+        r = json.loads((await ws2.receive(timeout=60)).data)
+        check("isolation: device-2 cannot steal via make-private",
+              r.get("type") == "error", str(r))
+
+        # but device-2 CAN log where it found the shared item (the point)
+        await ws2.send_str(json.dumps(
+            {"type": "log_location", "item_id": shared_id, "place": "hallway"}))
+        r = json.loads((await ws2.receive(timeout=60)).data)
+        check("isolation: device-2 can log location on shared item",
+              r.get("type") == "location_logged", str(r))
+
+        # the shared item still belongs to device-1, unrenamed
+        await ws.send_str(json.dumps({"type": "list_items"}))
+        back = json.loads((await ws.receive(timeout=60)).data)
+        still = next((i for i in back.get("items", []) if i["id"] == shared_id), None)
+        check("isolation: shared item survived the attacks intact",
+              still is not None and still["name"] == "D1 Shared" and still["mine"] is True,
+              str(still))
+
+        await ws2.close()
         await ws.close()
 
         # ── 5. toggle off mid-run -> reconciler kills worker ──

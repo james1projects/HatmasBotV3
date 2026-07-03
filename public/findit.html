@@ -514,9 +514,13 @@ function nameBox(box) {
              `Entering the same name adds another view (helps recognition).`, box.label)
     : prompt(`Name this ${box.label} (e.g. "my lucky pen"). ` +
              `You'll then be able to search for it by that name.`);
-  if (name === null || !ws || ws.readyState !== WebSocket.OPEN) return;
+  if (name === null || !ws || ws.readyState !== WebSocket.OPEN) {
+    pendingLocationItem = null;   // pill-initiated naming was cancelled
+    return;
+  }
   const trimmed = name.trim();
   if (!trimmed) {
+    pendingLocationItem = null;
     if (box.custom) ws.send(JSON.stringify({ type: 'forget', name: box.label }));
     return;
   }
@@ -660,14 +664,27 @@ function showItemMenu(item) {
   const btnCancel = document.createElement('button');
   btnCancel.textContent = 'Cancel';
   btnCancel.onclick = closeMenu;
-  
-  menuBody.appendChild(btnRename);
-  menuBody.appendChild(btnView);
-  menuBody.appendChild(btnShare);
+
+  // Only the person who added an item can change it. On someone else's
+  // shared item you can still see it and log where you found it, but the
+  // rename/add-view/share/forget controls are hidden (the server enforces
+  // this too — this just keeps the UI honest).
+  const mine = item.mine !== false;
+  if (mine) {
+    menuBody.appendChild(btnRename);
+    menuBody.appendChild(btnView);
+    menuBody.appendChild(btnShare);
+  }
   menuBody.appendChild(btnLocs);
-  menuBody.appendChild(btnForget);
+  if (mine) menuBody.appendChild(btnForget);
+  if (!mine) {
+    const note = document.createElement('div');
+    note.style.cssText = 'font-size:12px;color:#9fb1c1;text-align:center;margin-bottom:8px;';
+    note.textContent = `Shared by ${esc(item.owner_name || 'someone')} — tap Found to log where you saw it.`;
+    menuBody.insertBefore(note, menuBody.firstChild);
+  }
   menuBody.appendChild(btnCancel);
-  
+
   itemMenu.style.display = 'flex';
 }
 

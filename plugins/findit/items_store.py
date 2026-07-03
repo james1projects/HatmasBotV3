@@ -42,8 +42,22 @@ class ItemsStore:
             # Detect v1 format by absence of "version" key
             if not isinstance(raw, dict) or "version" not in raw:
                 self._migrate_v1_to_v2(raw)
-            else:
+            elif isinstance(raw.get("profiles"), dict) and isinstance(raw.get("items"), dict):
                 self._data = raw
+            else:
+                # Parseable JSON but not a well-formed v2 store (truncated,
+                # hand-edited, missing keys). Dereferencing profiles/items
+                # would KeyError in the constructor and brick the worker's
+                # startup — back up and start fresh instead.
+                corrupt_bak = self._path.with_suffix('.corrupt.bak')
+                if not corrupt_bak.exists():
+                    try:
+                        shutil.copy2(self._path, corrupt_bak)
+                    except OSError:
+                        pass
+                print(f"[worker] items.json was malformed — backed up to "
+                      f"{corrupt_bak.name} and started a fresh store", flush=True)
+                self._data = {"version": 2, "profiles": {}, "items": {}}
         else:
             self._data = {"version": 2, "profiles": {}, "items": {}}
             
@@ -51,9 +65,15 @@ class ItemsStore:
         if "shared" not in self._data["profiles"]:
             self._data["profiles"]["shared"] = {"name": "Shared", "created": 0}
 
-        # Items enrolled before the embedder became configurable were CLIP
         for item in self._data["items"].values():
+            # Items enrolled before the embedder became configurable were CLIP
             item.setdefault("embed_model", "clip")
+            # `creator` is the immutable device that made the item and the ONLY
+            # one allowed to rename/delete/un-share it; `owner` is just the
+            # visibility key ("shared" or a device id). Legacy items predate
+            # the split — fall back to owner, so a legacy shared item has
+            # creator "shared" (no real device) and stays locked to mutation.
+            item.setdefault("creator", item.get("owner", "shared"))
 
     def _migrate_v1_to_v2(self, raw):
         """
@@ -162,6 +182,7 @@ class ItemsStore:
                 "id": item_id,
                 "name": trimmed_name,
                 "owner": profile_id,
+                "creator": profile_id,   # immutable; gates mutation (see load)
                 "base_class": base_class,
                 "embed_model": embed_model,
                 "embeds": [],
@@ -174,28 +195,44 @@ class ItemsStore:
             self._save()
             return dict(item)
 
+    # Views are matched one-by-one every frame and stored in items.json, so
+    # they can't grow without bound — an enrollment past this keeps only the
+    # newest MAX_VIEWS (more than enough angles for recognition, and it caps
+    # both disk use and per-frame matching cost on a public endpoint).
+    MAX_VIEWS = 12
+
     def add_view(self, item_id, embed, thumb_jpeg=None):
         """Append an embedding and optionally a thumbnail. Returns new embed count."""
         with self._lock:
             if item_id not in self._data["items"]:
                 raise KeyError(item_id)
-                
+
             item = self._data["items"][item_id]
             item["embeds"].append(embed)
-            
+
             if thumb_jpeg is not None:
-                # Isolate thumbnails per item to prevent directory collisions
+                # Isolate thumbnails per item to prevent directory collisions.
+                # Use a monotonic index (never reused) so a capped-off view's
+                # filename can't collide with a survivor's.
                 item_dir = self._thumbs_dir / item_id
                 item_dir.mkdir(parents=True, exist_ok=True)
-                
-                n = len(item["thumbs"])
+                n = item.get("thumb_seq", len(item["thumbs"]))
+                item["thumb_seq"] = n + 1
                 rel_path = f"{item_id}/{n}.jpg"
-                full_path = self._thumbs_dir / rel_path
-                
-                with open(full_path, 'wb') as f:
+                with open(self._thumbs_dir / rel_path, 'wb') as f:
                     f.write(thumb_jpeg)
                 item["thumbs"].append(rel_path)
-                
+
+            # Enforce the cap: drop the oldest views (and their thumb files)
+            while len(item["embeds"]) > self.MAX_VIEWS:
+                item["embeds"].pop(0)
+            while len(item["thumbs"]) > self.MAX_VIEWS:
+                old = item["thumbs"].pop(0)
+                try:
+                    (self._thumbs_dir / old).unlink(missing_ok=True)
+                except OSError:
+                    pass
+
             item["updated"] = time.time()
             self._save()
             return len(item["embeds"])
@@ -289,21 +326,24 @@ class ItemsStore:
         result.sort(key=lambda x: (-x["count"], -x["last_ts"]))
         return result
 
-    def item_summary(self, item_id, with_thumb=False):
-        """Generate a JSON-safe summary of an item."""
+    def item_summary(self, item_id, with_thumb=False, viewer=None):
+        """Generate a JSON-safe summary of an item. `viewer` (a profile id)
+        sets `mine` — whether the viewer created it and may mutate it."""
         if item_id not in self._data["items"]:
             raise KeyError(item_id)
-            
+
         with self._lock:
             item = dict(self._data["items"][item_id])
-            owner_name = self._data["profiles"].get(item["owner"], {}).get("name", "?")
-            
+            creator = item.get("creator", item.get("owner"))
+            owner_name = self._data["profiles"].get(creator, {}).get("name", "?")
+
         summary = {
             "id": item["id"],
             "name": item["name"],
             "base_class": item["base_class"],
             "views": len(item["embeds"]),
             "shared": item["owner"] == "shared",
+            "mine": viewer is not None and creator == viewer,
             "owner_name": owner_name,
             "locations": self.location_summary(item_id),
             "thumb": None
@@ -328,7 +368,8 @@ class ItemsStore:
         summaries = []
         for iid in visible:
             try:
-                summaries.append(self.item_summary(iid, with_thumb))
+                summaries.append(
+                    self.item_summary(iid, with_thumb, viewer=profile_id))
             except KeyError:
                 # Item might have been deleted concurrently; skip safely
                 continue

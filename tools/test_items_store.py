@@ -137,6 +137,62 @@ def main():
                 break
         check("unicode_name_roundtrip", found is not None and found["name"] == "café keys ☕")
 
+        # Test 10: creator tracking + mine flag (F6/F7 fix)
+        c_item = store3.create_item("dev-a", "creator test", "keys")
+        check("create_sets_creator", c_item.get("creator") == "dev-a")
+        summ_owner = store3.item_summary(c_item["id"], viewer="dev-a")
+        summ_other = store3.item_summary(c_item["id"], viewer="dev-b")
+        check("summary_mine_true_for_creator", summ_owner["mine"] is True)
+        # dev-b can't see dev-a's private item at all, but mine must be False
+        check("summary_mine_false_for_other", summ_other["mine"] is False)
+
+        # Test 11: shared item keeps its creator (the F6 steal scenario)
+        shared_item = store3.create_item("dev-a", "shared remote", "remote")
+        store3.set_shared(shared_item["id"], True, "dev-a")
+        check("shared_visible_to_other",
+              shared_item["id"] in store3.visible_items("dev-b"))
+        after_share = store3.item_summary(shared_item["id"], viewer="dev-b")
+        check("shared_not_mine_for_other", after_share["mine"] is False)
+        # dev-b un-sharing must NOT change the creator (worker blocks the call,
+        # but even if set_shared runs, creator is immutable)
+        stolen = store3.set_shared(shared_item["id"], False, "dev-b")
+        check("unshare_preserves_creator", stolen.get("creator") == "dev-a")
+
+        # Test 12: view cap (F5) — enroll past MAX_VIEWS keeps only the newest
+        cap_item = store3.create_item("dev-a", "cap test", "cup")
+        cap = ItemsStore.MAX_VIEWS
+        for i in range(cap + 5):
+            n = store3.add_view(cap_item["id"], [float(i)], b"\xff\xd8jpeg")
+        raw_item = store3.visible_items("dev-a")[cap_item["id"]]
+        check("view_cap_embeds", n == cap and len(raw_item["embeds"]) == cap)
+        check("view_cap_thumbs", len(raw_item["thumbs"]) == cap)
+        # oldest embed (0.0) dropped, newest (cap+4) kept
+        embed_vals = [e[0] for e in raw_item["embeds"]]
+        check("view_cap_keeps_newest",
+              0.0 not in embed_vals and float(cap + 4) in embed_vals)
+        # capped thumb files actually removed from disk
+        thumb_files = list((test_dir / "thumbs" / cap_item["id"]).glob("*.jpg"))
+        check("view_cap_thumbs_on_disk", len(thumb_files) == cap)
+
+        # Test 13: partial/corrupt v2 file recovers instead of crashing (F1)
+        partial_path = test_dir / "partial.json"
+        partial_path.write_text('{"version": 2}', encoding="utf-8")  # no profiles/items
+        partial_store = ItemsStore(partial_path)  # must NOT raise
+        check("partial_v2_recovers",
+              partial_store.visible_items("dev-a") == {})
+        check("partial_v2_backed_up",
+              partial_path.with_suffix(".corrupt.bak").exists())
+        # and it's usable afterward
+        partial_store.create_item("dev-a", "post recovery", "keys")
+        check("partial_v2_usable_after",
+              len(partial_store.visible_items("dev-a")) == 1)
+
+        # Test 14: non-dict JSON is backed up before reset (F3)
+        listfile = test_dir / "list.json"
+        listfile.write_text('[1, 2, 3]', encoding="utf-8")
+        list_store = ItemsStore(listfile)
+        check("nondict_json_recovers", list_store.visible_items("x") == {})
+
     finally:
         shutil.rmtree(test_dir)
 

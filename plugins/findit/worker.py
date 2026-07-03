@@ -326,6 +326,8 @@ def enroll(profile_id: str, name: str, base: str, jpeg: bytes,
         item = _store.visible_items(profile_id).get(item_id)
         if item is None:
             return {"type": "error", "message": "unknown item"}
+        if not _may_mutate(item, profile_id):
+            return {"type": "error", "message": _NOT_YOURS}
     else:
         # tapping an already-custom box passes its custom name as base;
         # resolve to that item's true base class
@@ -338,11 +340,19 @@ def enroll(profile_id: str, name: str, base: str, jpeg: bytes,
                                           embed_model=app.state.embed_model)
             except ValueError as e:
                 return {"type": "error", "message": str(e)}
+        elif not _may_mutate(item, profile_id):
+            # a visible shared item created by someone else — adding views
+            # to it would mutate their item
+            return {"type": "error", "message": _NOT_YOURS}
     if item["embeds"] and item.get("embed_model", "clip") != app.state.embed_model:
         return {"type": "error",
                 "message": f'"{item["name"]}" was saved with an older '
                            f"recognition model — forget it and add it again"}
-    views = _store.add_view(item["id"], vec, thumb)
+    try:
+        views = _store.add_view(item["id"], vec, thumb)
+    except KeyError:
+        # a concurrent forget removed the item between resolve and add
+        return {"type": "error", "message": "unknown item"}
     reply = {"type": "enrolled", "item_id": item["id"],
              "name": item["name"], "views": views, "thumb": None}
     if thumb:
@@ -363,10 +373,20 @@ async def warmup():
         dummy = cv2.imencode(".jpg", np.zeros((480, 640, 3), np.uint8))[1].tobytes()
         detect(dummy, ["warmup object"], 0.5)
         if app.state.embed_model == "dinov2":
-            # load + one dummy embed so the first real enroll isn't slow
-            from PIL import Image
-            with _infer_lock:
-                _embed_pil(Image.new("RGB", (64, 64)))
+            # Prefetch the embedder so the first real enroll isn't slow. If it
+            # can't load (first-ever start with no torch.hub cache AND no
+            # internet), DON'T brick the feature: generic search + detection
+            # still work, and the embedder lazy-loads (and surfaces its real
+            # error) on the first enroll. Readiness must not hinge on a
+            # network download.
+            try:
+                from PIL import Image
+                with _infer_lock:
+                    _embed_pil(Image.new("RGB", (64, 64)))
+            except Exception as e:
+                print(f"[worker] DINOv2 warmup failed ({e}); starting in "
+                      "detection-only mode — custom items load on first use",
+                      flush=True)
         _ready = True
         print("[worker] model warmed up and ready "
               f"(embed={app.state.embed_model})", flush=True)
@@ -380,6 +400,16 @@ async def healthz():
     if _ready:
         return PlainTextResponse("ok")
     return PlainTextResponse("warming up", status_code=503)
+
+
+_NOT_YOURS = "only the person who added this item can change it"
+
+
+def _may_mutate(item: dict, pid: str) -> bool:
+    """True if pid may rename/delete/un-share this item. The creator always
+    can; a private item is only ever visible to its creator anyway. Legacy
+    items whose creator is 'shared' (no real device) are locked."""
+    return item.get("creator", item.get("owner")) == pid
 
 
 def _handle_control(data: dict, profile: dict):
@@ -413,6 +443,8 @@ def _handle_control(data: dict, profile: dict):
             item = _store.find_by_name(pid, str(data["name"]).strip())
         if item is None:
             return {"type": "error", "message": "unknown item"}
+        if not _may_mutate(item, pid):
+            return {"type": "error", "message": _NOT_YOURS}
         _store.delete(item["id"])
         return {"type": "forgot", "item_id": item["id"], "name": item["name"]}
 
@@ -420,6 +452,12 @@ def _handle_control(data: dict, profile: dict):
         item = _store.visible_items(pid).get(str(data.get("item_id") or ""))
         if item is None:
             return {"type": "error", "message": "unknown item"}
+        # Anyone who can see a shared item may log WHERE they found it (that
+        # collaboration is the point), but only its creator may rename it,
+        # delete it, or change its sharing — a visible item is not a mutable
+        # one. Private items already resolve to None for other profiles.
+        if kind in ("rename", "set_shared") and not _may_mutate(item, pid):
+            return {"type": "error", "message": _NOT_YOURS}
         try:
             if kind == "rename":
                 it = _store.rename(item["id"], str(data.get("name") or ""), pid)
@@ -457,7 +495,10 @@ async def ws_endpoint(ws: WebSocket):
                 data = json.loads(msg["text"])
                 if not isinstance(data, dict):
                     raise ValueError("not an object")
-            except ValueError:
+            except (ValueError, RecursionError):
+                # RecursionError: deeply-nested JSON (json.loads' default
+                # limit trips before our 8 MB frame cap). It's NOT a
+                # ValueError, so catch it explicitly or it kills the socket.
                 await ws.send_text(json.dumps(
                     {"type": "error", "message": "malformed message"}))
                 continue
@@ -484,8 +525,15 @@ async def ws_endpoint(ws: WebSocket):
                         {"type": "error",
                          "message": "enroll needs a name and an image"}))
                     continue
-                reply = await loop.run_in_executor(
-                    None, enroll, profile["id"], name, base, jpeg, item_id)
+                # enroll touches the GPU and does a resolve-then-add_view that
+                # a concurrent forget can invalidate — never let it escape the
+                # executor and tear down the socket (F10). add_view already
+                # tolerates a vanished id.
+                try:
+                    reply = await loop.run_in_executor(
+                        None, enroll, profile["id"], name, base, jpeg, item_id)
+                except Exception as e:
+                    reply = {"type": "error", "message": f"enroll failed: {e}"}
                 await ws.send_text(json.dumps(reply))
             else:
                 try:
