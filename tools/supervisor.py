@@ -42,10 +42,17 @@ def main() -> int:
         started = time.monotonic()
         child = None
         try:
-            child = subprocess.Popen(
-                [sys.executable, "main.py"],
-                cwd=str(REPO_ROOT),
-            )
+            try:
+                child = subprocess.Popen(
+                    [sys.executable, "main.py"],
+                    cwd=str(REPO_ROOT),
+                )
+            except OSError as e:
+                # Spawn failure is a configuration problem, not a bot
+                # crash — log it (the console window may be gone under
+                # Task Scheduler) and die loudly rather than retry-loop.
+                log_event(f"FATAL: could not launch bot: {e}")
+                raise
             code = child.wait()
         except KeyboardInterrupt:
             # Ctrl+C hits the whole console group: the bot receives it
