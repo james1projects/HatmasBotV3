@@ -6,8 +6,11 @@ every Smite 2 god. Used by tools/build_thumbnail.py to compose YouTube
 thumbnails.
 
 Companion to download_god_icons.py. Both tools share the same source of
-truth (the saved "Gods - SMITE 2 Wiki.html" page); this one differs in
-that it pulls the *card* art rather than the small icon.
+truth (core/god_roster.py, live-refreshed from wiki.smite2.com with the
+saved "Gods - SMITE 2 Wiki.html" page as offline fallback); this one
+differs in that it pulls the *card* art rather than the small icon.
+--s1 downloads the SMITE 1 card catalog into data/god_cards_s1/ as
+display fallback for gods without SMITE 2 art yet.
 
 Why we don't HTML-scrape the per-god wiki pages
 -----------------------------------------------
@@ -74,9 +77,9 @@ except Exception:
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-# Reuse the wiki HTML parser + slug helpers from the icon downloader.
-# Wrap the import in a try/except so any failure shows up immediately
-# instead of silently exiting before main() ever runs.
+# Reuse the roster-backed god list + slug helpers from the icon
+# downloader. Wrap the import in a try/except so any failure shows up
+# immediately instead of silently exiting before main() ever runs.
 import importlib.util as _importlib_util
 try:
     _icon_spec = _importlib_util.spec_from_file_location(
@@ -85,7 +88,10 @@ try:
     _icon_mod = _importlib_util.module_from_spec(_icon_spec)
     _icon_spec.loader.exec_module(_icon_mod)
     parse_wiki_html = _icon_mod.parse_wiki_html
+    get_god_list = _icon_mod.get_god_list
+    fetch_fandom_file = _icon_mod.fetch_fandom_file
     _name_to_slug = _icon_mod._name_to_slug
+    god_roster = _icon_mod.god_roster
 except Exception as _exc:
     print(f"[!] Failed to import download_god_icons.py: "
           f"{type(_exc).__name__}: {_exc}", file=sys.stderr)
@@ -93,6 +99,7 @@ except Exception as _exc:
     sys.exit(2)
 
 OUTPUT_DIR = REPO_ROOT / "data" / "god_cards"
+S1_OUTPUT_DIR = REPO_ROOT / "data" / "god_cards_s1"
 WIKI_BASE = "https://wiki.smite2.com"
 
 USER_AGENT = (
@@ -345,6 +352,41 @@ def _build_god_dict_for_add(name):
     }
 
 
+def download_s1_cards(force=False, throttle=0.4):
+    """
+    Download the SMITE 1 card catalog (130 gods) from smite.fandom.com
+    into data/god_cards_s1/. Display fallback only — same separation
+    rationale as data/god_icons_s1/. The S1 card filename is derived
+    from the catalog's icon filename (T_X_Default_Icon.png ->
+    T_X_Default_Card.png, the fandom wiki's convention).
+    """
+    catalog = god_roster.smite1_catalog()
+    S1_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"SMITE 1 catalog: {len(catalog)} gods")
+    print(f"Output: {S1_OUTPUT_DIR}/\n")
+
+    stats = {"downloaded": 0, "exists": 0, "missing": 0}
+    for entry in catalog:
+        output_path = S1_OUTPUT_DIR / f"{entry['slug']}.png"
+        if not force and output_path.exists():
+            stats["exists"] += 1
+            continue
+        card_file = entry["s1_icon"].replace("_Default_Icon.png",
+                                             "_Default_Card.png")
+        body = fetch_fandom_file(card_file)
+        if body and len(body) >= MIN_VALID_BYTES:
+            _save(output_path, body)
+            stats["downloaded"] += 1
+            print(f"  [S1] {entry['name']}")
+        else:
+            stats["missing"] += 1
+            print(f"  [--] {entry['name']} ({card_file} not found)")
+        time.sleep(throttle)
+
+    print(f"\nDone! downloaded={stats['downloaded']} "
+          f"already had={stats['exists']} missing={stats['missing']}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Download Smite 2 god card art")
     parser.add_argument("--force", action="store_true")
@@ -353,8 +395,16 @@ def main():
     parser.add_argument("--only", type=str)
     parser.add_argument("--throttle", type=float, default=0.4)
     parser.add_argument("--use-og-scrape", action="store_true")
+    parser.add_argument("--offline", action="store_true",
+                        help="Skip the live wiki fetch (roster cache/bundled list)")
+    parser.add_argument("--s1", action="store_true",
+                        help="Download the SMITE 1 catalog into data/god_cards_s1/")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
+
+    if args.s1:
+        download_s1_cards(force=args.force, throttle=args.throttle)
+        return
 
     print(f"[i] CWD: {os.getcwd()}")
     print(f"[i] REPO_ROOT: {REPO_ROOT}")
@@ -368,9 +418,9 @@ def main():
 
     if args.add:
         try:
-            gods = parse_wiki_html()
+            gods = get_god_list(offline=args.offline)
         except Exception as exc:
-            print(f"[!] parse_wiki_html() raised: {type(exc).__name__}: {exc}",
+            print(f"[!] get_god_list() raised: {type(exc).__name__}: {exc}",
                   file=sys.stderr)
             traceback.print_exc()
             return
@@ -393,9 +443,9 @@ def main():
         return
 
     try:
-        gods = parse_wiki_html()
+        gods = get_god_list(offline=args.offline)
     except Exception as exc:
-        print(f"[!] parse_wiki_html() raised: {type(exc).__name__}: {exc}",
+        print(f"[!] get_god_list() raised: {type(exc).__name__}: {exc}",
               file=sys.stderr)
         traceback.print_exc()
         return
@@ -404,7 +454,7 @@ def main():
         print("No gods found. Make sure 'Gods - SMITE 2 Wiki.html' is current.")
         return
 
-    print(f"[i] Parsed {len(gods)} gods from saved wiki HTML.")
+    print(f"[i] God list: {len(gods)} gods (live roster, newest first).")
 
     if args.only:
         gods = _resolve_god_list(gods, args.only)

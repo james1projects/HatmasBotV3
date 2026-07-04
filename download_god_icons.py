@@ -4,10 +4,11 @@ Download God Icons for Portrait Detection
 Downloads all Smite 2 god default icons for use by the in-game god
 portrait matcher (core/god_matcher.py).
 
-The definitive god list and wiki filenames come from the saved wiki page:
-  "Gods - SMITE 2 Wiki.html"
-which should be re-saved from https://wiki.smite2.com/w/Gods whenever
-new gods are released (File > Save As > "Webpage, Complete").
+The definitive god list comes from core/god_roster.py, which fetches
+the LIVE https://wiki.smite2.com/w/Gods page on every run — new god
+releases show up here without re-saving any HTML. The old saved
+"Gods - SMITE 2 Wiki.html" page is kept only as an offline fallback
+list source and a local thumbnail source.
 
 Sources (tried in order for each god):
   1. wiki.smite2.com direct image URL — 256x256 S2 art
@@ -15,13 +16,23 @@ Sources (tried in order for each god):
   3. smite.fandom.com MediaWiki API — 256x256 (may be S1 art for some gods)
   4. tracker.gg CDN — 256x256 S2 art (missing newly released gods)
 
-Icons are saved in data/god_icons/.
+Icons are saved in data/god_icons/. New releases (per the roster's
+first_seen date) are downloaded first.
+
+data/god_icons/ holds ONLY SMITE 2 art — it feeds the portrait
+matcher's fingerprints, so SMITE 1 art in there would cause false
+matches. The --s1 flag downloads the full 130-god SMITE 1 icon
+catalog into the separate data/god_icons_s1/ folder, used purely as
+display fallback (OBS god-request portrait) for gods whose SMITE 2
+art doesn't exist yet.
 
 Usage:
-    python download_god_icons.py              # Download all
+    python download_god_icons.py              # Download all (live list)
+    python download_god_icons.py --offline    # Skip the live wiki fetch
     python download_god_icons.py --force      # Re-download even if present
     python download_god_icons.py --check      # List missing icons
     python download_god_icons.py --add "God Name"  # Add a single god
+    python download_god_icons.py --s1         # SMITE 1 catalog -> god_icons_s1/
 """
 
 import os
@@ -37,8 +48,10 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(__file__))
 from core.config import SMITE2_GOD_IMAGE_BASE
+from core import god_roster
 
 OUTPUT_DIR = Path(__file__).parent / "data" / "god_icons"
+S1_OUTPUT_DIR = Path(__file__).parent / "data" / "god_icons_s1"
 WIKI_HTML = Path(__file__).parent / "Gods - SMITE 2 Wiki.html"
 WIKI_FILES_DIR = Path(__file__).parent / "Gods - SMITE 2 Wiki_files"
 
@@ -96,37 +109,46 @@ def _wiki_filename_to_name(filename):
     T_Ra(S2)_Default_Icon.png          → Ra
     T_Hou_Yi(S2)_Default_Icon.png      → Hou Yi
     T_MorganLeFay(S2)_Default_Icon.png → Morgan Le Fay
-    T_DaJi(S2)_Default_Icon.png        → Da Ji
-    T_Atlas_Default_Icon.png           → Atlas
+    T_CuChulainn(S2)_Default_Icon.png  → Cu Chulainn
+
+    Delegates to god_roster's generic camel-splitter — the old
+    hand-maintained concat_map here mangled every new concatenated
+    name (Xing Tian came out as "Xingtian").
     """
-    # Strip prefix and suffix
-    name = filename
-    if name.startswith("T_"):
-        name = name[2:]
-    for suffix in ["(S2)_Default_Icon.png", "_Default_Icon.png"]:
-        if suffix in name:
-            name = name[: name.index(suffix)]
-            break
-
-    # Underscores → spaces
-    name = name.replace("_", " ")
-
-    # Handle concatenated wiki names
-    concat_map = {
-        "DaJi": "Da Ji",
-        "JingWei": "Jing Wei",
-        "MorganLeFay": "Morgan Le Fay",
-        "NeZha": "Ne Zha",
-    }
-    if name in concat_map:
-        name = concat_map[name]
-
-    return name.strip()
+    return god_roster.wiki_filename_to_name(filename)
 
 
 def _name_to_slug(name):
     """Convert display name to file slug: lowercase, spaces→hyphens, strip apostrophes."""
-    return name.lower().replace("'", "").replace(" ", "-")
+    return god_roster.name_to_slug(name)
+
+
+# ============================================================
+# GOD LIST — roster-backed, live-refreshed
+# ============================================================
+
+def get_god_list(offline=False):
+    """
+    The god list to download, newest releases first.
+
+    Tries a live wiki refresh through core/god_roster.py (so brand-new
+    gods appear without any manual step), then falls back to the
+    roster cache / bundled snapshot, then to the saved wiki HTML.
+    """
+    if not offline:
+        added = god_roster.refresh(force=True)
+        for g in added:
+            print(f"[+] New god on the wiki: {g['name']}")
+
+    gods = god_roster.gods()
+    if not gods:
+        return parse_wiki_html()
+
+    fresh = [g for g in gods if g.get("first_seen")]
+    fresh.sort(key=lambda g: g["first_seen"], reverse=True)
+    rest = sorted((g for g in gods if not g.get("first_seen")),
+                  key=lambda g: g["slug"])
+    return fresh + rest
 
 
 # ============================================================
@@ -218,6 +240,69 @@ def try_fandom_wiki(wiki_filename):
     return None
 
 
+def fetch_fandom_file(filename):
+    """
+    Resolve an exact fandom wiki filename to its image URL via the
+    MediaWiki API and download it. Returns bytes or None. Fandom is
+    not Cloudflare-challenged, so plain urllib works here.
+    """
+    params = urllib.parse.urlencode({
+        "action": "query",
+        "titles": f"File:{filename}",
+        "prop": "imageinfo",
+        "iiprop": "url",
+        "format": "json",
+    })
+    try:
+        req = urllib.request.Request(
+            f"{FANDOM_API}?{params}",
+            headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+        )
+        resp = urllib.request.urlopen(req, timeout=15)
+        data = json.loads(resp.read().decode())
+        for page_id, page_data in data.get("query", {}).get("pages", {}).items():
+            if int(page_id) < 0:
+                continue
+            imageinfo = page_data.get("imageinfo", [])
+            if imageinfo and imageinfo[0].get("url"):
+                return _download_url(imageinfo[0]["url"])
+    except Exception:
+        pass
+    return None
+
+
+def download_s1_library(force=False):
+    """
+    Download the full SMITE 1 icon catalog (130 gods) from
+    smite.fandom.com into data/god_icons_s1/. Display-only fallback
+    art — deliberately a separate folder from data/god_icons/, which
+    feeds the portrait matcher and must stay SMITE 2 art only.
+    """
+    catalog = god_roster.smite1_catalog()
+    S1_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"SMITE 1 catalog: {len(catalog)} gods")
+    print(f"Output: {S1_OUTPUT_DIR}/\n")
+
+    stats = {"downloaded": 0, "exists": 0, "missing": 0}
+    for entry in catalog:
+        output_path = S1_OUTPUT_DIR / f"{entry['slug']}.png"
+        if not force and output_path.exists():
+            stats["exists"] += 1
+            continue
+        data = fetch_fandom_file(entry["s1_icon"])
+        if data and len(data) > 500:
+            _save_icon(output_path, data)
+            stats["downloaded"] += 1
+            print(f"  [S1] {entry['name']}")
+        else:
+            stats["missing"] += 1
+            print(f"  [--] {entry['name']} (not found)")
+        time.sleep(0.15)
+
+    print(f"\nDone! downloaded={stats['downloaded']} "
+          f"already had={stats['exists']} missing={stats['missing']}")
+
+
 def try_tracker_cdn(slug):
     """
     Source 4: tracker.gg CDN fallback.
@@ -294,12 +379,20 @@ def main():
     parser.add_argument("--force", action="store_true", help="Re-download all")
     parser.add_argument("--check", action="store_true", help="Check which are missing")
     parser.add_argument("--add", type=str, help="Add a single god by name")
+    parser.add_argument("--offline", action="store_true",
+                        help="Skip the live wiki fetch (roster cache/bundled list)")
+    parser.add_argument("--s1", action="store_true",
+                        help="Download the SMITE 1 catalog into data/god_icons_s1/")
     args = parser.parse_args()
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Parse the saved wiki HTML for the definitive god list
-    gods = parse_wiki_html()
+    if args.s1:
+        download_s1_library(force=args.force)
+        return
+
+    # Live-refreshed roster (falls back to cache/bundled, then saved HTML)
+    gods = get_god_list(offline=args.offline)
     if not gods:
         print("No gods found. Make sure 'Gods - SMITE 2 Wiki.html' exists.")
         print("Save https://wiki.smite2.com/w/Gods as 'Webpage, Complete'.")
