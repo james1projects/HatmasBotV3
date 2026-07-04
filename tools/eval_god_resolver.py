@@ -61,7 +61,10 @@ async def run(use_llm: bool) -> int:
                 kind_correct[kind] += 1
             else:
                 junk_resolved.append((text, got, tier))
-        elif got == expect:
+        # Case-insensitive: SMITE2_GODS is roster-backed now and
+        # carries display casing ("Hou Yi"), while the eval cases
+        # were written against the old all-lowercase list.
+        elif got is not None and got.lower() == expect.lower():
             kind_correct[kind] += 1
             tier_hits[tier] += 1
         else:

@@ -27,12 +27,14 @@ MixItUp integration:
 
 import asyncio
 import json
+import sys
 import time
 import aiohttp
 from datetime import datetime
 from pathlib import Path
 
 from core.config import (
+    BASE_DIR,
     MIXITUP_API_BASE, MIXITUP_INVENTORY_NAME, MIXITUP_ITEM_NAME,
     GODREQ_QUEUE_FILE, GODREQ_HISTORY_FILE,
     GODREQ_MAX_QUEUE, GODREQ_TOKEN_COST,
@@ -43,28 +45,18 @@ from core.config import (
     DATA_DIR
 )
 from core.god_resolver import resolve, resolve_sync
+from core import god_roster
 
 
 # === KNOWN GODS ===
-# Canonical list for fuzzy matching (lowercase).
-# Source of truth: Gods - SMITE 2 Wiki.html (82 gods as of April 2026).
-# Update by re-saving https://wiki.smite2.com/w/Gods and running
-# download_god_icons.py to refresh both this list and the icon library.
-SMITE2_GODS = [
-    "achilles", "agni", "aladdin", "amaterasu", "anhur", "anubis",
-    "aphrodite", "apollo", "ares", "artemis", "artio", "athena", "atlas",
-    "awilix", "bacchus", "baron samedi", "bellona", "cabrakan", "cerberus",
-    "cernunnos", "chaac", "charon", "chiron", "cupid", "da ji", "danzaburou",
-    "discordia", "eset", "fenrir", "ganesha", "geb", "gilgamesh", "guan yu",
-    "hades", "hecate", "hercules", "hou yi", "hua mulan", "hun batz",
-    "ishtar", "izanami", "janus", "jing wei", "jormungandr", "kali",
-    "khepri", "kukulkan", "loki", "medusa", "mercury", "merlin", "mordred",
-    "morgan le fay", "ne zha", "neith", "nemesis", "nu wa", "nut", "odin",
-    "osiris", "pele", "poseidon", "princess bari", "ra", "rama", "ratatoskr",
-    "scylla", "sobek", "sol", "sun wukong", "susano", "sylvanus", "thanatos",
-    "the morrigan", "thor", "tsukuyomi", "ullr", "vulcan", "xbalanque",
-    "yemoja", "ymir", "zeus",
-]
+# The roster lives in core/god_roster.py now (bundled snapshot +
+# data/god_roster.json cache + daily live refresh from the wiki) —
+# the old hardcoded list here froze at 82 gods in April 2026 and made
+# !godreq call Bastet and Chronos unknown. This module-level name is
+# kept for importers (tools/eval_god_resolver.py); the plugin itself
+# calls god_roster.names() per lookup so a mid-session roster refresh
+# takes effect immediately.
+SMITE2_GODS = god_roster.names()
 
 
 class GodRequestPlugin:
@@ -77,6 +69,9 @@ class GodRequestPlugin:
         self._miu_inventory_id = None
         self._miu_item_id = None
         self._miu_connected = False
+
+        # Daily roster-refresh task (started in on_ready)
+        self._roster_task = None
 
         # History listeners (append-only list, same pattern as the
         # kill detector's add_*_listener hooks). Fired with the final
@@ -157,6 +152,60 @@ class GodRequestPlugin:
 
         # Push initial OBS state
         await self._update_obs_display()
+
+        # Keep the god roster current without manual steps
+        self._roster_task = asyncio.create_task(self._roster_refresh_loop())
+
+    # === ROSTER REFRESH ===
+
+    async def _roster_refresh_loop(self):
+        """Once at startup and then periodically: pull the live god
+        list from the wiki (god_roster.refresh() no-ops while its
+        cache is under 24h old, so the 6h loop is just a retry
+        cadence). Newly released gods become requestable immediately;
+        their icon + card art is fetched in the background so the OBS
+        portrait works the same day."""
+        while True:
+            try:
+                added = await asyncio.to_thread(god_roster.refresh)
+                if added:
+                    global SMITE2_GODS
+                    SMITE2_GODS = god_roster.names()  # legacy importers
+                    names = ", ".join(g["name"] for g in added)
+                    print(f"[GodReq] New god(s) on the roster: {names}")
+                    await self._download_new_god_assets(added)
+            except Exception as e:
+                print(f"[GodReq] roster refresh error: {e}")
+            await asyncio.sleep(6 * 3600)
+
+    async def _download_new_god_assets(self, added):
+        """Fetch icon + card art for newly released gods via the
+        existing download tools (each is idempotent and validates
+        against the wiki). Failures are logged and non-fatal — the
+        request queue works without art."""
+        import subprocess
+        for g in added:
+            for script in ("download_god_icons.py",
+                           str(Path("tools") / "download_god_cards.py")):
+                cmd = [sys.executable, str(BASE_DIR / script),
+                       "--add", g["name"]]
+                try:
+                    proc = await asyncio.to_thread(
+                        subprocess.run, cmd, capture_output=True,
+                        timeout=180, cwd=str(BASE_DIR))
+                    status = "ok" if proc.returncode == 0 else "FAILED"
+                    print(f"[GodReq] asset fetch {status}: "
+                          f"{Path(script).name} --add {g['name']}")
+                except Exception as e:
+                    print(f"[GodReq] asset fetch error for {g['name']}: {e}")
+
+        # Let the spin pool recognize the new gods without a restart
+        pool = self.bot.plugins.get("god_pool")
+        if pool is not None and hasattr(pool, "reload_known_gods"):
+            try:
+                pool.reload_known_gods()
+            except Exception as e:
+                print(f"[GodReq] god_pool reload failed: {e}")
 
     # === MIXITUP API ===
 
@@ -295,10 +344,43 @@ class GodRequestPlugin:
     @staticmethod
     def _match_god(input_name):
         """Match a god name via the shared tiered resolver
-        (exact/alias/prefix/contains/fuzzy — see core/god_resolver.py).
-        Returns the canonical Title Cased name or None."""
-        hit = resolve_sync(input_name, SMITE2_GODS)
-        return hit[0].title() if hit else None
+        (exact/alias/prefix/contains/fuzzy — see core/god_resolver.py)
+        against the live roster. Returns the canonical name or None."""
+        hit = resolve_sync(input_name, god_roster.names())
+        return hit[0] if hit else None
+
+    @staticmethod
+    async def _match_god_full(input_name):
+        """_match_god plus the last-resort local-Ollama tier (strict
+        timeout; silently a no-op when the model is cold or the GPU is
+        busy with the game). Only ever returns names validated against
+        the roster, so a hallucinated answer cannot get through."""
+        god = GodRequestPlugin._match_god(input_name)
+        if god:
+            return god
+        hit = await resolve(input_name, god_roster.names())
+        return hit[0] if hit else None
+
+    @staticmethod
+    def _unknown_god_reply(raw_input):
+        """A reply that actually helps: SMITE 1 gods that haven't been
+        ported yet get named as such (the old reply blamed the viewer's
+        spelling when Bastet simply wasn't on the list), and plain
+        typos get a did-you-mean."""
+        s1_hit = resolve_sync(raw_input, god_roster.smite1_only_names())
+        if s1_hit:
+            return (f"{s1_hit[0]} isn't in SMITE 2 yet — "
+                    f"hopefully soon! Try another god.")
+
+        import difflib
+        names = god_roster.names()
+        by_lower = {n.lower(): n for n in names}
+        close = difflib.get_close_matches(
+            raw_input.lower().strip(), list(by_lower), n=2, cutoff=0.5)
+        if close:
+            suggest = " or ".join(by_lower[c] for c in close)
+            return f"Unknown god: {raw_input}. Did you mean {suggest}?"
+        return f"Unknown god: {raw_input}. Check your spelling!"
 
     def _is_god_in_queue(self, god_name):
         """Check if a god is already in the queue."""
@@ -370,21 +452,28 @@ class GodRequestPlugin:
                 pass
 
     def _find_god_image(self, god_name):
-        """Find a god portrait image in the custom icons folder."""
-        if not SMITE2_GOD_IMAGES_DIR:
-            return None
+        """Find a god portrait for the OBS next-up display.
 
-        god_dir = Path(SMITE2_GOD_IMAGES_DIR)
-        if not god_dir.exists():
-            return None
+        Priority: Custom God Icons (James's curated set) → downloaded
+        SMITE 2 icon → SMITE 1 fallback art. The fallbacks mean a god
+        released this morning still gets a portrait on stream tonight
+        even before anyone curates a custom icon for it."""
+        slug = god_roster.slug_for(god_name)
 
-        slug = god_name.lower().replace(" ", "-").replace("'", "")
-        names = [god_name, god_name.lower(), slug]
-        for ext in [".gif", ".png"]:
-            for name in names:
-                path = god_dir / f"{name}{ext}"
-                if path.exists():
-                    return path.resolve()
+        if SMITE2_GOD_IMAGES_DIR:
+            god_dir = Path(SMITE2_GOD_IMAGES_DIR)
+            if god_dir.exists():
+                names = [god_name, god_name.lower(), slug]
+                for ext in [".gif", ".png"]:
+                    for name in names:
+                        path = god_dir / f"{name}{ext}"
+                        if path.exists():
+                            return path.resolve()
+
+        for folder in (DATA_DIR / "god_icons", DATA_DIR / "god_icons_s1"):
+            path = folder / f"{slug}.png"
+            if path.exists():
+                return path.resolve()
         return None
 
     # === SMITE INTEGRATION ===
@@ -496,19 +585,11 @@ class GodRequestPlugin:
                 )
             return
 
-        # Match the god name
-        god_name = self._match_god(args)
-        if not god_name:
-            # Last resort: local Ollama tier (strict timeout; silently a
-            # no-op when the model is cold or the GPU is busy with the
-            # game). Only ever returns names validated against
-            # SMITE2_GODS, so a hallucinated answer cannot get through.
-            hit = await resolve(args, SMITE2_GODS)
-            if hit:
-                god_name = hit[0].title()
+        # Match the god name (all tiers including local LLM)
+        god_name = await self._match_god_full(args)
         if not god_name:
             await self.bot.send_reply(
-                message, f"Unknown god: {args}. Check your spelling!", whisper
+                message, self._unknown_god_reply(args), whisper
             )
             return
 
@@ -637,10 +718,10 @@ class GodRequestPlugin:
             )
             return
 
-        god_name = self._match_god(args)
+        god_name = await self._match_god_full(args)
         if not god_name:
             await self.bot.send_reply(
-                message, f"Unknown god: {args}. Check your spelling!", whisper
+                message, self._unknown_god_reply(args), whisper
             )
             return
 
@@ -837,6 +918,8 @@ class GodRequestPlugin:
     # === CLEANUP ===
 
     async def cleanup(self):
+        if self._roster_task:
+            self._roster_task.cancel()
         if self.session:
             await self.session.close()
         self._save_data()

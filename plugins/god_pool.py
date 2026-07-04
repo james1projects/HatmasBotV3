@@ -96,8 +96,15 @@ class GodPoolPlugin:
         # startup race described there. Refresh here in case new
         # god icons landed between setup and on_ready (rare, but
         # cheap and idempotent).
+        self.reload_known_gods()
+
+    def reload_known_gods(self):
+        """Re-scan data/god_icons/ for the validation list. Also
+        called by godrequest's roster-refresh loop after it downloads
+        art for a newly released god, so !nominate knows the god
+        without a bot restart."""
         self._known_gods = load_known_gods(BASE_DIR)
-        print(f"[GodPool] Ready — {len(self._known_gods)} gods loaded for "
+        print(f"[GodPool] {len(self._known_gods)} gods loaded for "
               f"validation")
 
     async def cleanup(self):
