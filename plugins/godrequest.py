@@ -173,20 +173,36 @@ class GodRequestPlugin:
                     SMITE2_GODS = god_roster.names()  # legacy importers
                     names = ", ".join(g["name"] for g in added)
                     print(f"[GodReq] New god(s) on the roster: {names}")
-                    await self._download_new_god_assets(added)
+
+                # Fetch art for any recent release still missing it —
+                # covers both gods added just now and earlier download
+                # failures (wiki hiccup at release time), which retry
+                # each pass instead of waiting for manual --add.
+                missing_art = [
+                    g for g in god_roster.new_gods()
+                    if not (DATA_DIR / "god_icons" / f"{g['slug']}.png").exists()
+                    or not (DATA_DIR / "god_cards" / f"{g['slug']}.png").exists()
+                ]
+                if missing_art:
+                    await self._download_new_god_assets(missing_art)
             except Exception as e:
                 print(f"[GodReq] roster refresh error: {e}")
             await asyncio.sleep(6 * 3600)
 
     async def _download_new_god_assets(self, added):
         """Fetch icon + card art for newly released gods via the
-        existing download tools (each is idempotent and validates
-        against the wiki). Failures are logged and non-fatal — the
-        request queue works without art."""
+        existing download tools (each validates against the wiki).
+        Assets that already exist are skipped — --add force-downloads,
+        and the retry pass would otherwise re-fetch a god's icon every
+        cycle just because its card is still missing. Failures are
+        logged and non-fatal — the request queue works without art."""
         import subprocess
+        targets = [("download_god_icons.py", "god_icons"),
+                   (str(Path("tools") / "download_god_cards.py"), "god_cards")]
         for g in added:
-            for script in ("download_god_icons.py",
-                           str(Path("tools") / "download_god_cards.py")):
+            for script, asset_dir in targets:
+                if (DATA_DIR / asset_dir / f"{g['slug']}.png").exists():
+                    continue
                 cmd = [sys.executable, str(BASE_DIR / script),
                        "--add", g["name"]]
                 try:

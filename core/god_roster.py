@@ -283,7 +283,10 @@ def refresh(force: bool = False, max_age_hours: float = 24.0) -> list:
     if live is None:
         return []
 
-    current = {g["slug"]: g for g in _load()}
+    # Copy entries before mutating: _load() returns the live dicts
+    # that concurrent readers (names()/gods() on the event loop) are
+    # holding, so the merge must never edit them in place.
+    current = {g["slug"]: dict(g) for g in _load()}
     today = datetime.now().date().isoformat()
     added = []
     for g in live:
