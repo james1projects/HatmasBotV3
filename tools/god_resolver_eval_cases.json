@@ -609,6 +609,101 @@
       "input": "thor2 electric boogaloo",
       "expect": null,
       "kind": "junk"
+    },
+    {
+      "input": "bastet",
+      "expect": "bastet",
+      "kind": "exact"
+    },
+    {
+      "input": "chronos",
+      "expect": "chronos",
+      "kind": "exact"
+    },
+    {
+      "input": "horus",
+      "expect": "horus",
+      "kind": "exact"
+    },
+    {
+      "input": "ah puch",
+      "expect": "ah puch",
+      "kind": "exact"
+    },
+    {
+      "input": "cu chulainn",
+      "expect": "cu chulainn",
+      "kind": "exact"
+    },
+    {
+      "input": "xing tian",
+      "expect": "xing tian",
+      "kind": "exact"
+    },
+    {
+      "input": "ahpuch",
+      "expect": "ah puch",
+      "kind": "nospace"
+    },
+    {
+      "input": "xingtian",
+      "expect": "xing tian",
+      "kind": "nospace"
+    },
+    {
+      "input": "cuchulainn",
+      "expect": "cu chulainn",
+      "kind": "nospace"
+    },
+    {
+      "input": "bast",
+      "expect": "bastet",
+      "kind": "prefix"
+    },
+    {
+      "input": "chrono",
+      "expect": "chronos",
+      "kind": "prefix"
+    },
+    {
+      "input": "cuchu",
+      "expect": "cu chulainn",
+      "kind": "prefix"
+    },
+    {
+      "input": "xing",
+      "expect": "xing tian",
+      "kind": "prefix"
+    },
+    {
+      "input": "cu",
+      "expect": "cu chulainn",
+      "kind": "nickname"
+    },
+    {
+      "input": "xt",
+      "expect": "xing tian",
+      "kind": "nickname"
+    },
+    {
+      "input": "cronos",
+      "expect": "chronos",
+      "kind": "typo"
+    },
+    {
+      "input": "bastett",
+      "expect": "bastet",
+      "kind": "typo"
+    },
+    {
+      "input": "bakasura",
+      "expect": null,
+      "kind": "junk"
+    },
+    {
+      "input": "cthulhu",
+      "expect": null,
+      "kind": "junk"
     }
   ]
 }

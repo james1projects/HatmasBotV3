@@ -60,10 +60,15 @@ ALIASES: dict[str, str] = {
     
     # chiron
     "chiro": "chiron",
-    
+
+    # cu chulainn — "cu" is below the resolver's 3-char partial-match
+    # floor, so it needs an explicit alias; longer forms (cuchu,
+    # chulainn) already hit the prefix/contains tiers.
+    "cu": "cu chulainn",
+
     # cupid
     "cupi": "cupid",
-    
+
     # da ji
     "daji": "da ji",
     
@@ -199,7 +204,10 @@ ALIASES: dict[str, str] = {
     
     # xbalanque
     "xbal": "xbalanque",
-    
+
+    # xing tian — "xt" is below the 3-char partial-match floor
+    "xt": "xing tian",
+
     # yemoja
     "yem": "yemoja",
 }
