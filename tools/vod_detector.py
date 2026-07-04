@@ -913,6 +913,11 @@ class VodDetector:
                     f"max={max_jump} after {time_elapsed:.1f}s) "
                     f"— treating as misread, skipping"
                 )
+                # A garbage read between "consecutive identical" decrease
+                # samples breaks the streak — keep the re-baseline
+                # evidence strictly consecutive.
+                decrease_candidate = None
+                decrease_candidate_count = 0
                 continue
 
             # Something changed in [prev_t, t].  Refine each field that

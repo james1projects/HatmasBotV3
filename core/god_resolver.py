@@ -60,7 +60,7 @@ FUZZY_MARGIN = 0.03
 # prefix-match anything and "ra" still exact-matches Ra.
 MIN_PARTIAL_LEN = 3
 
-_PUNCT_RE = re.compile(r"[’'\-.]")
+_PUNCT_RE = re.compile(r"[’'\-.!?,:;]")
 _WS_RE = re.compile(r"\s+")
 
 

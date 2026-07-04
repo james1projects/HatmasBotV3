@@ -1,10 +1,13 @@
-# Morning Report — overnight-2026-07-04 (Reliability night)
+# Morning Report — overnight-2026-07-04 (Reliability night + resolver + KDA)
 
 **Branch:** `overnight-2026-07-04` (worktree at `.claude/worktrees/overnight-2026-07-04`)
 **Nothing merged — you merge after reading this.**
 
-Goal you set before bed: keep hatmasbot up and hatmaster.tv always
-available, with a graceful offline page when it isn't.
+Goal from your bedtime message: keep hatmasbot up and hatmaster.tv
+always available, with a graceful offline page. Mid-run I found the
+plan memory from your side chat (it landed in the memory index after
+this session started) and picked up its two additions: the god-name
+resolver and the KDA replay harness. Everything below is done.
 
 ## TL;DR
 
@@ -12,9 +15,15 @@ The bot now restarts itself after a crash and explains every outage in
 `data/crash.log`. The dashboard and `check_stream.bat` can see at a
 glance which subsystem is sick. Visitors to hatmaster.tv get a branded
 "Market closed" page instead of Cloudflare error 1033 once you deploy
-the worker (5 minutes, steps below). Three of the six planned fixes
-turned out to be already-solved problems — verified and documented
-instead of "fixed".
+the worker (5 minutes, steps below). Chat can now typo, nickname, or
+squash god names anywhere (!godrequest, !nominate, !buy) — 110/110 on
+the misspelling eval with zero junk false-positives. The new KDA
+replay harness immediately caught a real detector bug (a phantom
+assist digit was silently vetoing kills — 2 of 7 lost on the Atlas
+full-gameplay VOD) and the fix takes it to 7/7 with an A/B run over
+all 91 archived clips showing zero regressions. Three of the six
+originally-planned fixes turned out to be already-solved problems —
+verified and documented instead of "fixed".
 
 ## Two things only you can do (both quick)
 
@@ -82,10 +91,66 @@ instead of "fixed".
   accessibility tree. Twitch link -> twitch.tv/hatmaster (from
   landing.html).
 
-### (final commit) — Review fix + this report
+### 810f3f4 — Review fix + this report
 - Supervisor logs `FATAL: could not launch bot` to crash.log before
   dying if the spawn itself fails (config problem ≠ crash; no retry
   loop, but now diagnosable after the console window is gone).
+
+### e871557 — Tiered god-name resolver (side-chat item 5)
+- `core/god_resolver.py`: one resolver behind every chat surface that
+  takes a god name. Tiers: exact (normalized + space-squashed) →
+  alias (`core/god_aliases.py`, 78 community nicknames — fleet-drafted,
+  hand-pruned of invented ones) → unique prefix → unique contains →
+  difflib fuzzy (0.75 cutoff, clear-winner margin, phonetic fold for
+  "skilla"→Scylla) → local Ollama tier.
+- The LLM tier is exactly what the plan asked for: strict 2.5s
+  timeout, silently skipped when the model is cold or the GPU is busy
+  with Smite/OBS, answers validated against the candidate list so a
+  hallucination can't land. Config: `GOD_RESOLVER_LLM_*` in
+  core/config.py. **Gotcha found live: thinking models (qwen3.6)
+  return an empty response under a small token budget — default is
+  qwen3-coder:30b with think:false.** Probed live: "the snake hair
+  lady" → Medusa, junk → NONE.
+- Wired into godrequest (`_match_god` + LLM last-resort in the
+  !godrequest handler; priority_request inherits via delegation),
+  god_pool `_resolve_god`, economy `_resolve_god_name` (**tiers 1-5
+  only — the money path stays deterministic on purpose**).
+- Eval: `tools/eval_god_resolver.py` + 122-case set. **110/110
+  non-junk (exact 68 / alias 26 / fuzzy 11 / prefix 5), 0 of 12 junk
+  inputs wrongly resolved.** Two fleet-authored eval expectations were
+  wrong ("morri" = The Morrigan, not Morgan le Fay) — fixed.
+- Icon library audit: all 82 gods present vs the saved wiki HTML.
+  (Resave the wiki HTML periodically — the check is only as fresh as
+  that file; see god-icon-library-gaps memory.)
+
+### 88c5e4d — KDA replay harness + real detector fix (side-chat item 6)
+- `tools/kda_replay_eval.py` replays the VOD detector over saved
+  footage and diffs against the archived `.events.json`. Honesty note:
+  those files are **prior detector output** (written by
+  process_recordings.py), not hand labels — so this measures drift
+  and gives a reviewable disagreement list, and doubles as a
+  regression gate for any kda_reader/vod_detector change.
+- **Real bug found and fixed:** a stable UI artifact reads the assist
+  field as a phantom "6", survives the two-read baseline
+  confirmation, and then every CORRECT read is vetoed as a "partial
+  KDA decrease" — the Atlas full-gameplay VOD silently lost 2 of 7
+  kills this way. New rule in tools/vod_detector.py
+  (`REBASELINE_REQUIRED_READS = 3`): three consecutive identical
+  reads disagreeing with the baseline only downward = the baseline
+  was the misread; re-baseline, keeping increases as real events.
+- **Before/after: 5/7 → 7/7 matched on Full Gameplay (≤0.1s
+  timestamp precision); Atlas-1 1/1 unchanged.** Full sweep over all
+  91 archived Atlas clips: remaining disagreements (12 missed / 27
+  new, clustered at ~40s clip edges) were **A/B-verified as
+  pre-existing** — the old code gives identical-or-worse results on
+  every suspicious clip (Atlas-42's archived death is matched only
+  by the new code).
+- Known limitation (also pre-existing): the assist field still flaps
+  on the phantom digit, which can emit spurious assist events; kills
+  and deaths are verified clean. Root fix is reader-level assist
+  digit filtering — flagged as a follow-up task chip along with the
+  clip-edge phantom batches and a mirror-check of the LIVE detector
+  (plugins/killdetector.py) for the same veto bug.
 
 ## Verified as already fine (no code changed)
 
@@ -103,23 +168,35 @@ instead of "fixed".
 
 ## Review + tests
 
-- Local fleet (qwen3.5:35b) reviewed the full night diff in three
-  chunks: 9 findings, **8 rejected on verification** (asyncio "races"
-  that are single-threaded, a PS 5.1 parameter claim disproven by
-  running it on this machine, unreachable null paths, deliberate
-  defensive excepts), 1 accepted (supervisor spawn-failure logging,
-  applied + re-tested). Consistent with the ~80% false-alarm rate.
-- Test suites: test_trading_hardening, test_web_session (11),
-  test_web_trade (20), test_priority_request (18) — all exit 0.
-  test_economy — exit 0 ("All tests completed!"). Gotcha for future
-  runs: it prints an emoji, so with redirected output it wedges on a
-  cp1252 UnicodeEncodeError unless `PYTHONIOENCODING=utf-8` is set
-  (fine in an interactive console).
+- Local fleet (qwen3.5:35b) reviewed the night's diffs in five
+  chunks: 14 findings total, **11 rejected on verification** (asyncio
+  "races" that are single-threaded, a PS 5.1 parameter claim
+  disproven by running it on this machine, unreachable null paths,
+  deliberate defensive excepts, "dead code" that isn't), 3 accepted
+  and applied + re-verified: supervisor spawn-failure logging,
+  punctuation stripping in the resolver ("kuku!!" now resolves), and
+  a strictly-consecutive counter reset in the detector's re-baseline
+  rule. Consistent with the ~80% false-alarm rate.
+- Test suites (run twice: after the reliability work and again after
+  the resolver wiring): test_economy, test_trading_hardening,
+  test_web_session (11), test_web_trade (20), test_priority_request
+  (18) — all exit 0. Gotcha for future runs: test_economy prints an
+  emoji, so with redirected output it wedges on a cp1252
+  UnicodeEncodeError unless `PYTHONIOENCODING=utf-8` is set (fine in
+  an interactive console). Flagged as a task chip.
+- Resolver eval re-run after every resolver change: 110/110, 0 junk
+  false-positives each time. Full Gameplay replay re-run after the
+  final detector tweak to confirm 7/7 held.
 - Every touched Python file py_compile-clean, trailing newlines
   verified.
 
 ## Also worth knowing
 
+- **ffmpeg is not installed on this PC** — that's the "ffmpeg-on-PATH
+  mystery" solved. Tonight's KDA runs used the imageio-ffmpeg pip
+  binary plus a temporary ffprobe shim. To run the replay harness
+  plainly: `winget install Gyan.FFmpeg`, then
+  `python tools/kda_replay_eval.py recordings/Atlas`.
 - The scheduled task triggers at **logon**, not boot — the bot needs
   your session (OBS websocket) anyway. Auto-logon would be the next
   step if you ever want bot-up-before-you-sit-down.
@@ -128,4 +205,8 @@ instead of "fixed".
   option). If you later want true 24/7, the decision points are:
   always-on PC vs. moving the read-only site off-box.
 - The stale `overnight-2026-07-03` worktree (merged yesterday) was
-  pruned during setup.
+  pruned during setup. Three follow-up task chips are waiting in the
+  session: de-emoji the test harnesses, the clip-edge phantom event
+  batches + live-detector mirror check, and nothing else.
+- Process note: next time a side-chat plan exists, land it in memory
+  BEFORE the overnight session starts (I found it mid-run).
