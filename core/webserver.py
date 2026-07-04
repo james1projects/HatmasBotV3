@@ -16,6 +16,7 @@ Endpoints:
 
 import asyncio
 import json
+import time
 import uuid
 import os
 from datetime import datetime
@@ -41,6 +42,10 @@ class WebServer:
         self.bot = bot
         self.app = web.Application()
         self.runner = None
+        # Attached by main.py after construction; read by GET /health.
+        self.token_manager = None
+        self.tunnel = None
+        self._tunnel_service_cache = None  # (checked_at, running)
         self.overlay = OverlayManager(self)
         self._state = {
             "now_playing": None,
@@ -104,6 +109,7 @@ class WebServer:
         self.app.router.add_get("/api/suggestions", self.handle_get_suggestions)
         self.app.router.add_get("/api/priority_payments",
                                 self.handle_priority_payments)
+        self.app.router.add_get("/health", self.handle_health)
         self.app.router.add_get("/api/state", self.handle_get_state)
         self.app.router.add_post("/api/state", self.handle_update_state)
         self.app.router.add_post("/api/action", self.handle_action)
@@ -212,6 +218,96 @@ class WebServer:
         if html_path.exists():
             return self._no_cache_file_response(html_path)
         return web.Response(text="Control panel not found", status=404)
+
+    async def _tunnel_health(self):
+        """Tunnel reachability: the bot-managed cloudflared child, or the
+        cloudflared Windows service. The service query shells out to
+        `sc`, so its result is cached for 30s to keep /health cheap
+        under dashboard polling."""
+        tunnel = self.tunnel
+        if tunnel is not None and tunnel.is_running:
+            return {"ok": True, "via": "bot child process"}
+
+        now = time.time()
+        cached = self._tunnel_service_cache
+        if cached is None or now - cached[0] > 30:
+            running = False
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "sc", "query", "cloudflared",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                out, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+                running = b"RUNNING" in out
+            except Exception:
+                running = False
+            cached = (now, running)
+            self._tunnel_service_cache = cached
+        return {
+            "ok": cached[1],
+            "via": "windows service" if cached[1] else None,
+        }
+
+    async def handle_health(self, request):
+        """GET /health — liveness JSON for the control panel badge and
+        check_stream_ready. 200 when every critical subsystem (DB,
+        tokens, EventSub, tunnel) is up; 503 with per-check details
+        otherwise. Chat quietness is reported but never fails the
+        check."""
+        checks = {}
+
+        # Shared SQLite connection (economy, god pool, priority requests)
+        try:
+            from core import db as shared_db
+            conn = await shared_db.get_db()
+            if conn is None:
+                checks["db"] = {"ok": False, "detail": "connection not open"}
+            else:
+                await conn.execute("SELECT 1")
+                checks["db"] = {"ok": True}
+        except Exception as e:
+            checks["db"] = {"ok": False, "detail": str(e)}
+
+        # OAuth tokens (bot + broadcaster)
+        if self.token_manager is None:
+            checks["tokens"] = {"ok": False, "detail": "token manager not attached"}
+        else:
+            st = self.token_manager.status()
+            st["ok"] = st["bot_token_ok"] and st["broadcaster_token_ok"]
+            checks["tokens"] = st
+
+        # EventSub websocket sessions. bot._websockets is TwitchIO
+        # internal (user_id -> session_id -> Websocket) — the same map
+        # the manual channel-points subscribe in core/bot.py relies on.
+        # Read defensively so a TwitchIO upgrade degrades this check
+        # rather than crashing /health.
+        sessions = 0
+        try:
+            ws_map = getattr(self.bot, "_websockets", None) or {}
+            for inner in ws_map.values():
+                if isinstance(inner, dict):
+                    sessions += len(inner)
+        except Exception:
+            pass
+        last_event = getattr(self.bot, "last_event_time", None) if self.bot else None
+        checks["eventsub"] = {
+            "ok": sessions > 0,
+            "sessions": sessions,
+            "last_chat_event_age_seconds":
+                int(time.time() - last_event) if last_event else None,
+        }
+
+        checks["tunnel"] = await self._tunnel_health()
+
+        healthy = all(c.get("ok") for c in checks.values())
+        uptime = None
+        if self.bot is not None and getattr(self.bot, "start_time", None):
+            uptime = int((datetime.now() - self.bot.start_time).total_seconds())
+        return web.json_response(
+            {"healthy": healthy, "uptime_seconds": uptime, "checks": checks},
+            status=200 if healthy else 503,
+        )
 
     async def handle_spacegame(self, request):
         """Serve the Streaming Space Game prototype at /spacegame.

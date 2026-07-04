@@ -189,6 +189,33 @@ async def check_bot_dashboard():
     )
 
 
+async def check_bot_health():
+    """GET /health — the bot's own per-subsystem self-report (DB,
+    tokens, EventSub, tunnel). Complements check_bot_dashboard, which
+    only proves the webserver answers."""
+    name = "Bot health"
+    t0 = time.time()
+    status, body = await _http_get_json(f"http://localhost:{DASHBOARD_PORT}/health")
+    elapsed = int((time.time() - t0) * 1000)
+    if status is None:
+        return fail(name, f"localhost:{DASHBOARD_PORT}/health not responding",
+                    hint="Bot may have crashed or hasn't started. Run run_bot.bat.",
+                    elapsed_ms=elapsed)
+    try:
+        data = json.loads(body)
+    except Exception:
+        return fail(name, f"/health returned unparseable body (HTTP {status})",
+                    elapsed_ms=elapsed)
+    checks = data.get("checks", {})
+    if status == 200 and data.get("healthy"):
+        return ok(name, f"all subsystems up ({', '.join(checks)})",
+                  elapsed_ms=elapsed)
+    failing = [k for k, v in checks.items() if not v.get("ok")]
+    return fail(name, f"unhealthy: {', '.join(failing) or f'HTTP {status}'}",
+                hint="See /health JSON for per-subsystem detail.",
+                elapsed_ms=elapsed)
+
+
 async def check_twitch_token(token_file: Path, label: str,
                               required_scopes: Optional[set] = None):
     name = f"Twitch {label} token"
@@ -644,6 +671,7 @@ async def check_web_login():
 
 ALL_CHECKS = [
     ("bot_dashboard",     check_bot_dashboard,             False),
+    ("bot_health",        check_bot_health,                False),
     ("bot_token",         lambda: check_twitch_token(BOT_TOKEN_FILE, "bot"),                 False),
     ("broadcaster_token", lambda: check_twitch_token(BROADCASTER_TOKEN_FILE, "broadcaster",
                                                      REQUIRED_BROADCASTER_SCOPES),           False),

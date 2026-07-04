@@ -44,6 +44,13 @@ class TokenManager:
         self._session = None
         self._validation_task = None
 
+        # Health snapshot for /health: outcome of the most recent
+        # validate-or-refresh per token, and when it happened.
+        # None = not checked yet (startup still in progress).
+        self.bot_token_ok = None
+        self.broadcaster_token_ok = None
+        self.last_validation_time = 0.0
+
         # Bot token state
         self._bot_token = config.TWITCH_BOT_TOKEN
         self._bot_refresh = config.TWITCH_BOT_REFRESH_TOKEN
@@ -158,8 +165,12 @@ class TokenManager:
         """Check bot token validity, refresh if needed."""
         async with self._bot_lock:
             if await self._validate_token(self._bot_token):
-                return True
-            return await self._do_refresh_bot()
+                ok = True
+            else:
+                ok = await self._do_refresh_bot()
+        self.bot_token_ok = ok
+        self.last_validation_time = time.time()
+        return ok
 
     async def _do_refresh_bot(self):
         """Actually refresh the bot token. Must be called under _bot_lock."""
@@ -202,8 +213,12 @@ class TokenManager:
         """Check broadcaster token validity, refresh if needed."""
         async with self._broadcaster_lock:
             if await self._validate_token(self._broadcaster_token):
-                return True
-            return await self._do_refresh_broadcaster()
+                ok = True
+            else:
+                ok = await self._do_refresh_broadcaster()
+        self.broadcaster_token_ok = ok
+        self.last_validation_time = time.time()
+        return ok
 
     async def _do_refresh_broadcaster(self):
         """Actually refresh the broadcaster token. Must be called under _broadcaster_lock."""
@@ -238,6 +253,18 @@ class TokenManager:
             "Client-ID": config.TWITCH_CLIENT_ID,
             "Authorization": f"Bearer {self._broadcaster_token}",
             "Content-Type": "application/json",
+        }
+
+    def status(self) -> dict:
+        """Health snapshot for /health. A token is reported ok when its
+        last validate-or-refresh succeeded and the periodic loop isn't
+        overdue (2x the validation interval)."""
+        age = time.time() - self.last_validation_time
+        stale = self.last_validation_time > 0 and age > VALIDATION_INTERVAL * 2
+        return {
+            "bot_token_ok": bool(self.bot_token_ok) and not stale,
+            "broadcaster_token_ok": bool(self.broadcaster_token_ok) and not stale,
+            "last_validation_age_seconds": int(age) if self.last_validation_time else None,
         }
 
     # --- 401 handler ---

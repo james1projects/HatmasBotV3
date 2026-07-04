@@ -81,6 +81,7 @@ async def main():
         token_manager=token_mgr,
     )
     web.bot = bot
+    web.token_manager = token_mgr  # read by GET /health
 
     # Register plugins (uncomment as you set them up)
     bot.register_plugin("basic", BasicPlugin())
@@ -357,6 +358,7 @@ async def main():
     if CLOUDFLARED_ENABLED:
         tunnel = CloudflaredTunnel(CLOUDFLARED_TUNNEL_NAME, CLOUDFLARED_PATH)
         await tunnel.start()
+    web.tunnel = tunnel  # read by GET /health (None = service-mode check)
 
     print("[HatmasBot] Starting...")
     print()
