@@ -226,6 +226,13 @@ def construct_card_urls(wiki_name, display_name=None):
         "SkinArt_{n}S2_Default",
         "SkinArt_{n}(S2)_Default",
         "GodCard_{n}",
+        # Newest gods (Cu Chulainn, Xing Tian as of 2026-07) are hosted
+        # with NO S2 marker at all — same convention as the old SMITE 1
+        # wiki. Last in the list so S2-marked art always wins when both
+        # exist; SkinArt_ before T_..._Card because SkinArt is the S2
+        # wiki's card-art convention while T_..._Card may be an S1 import.
+        "SkinArt_{n}_Default",
+        "T_{n}_Default_Card",
     ]
 
     candidates = []
