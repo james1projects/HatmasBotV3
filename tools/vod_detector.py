@@ -86,6 +86,19 @@ BASELINE_REQUIRED_READS = 2
 BASELINE_MAX_FIELD = 15
 BASELINE_MAX_SUM = 25
 
+# Recovery from a POISONED baseline.  "Misreads almost never repeat
+# the exact same garbage twice in a row" (see BASELINE_REQUIRED_READS)
+# has one real-world exception: a stable UI artifact next to a digit
+# group can read as the same phantom value on every frame (2026-07-04
+# Atlas replay: assists locked in as 6, and every legitimate A=0 read
+# for the next 20 minutes was vetoed as a "partial decrease" — two
+# real kills were lost in the veto).  When this many CONSECUTIVE
+# IDENTICAL reads disagree with the committed baseline only downward
+# on some field, the baseline — not the stream of agreeing reads — is
+# the misread, and we re-baseline to the repeated value.  Real
+# decreases (a new match) are still handled by the clean-0/0/0 reset.
+REBASELINE_REQUIRED_READS = 3
+
 # plugin (killdetector.py).  Anything more than MAX_KDA_JUMP_BASE +
 # elapsed_seconds * MAX_KDA_JUMP_PER_SEC is treated as an OCR misread and
 # dropped without triggering refinement.  This prevents a single misread
@@ -463,6 +476,12 @@ class VodDetector:
         baseline_candidate_count = 0
         baseline_candidate_t = 0.0
 
+        # Poisoned-baseline recovery state: the identical "decreased"
+        # value we keep seeing, and how many consecutive samples agreed
+        # on it. See REBASELINE_REQUIRED_READS.
+        decrease_candidate: Optional[tuple[int, int, int]] = None
+        decrease_candidate_count = 0
+
         # Multi-kill timing & first-blood tracking.  These reset when we
         # observe a KDA decrease (the video likely contains multiple
         # matches; each gets its own first-blood).
@@ -771,6 +790,8 @@ class VodDetector:
                 prev_t = t
                 first_kill_emitted = False
                 kill_timestamps = []
+                decrease_candidate = None
+                decrease_candidate_count = 0
                 # New match → re-enable per-frame god identification so
                 # we can pick up a different god this match. Without this
                 # the post-confirmation disarm would persist for the rest
@@ -778,6 +799,54 @@ class VodDetector:
                 self.rearm_god_check()
                 continue
             if decreased:
+                # Track how many consecutive samples agree on this exact
+                # "decreased" value. One or two = the sample is the
+                # misread (the usual case). REBASELINE_REQUIRED_READS in
+                # a row = the committed BASELINE is the misread (a
+                # stable artifact survived baseline confirmation) and
+                # the agreeing reads are reality.
+                if kda == decrease_candidate:
+                    decrease_candidate_count += 1
+                else:
+                    decrease_candidate = kda
+                    decrease_candidate_count = 1
+
+                if decrease_candidate_count >= REBASELINE_REQUIRED_READS:
+                    # Re-baseline. Fields that DECREASED are the
+                    # correction and emit nothing; fields that INCREASED
+                    # meanwhile are real events (this is how a kill that
+                    # lands during the veto streak survives) — refine
+                    # them against a start value that already includes
+                    # the corrected fields.
+                    start_kda = tuple(
+                        min(prev_kda[i], kda[i]) for i in range(3)
+                    )
+                    self.log.warning(
+                        f"  t={t:.1f}s — {decrease_candidate_count} "
+                        f"consecutive identical reads {kda} disagree "
+                        f"with baseline {prev_kda} — the baseline was "
+                        f"the misread; re-baselining"
+                    )
+                    self._commit_sample(trustworthy=True)
+                    if start_kda != kda:
+                        new_events, first_kill_emitted = (
+                            self._emit_events_for_interval(
+                                video_path,
+                                prev_t,
+                                start_kda,
+                                t,
+                                kda,
+                                first_kill_emitted,
+                                kill_timestamps,
+                            )
+                        )
+                        events.extend(new_events)
+                    prev_kda = kda
+                    prev_t = t
+                    decrease_candidate = None
+                    decrease_candidate_count = 0
+                    continue
+
                 # Partial decrease — OCR misread, don't trust this sample
                 # and don't enroll its digits (which would poison the
                 # template library if this ever fires with --enroll).
@@ -803,6 +872,8 @@ class VodDetector:
                 # trustworthy as the last committed sample.
                 self._commit_sample(trustworthy=True)
                 prev_t = t
+                decrease_candidate = None
+                decrease_candidate_count = 0
                 continue
 
             # Sanity check: reject implausibly large jumps.  A 5s coarse
@@ -868,6 +939,8 @@ class VodDetector:
 
             prev_kda = kda
             prev_t = t
+            decrease_candidate = None
+            decrease_candidate_count = 0
 
         # Sort chronologically, then merge overlapping windows, then
         # apply the include-flag filter.  Merge-before-filter is
