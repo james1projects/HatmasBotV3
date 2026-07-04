@@ -42,6 +42,7 @@ from core.config import (
     OBS_GODREQ_SCENE, OBS_GODREQ_GROUP,
     DATA_DIR
 )
+from core.god_resolver import resolve, resolve_sync
 
 
 # === KNOWN GODS ===
@@ -293,32 +294,11 @@ class GodRequestPlugin:
 
     @staticmethod
     def _match_god(input_name):
-        """Fuzzy match a god name. Returns the canonical name or None."""
-        normalized = GodRequestPlugin._normalize_god_name(input_name)
-
-        # Exact match
-        for god in SMITE2_GODS:
-            if GodRequestPlugin._normalize_god_name(god) == normalized:
-                return god.title()
-
-        # Partial match (starts with)
-        matches = []
-        for god in SMITE2_GODS:
-            if GodRequestPlugin._normalize_god_name(god).startswith(normalized):
-                matches.append(god.title())
-
-        if len(matches) == 1:
-            return matches[0]
-
-        # Partial match (contains)
-        if not matches:
-            for god in SMITE2_GODS:
-                if normalized in GodRequestPlugin._normalize_god_name(god):
-                    matches.append(god.title())
-            if len(matches) == 1:
-                return matches[0]
-
-        return None
+        """Match a god name via the shared tiered resolver
+        (exact/alias/prefix/contains/fuzzy — see core/god_resolver.py).
+        Returns the canonical Title Cased name or None."""
+        hit = resolve_sync(input_name, SMITE2_GODS)
+        return hit[0].title() if hit else None
 
     def _is_god_in_queue(self, god_name):
         """Check if a god is already in the queue."""
@@ -518,6 +498,14 @@ class GodRequestPlugin:
 
         # Match the god name
         god_name = self._match_god(args)
+        if not god_name:
+            # Last resort: local Ollama tier (strict timeout; silently a
+            # no-op when the model is cold or the GPU is busy with the
+            # game). Only ever returns names validated against
+            # SMITE2_GODS, so a hallucinated answer cannot get through.
+            hit = await resolve(args, SMITE2_GODS)
+            if hit:
+                god_name = hit[0].title()
         if not god_name:
             await self.bot.send_reply(
                 message, f"Unknown god: {args}. Check your spelling!", whisper
