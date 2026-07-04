@@ -431,6 +431,7 @@ async def main():
         # threading-based signal handler
         signal.signal(signal.SIGINT, lambda s, f: _shutdown_event.set())
 
+    exit_code = 0
     try:
         # Start token manager (validates and refreshes tokens on startup)
         await token_mgr.start()
@@ -473,13 +474,21 @@ async def main():
         print(f"\n[HatmasBot] Error: {e}")
         import traceback
         traceback.print_exc()
+        # Persist the traceback and exit non-zero so the supervisor
+        # (tools/supervisor.py) can tell a crash from a console "quit"
+        # and restart us. Graceful shutdowns keep exit code 0.
+        from core.crash_log import record_crash
+        record_crash(e)
+        exit_code = 1
     finally:
         await _shutdown()
+    return exit_code
 
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        sys.exit(asyncio.run(main()))
     except KeyboardInterrupt:
-        # Last-resort catch for Ctrl+C during asyncio.run() teardown
+        # Last-resort catch for Ctrl+C during asyncio.run() teardown.
+        # User-initiated: exit 0 so the supervisor does not restart.
         print("\n[HatmasBot] Force quit.")
