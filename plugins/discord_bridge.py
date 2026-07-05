@@ -251,7 +251,11 @@ class DiscordBridgePlugin:
 
     def _make_slash_callback(self, cmd_name):
         async def callback(interaction: discord.Interaction, args: str = ""):
-            await self._run_slash(cmd_name, interaction, args or "")
+            # Same placeholder cleanup as the Twitch dispatch sites:
+            # "/godrequest args:<atlas>" should work like "atlas".
+            from core.bot import strip_placeholder_brackets
+            await self._run_slash(cmd_name, interaction,
+                                  strip_placeholder_brackets(args or ""))
         callback.__name__ = cmd_name
         return callback
 

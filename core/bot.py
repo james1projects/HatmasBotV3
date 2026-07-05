@@ -6,6 +6,7 @@ Built for TwitchIO v3.
 """
 
 import asyncio
+import re
 import time
 import traceback
 from datetime import datetime
@@ -20,6 +21,18 @@ from core.config import (
     DEFAULT_FEATURES, SHOUTOUT_ENABLED, SHOUTOUT_MIN_VIEWERS,
     SHOUTOUT_COOLDOWN, TWITCH_OWNER_ID, TTS_MAX_LENGTH, DATA_DIR,
 )
+
+# Viewers copy usage text literally: after seeing "Usage: !godrequest
+# <god name>" someone types "!godrequest <atlas>". Unwrap matched
+# <...> pairs in command args at every dispatch site so the intent
+# survives. Only MATCHED pairs — a lone "<" (the "<3" heart) is left
+# alone, so free-text args like !suggest keep their emotes.
+_PLACEHOLDER_RE = re.compile(r"<([^<>]*)>")
+
+
+def strip_placeholder_brackets(args: str) -> str:
+    """'<atlas>' -> 'atlas', 'i <3 this' -> 'i <3 this'."""
+    return _PLACEHOLDER_RE.sub(r"\1", args).strip()
 
 
 class _WhisperChatterAdapter:
@@ -467,7 +480,7 @@ class HatmasBot(commands.Bot):
         if content.startswith("!"):
             parts = content[1:].split(maxsplit=1)
             cmd_name = parts[0].lower()
-            args = parts[1] if len(parts) > 1 else ""
+            args = strip_placeholder_brackets(parts[1]) if len(parts) > 1 else ""
 
             if cmd_name in self._custom_commands:
                 cmd = self._custom_commands[cmd_name]
@@ -535,7 +548,7 @@ class HatmasBot(commands.Bot):
             self.command_count += 1
             parts = text[1:].split(maxsplit=1)
             cmd_name = parts[0].lower()
-            args = parts[1] if len(parts) > 1 else ""
+            args = strip_placeholder_brackets(parts[1]) if len(parts) > 1 else ""
 
             if cmd_name in self._custom_commands:
                 cmd = self._custom_commands[cmd_name]
