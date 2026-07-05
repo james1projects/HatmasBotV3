@@ -288,6 +288,8 @@ h1 {
 <body>
 
 <h1>HATMASBOT</h1>
+<div id="healthBadge" style="text-align:center; font-size:11px; letter-spacing:2px;
+     margin:-12px 0 16px; color:rgba(196,168,130,0.5)">CHECKING</div>
 
 <div class="grid">
   <!-- Stream Control -->
@@ -948,10 +950,35 @@ async function reloadPrices() {
   }
 }
 
+// Health badge — polls GET /health. Green when every subsystem is up,
+// red with the failing subsystem names otherwise, red UNREACHABLE when
+// the bot process itself is gone (tab outliving the server).
+async function pollHealth() {
+  const el = document.getElementById('healthBadge');
+  try {
+    const resp = await fetch('/health');
+    const h = await resp.json();
+    if (h.healthy) {
+      el.textContent = 'ALL SYSTEMS UP';
+      el.style.color = '#50c878';
+    } else {
+      const failing = Object.entries(h.checks)
+        .filter(([, c]) => !c.ok).map(([name]) => name.toUpperCase());
+      el.textContent = 'DOWN: ' + failing.join(', ');
+      el.style.color = '#c85050';
+    }
+  } catch (e) {
+    el.textContent = 'BOT UNREACHABLE';
+    el.style.color = '#c85050';
+  }
+}
+
 setInterval(poll, 2000);
 setInterval(pollKillStats, 2000);
+setInterval(pollHealth, 30000);
 poll();
 pollKillStats();
+pollHealth();
 </script>
 </body>
 </html>

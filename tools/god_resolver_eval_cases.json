@@ -1,0 +1,709 @@
+{
+  "cases": [
+    {
+      "input": "zeus",
+      "expect": "zeus",
+      "kind": "exact"
+    },
+    {
+      "input": "Zeus",
+      "expect": "zeus",
+      "kind": "case"
+    },
+    {
+      "input": "ZEUS",
+      "expect": "zeus",
+      "kind": "case"
+    },
+    {
+      "input": " ZEUS ",
+      "expect": "zeus",
+      "kind": "case"
+    },
+    {
+      "input": "hecate",
+      "expect": "hecate",
+      "kind": "exact"
+    },
+    {
+      "input": "HeCaTe",
+      "expect": "hecate",
+      "kind": "case"
+    },
+    {
+      "input": "Hecate",
+      "expect": "hecate",
+      "kind": "case"
+    },
+    {
+      "input": "  HECATE  ",
+      "expect": "hecate",
+      "kind": "case"
+    },
+    {
+      "input": "achilles",
+      "expect": "achilles",
+      "kind": "exact"
+    },
+    {
+      "input": "Achilles",
+      "expect": "achilles",
+      "kind": "case"
+    },
+    {
+      "input": "zues",
+      "expect": "zeus",
+      "kind": "typo"
+    },
+    {
+      "input": "posiedon",
+      "expect": "poseidon",
+      "kind": "typo"
+    },
+    {
+      "input": "achiles",
+      "expect": "achilles",
+      "kind": "typo"
+    },
+    {
+      "input": "medussa",
+      "expect": "medusa",
+      "kind": "typo"
+    },
+    {
+      "input": "jormungander",
+      "expect": "jormungandr",
+      "kind": "typo"
+    },
+    {
+      "input": "kukulcan",
+      "expect": "kukulkan",
+      "kind": "typo"
+    },
+    {
+      "input": "tsukiyomi",
+      "expect": "tsukuyomi",
+      "kind": "typo"
+    },
+    {
+      "input": "danzaburo",
+      "expect": "danzaburou",
+      "kind": "typo"
+    },
+    {
+      "input": "herculese",
+      "expect": "hercules",
+      "kind": "phonetic"
+    },
+    {
+      "input": "afrodite",
+      "expect": "aphrodite",
+      "kind": "phonetic"
+    },
+    {
+      "input": "anoobis",
+      "expect": "anubis",
+      "kind": "phonetic"
+    },
+    {
+      "input": "skilla",
+      "expect": "scylla",
+      "kind": "phonetic"
+    },
+    {
+      "input": "aphro",
+      "expect": "aphrodite",
+      "kind": "nickname"
+    },
+    {
+      "input": "herc",
+      "expect": "hercules",
+      "kind": "nickname"
+    },
+    {
+      "input": "jorm",
+      "expect": "jormungandr",
+      "kind": "nickname"
+    },
+    {
+      "input": "kuku",
+      "expect": "kukulkan",
+      "kind": "nickname"
+    },
+    {
+      "input": "wukong",
+      "expect": "sun wukong",
+      "kind": "nickname"
+    },
+    {
+      "input": "morri",
+      "expect": "the morrigan",
+      "kind": "nickname"
+    },
+    {
+      "input": "baron",
+      "expect": "baron samedi",
+      "kind": "nickname"
+    },
+    {
+      "input": "danza",
+      "expect": "danzaburou",
+      "kind": "nickname"
+    },
+    {
+      "input": "thana",
+      "expect": "thanatos",
+      "kind": "nickname"
+    },
+    {
+      "input": "mulan",
+      "expect": "hua mulan",
+      "kind": "nickname"
+    },
+    {
+      "input": "nuwa",
+      "expect": "nu wa",
+      "kind": "nickname"
+    },
+    {
+      "input": "rata",
+      "expect": "ratatoskr",
+      "kind": "nickname"
+    },
+    {
+      "input": "gilga",
+      "expect": "gilgamesh",
+      "kind": "prefix"
+    },
+    {
+      "input": "ama",
+      "expect": "amaterasu",
+      "kind": "prefix"
+    },
+    {
+      "input": "bell",
+      "expect": "bellona",
+      "kind": "prefix"
+    },
+    {
+      "input": "cerb",
+      "expect": "cerberus",
+      "kind": "prefix"
+    },
+    {
+      "input": "baronsamedi",
+      "expect": "baron samedi",
+      "kind": "nospace"
+    },
+    {
+      "input": "guanyu",
+      "expect": "guan yu",
+      "kind": "nospace"
+    },
+    {
+      "input": "houyi",
+      "expect": "hou yi",
+      "kind": "nospace"
+    },
+    {
+      "input": "nezha",
+      "expect": "ne zha",
+      "kind": "nospace"
+    },
+    {
+      "input": "themorrigan",
+      "expect": "the morrigan",
+      "kind": "nospace"
+    },
+    {
+      "input": "asdfgh",
+      "expect": null,
+      "kind": "junk"
+    },
+    {
+      "input": "hello",
+      "expect": null,
+      "kind": "junk"
+    },
+    {
+      "input": "123",
+      "expect": null,
+      "kind": "junk"
+    },
+    {
+      "input": "goku",
+      "expect": null,
+      "kind": "junk"
+    },
+    {
+      "input": "kratos",
+      "expect": null,
+      "kind": "junk"
+    },
+    {
+      "input": "thor2 electric boogaloo",
+      "expect": null,
+      "kind": "junk"
+    },
+    {
+      "input": "apollo",
+      "expect": "apollo",
+      "kind": "exact"
+    },
+    {
+      "input": "ares",
+      "expect": "ares",
+      "kind": "exact"
+    },
+    {
+      "input": "artemis",
+      "expect": "artemis",
+      "kind": "exact"
+    },
+    {
+      "input": "athena",
+      "expect": "athena",
+      "kind": "exact"
+    },
+    {
+      "input": "hades",
+      "expect": "hades",
+      "kind": "exact"
+    },
+    {
+      "input": "mercury",
+      "expect": "mercury",
+      "kind": "exact"
+    },
+    {
+      "input": "odin",
+      "expect": "odin",
+      "kind": "exact"
+    },
+    {
+      "input": "osiris",
+      "expect": "osiris",
+      "kind": "exact"
+    },
+    {
+      "input": "ra",
+      "expect": "ra",
+      "kind": "exact"
+    },
+    {
+      "input": "sobek",
+      "expect": "sobek",
+      "kind": "exact"
+    },
+    {
+      "input": "sol",
+      "expect": "sol",
+      "kind": "exact"
+    },
+    {
+      "input": "tsukuyomi",
+      "expect": "tsukuyomi",
+      "kind": "exact"
+    },
+    {
+      "input": "vulcan",
+      "expect": "vulcan",
+      "kind": "exact"
+    },
+    {
+      "input": "zeus",
+      "expect": "zeus",
+      "kind": "exact"
+    },
+    {
+      "input": "apollo",
+      "expect": "apollo",
+      "kind": "exact"
+    },
+    {
+      "input": "ares",
+      "expect": "ares",
+      "kind": "exact"
+    },
+    {
+      "input": "artemis",
+      "expect": "artemis",
+      "kind": "exact"
+    },
+    {
+      "input": "athena",
+      "expect": "athena",
+      "kind": "exact"
+    },
+    {
+      "input": "hades",
+      "expect": "hades",
+      "kind": "exact"
+    },
+    {
+      "input": "mercury",
+      "expect": "mercury",
+      "kind": "exact"
+    },
+    {
+      "input": "odin",
+      "expect": "odin",
+      "kind": "exact"
+    },
+    {
+      "input": "osiris",
+      "expect": "osiris",
+      "kind": "exact"
+    },
+    {
+      "input": "ra",
+      "expect": "ra",
+      "kind": "exact"
+    },
+    {
+      "input": "sobek",
+      "expect": "sobek",
+      "kind": "exact"
+    },
+    {
+      "input": "sol",
+      "expect": "sol",
+      "kind": "exact"
+    },
+    {
+      "input": "tsukuyomi",
+      "expect": "tsukuyomi",
+      "kind": "exact"
+    },
+    {
+      "input": "vulcan",
+      "expect": "vulcan",
+      "kind": "exact"
+    },
+    {
+      "input": "zeus",
+      "expect": "zeus",
+      "kind": "exact"
+    },
+    {
+      "input": "hercules",
+      "expect": "hercules",
+      "kind": "exact"
+    },
+    {
+      "input": "poseidon",
+      "expect": "poseidon",
+      "kind": "exact"
+    },
+    {
+      "input": "apollo",
+      "expect": "apollo",
+      "kind": "exact"
+    },
+    {
+      "input": "ares",
+      "expect": "ares",
+      "kind": "exact"
+    },
+    {
+      "input": "artemis",
+      "expect": "artemis",
+      "kind": "exact"
+    },
+    {
+      "input": "athena",
+      "expect": "athena",
+      "kind": "exact"
+    },
+    {
+      "input": "hades",
+      "expect": "hades",
+      "kind": "exact"
+    },
+    {
+      "input": "mercury",
+      "expect": "mercury",
+      "kind": "exact"
+    },
+    {
+      "input": "odin",
+      "expect": "odin",
+      "kind": "exact"
+    },
+    {
+      "input": "osiris",
+      "expect": "osiris",
+      "kind": "exact"
+    },
+    {
+      "input": "ra",
+      "expect": "ra",
+      "kind": "exact"
+    },
+    {
+      "input": "sobek",
+      "expect": "sobek",
+      "kind": "exact"
+    },
+    {
+      "input": "sol",
+      "expect": "sol",
+      "kind": "exact"
+    },
+    {
+      "input": "tsukuyomi",
+      "expect": "tsukuyomi",
+      "kind": "exact"
+    },
+    {
+      "input": "vulcan",
+      "expect": "vulcan",
+      "kind": "exact"
+    },
+    {
+      "input": "zeus",
+      "expect": "zeus",
+      "kind": "exact"
+    },
+    {
+      "input": "hercules",
+      "expect": "hercules",
+      "kind": "exact"
+    },
+    {
+      "input": "poseidon",
+      "expect": "poseidon",
+      "kind": "exact"
+    },
+    {
+      "input": "aphro",
+      "expect": "aphrodite",
+      "kind": "nickname"
+    },
+    {
+      "input": "herc",
+      "expect": "hercules",
+      "kind": "nickname"
+    },
+    {
+      "input": "jorm",
+      "expect": "jormungandr",
+      "kind": "nickname"
+    },
+    {
+      "input": "kuku",
+      "expect": "kukulkan",
+      "kind": "nickname"
+    },
+    {
+      "input": "wukong",
+      "expect": "sun wukong",
+      "kind": "nickname"
+    },
+    {
+      "input": "morri",
+      "expect": "the morrigan",
+      "kind": "nickname"
+    },
+    {
+      "input": "baron",
+      "expect": "baron samedi",
+      "kind": "nickname"
+    },
+    {
+      "input": "danza",
+      "expect": "danzaburou",
+      "kind": "nickname"
+    },
+    {
+      "input": "thana",
+      "expect": "thanatos",
+      "kind": "nickname"
+    },
+    {
+      "input": "mulan",
+      "expect": "hua mulan",
+      "kind": "nickname"
+    },
+    {
+      "input": "nuwa",
+      "expect": "nu wa",
+      "kind": "nickname"
+    },
+    {
+      "input": "rata",
+      "expect": "ratatoskr",
+      "kind": "nickname"
+    },
+    {
+      "input": "gilga",
+      "expect": "gilgamesh",
+      "kind": "prefix"
+    },
+    {
+      "input": "ama",
+      "expect": "amaterasu",
+      "kind": "prefix"
+    },
+    {
+      "input": "bell",
+      "expect": "bellona",
+      "kind": "prefix"
+    },
+    {
+      "input": "cerb",
+      "expect": "cerberus",
+      "kind": "prefix"
+    },
+    {
+      "input": "baronsamedi",
+      "expect": "baron samedi",
+      "kind": "nospace"
+    },
+    {
+      "input": "guanyu",
+      "expect": "guan yu",
+      "kind": "nospace"
+    },
+    {
+      "input": "houyi",
+      "expect": "hou yi",
+      "kind": "nospace"
+    },
+    {
+      "input": "nezha",
+      "expect": "ne zha",
+      "kind": "nospace"
+    },
+    {
+      "input": "themorrigan",
+      "expect": "the morrigan",
+      "kind": "nospace"
+    },
+    {
+      "input": "asdfgh",
+      "expect": null,
+      "kind": "junk"
+    },
+    {
+      "input": "hello",
+      "expect": null,
+      "kind": "junk"
+    },
+    {
+      "input": "123",
+      "expect": null,
+      "kind": "junk"
+    },
+    {
+      "input": "goku",
+      "expect": null,
+      "kind": "junk"
+    },
+    {
+      "input": "kratos",
+      "expect": null,
+      "kind": "junk"
+    },
+    {
+      "input": "thor2 electric boogaloo",
+      "expect": null,
+      "kind": "junk"
+    },
+    {
+      "input": "bastet",
+      "expect": "bastet",
+      "kind": "exact"
+    },
+    {
+      "input": "chronos",
+      "expect": "chronos",
+      "kind": "exact"
+    },
+    {
+      "input": "horus",
+      "expect": "horus",
+      "kind": "exact"
+    },
+    {
+      "input": "ah puch",
+      "expect": "ah puch",
+      "kind": "exact"
+    },
+    {
+      "input": "cu chulainn",
+      "expect": "cu chulainn",
+      "kind": "exact"
+    },
+    {
+      "input": "xing tian",
+      "expect": "xing tian",
+      "kind": "exact"
+    },
+    {
+      "input": "ahpuch",
+      "expect": "ah puch",
+      "kind": "nospace"
+    },
+    {
+      "input": "xingtian",
+      "expect": "xing tian",
+      "kind": "nospace"
+    },
+    {
+      "input": "cuchulainn",
+      "expect": "cu chulainn",
+      "kind": "nospace"
+    },
+    {
+      "input": "bast",
+      "expect": "bastet",
+      "kind": "prefix"
+    },
+    {
+      "input": "chrono",
+      "expect": "chronos",
+      "kind": "prefix"
+    },
+    {
+      "input": "cuchu",
+      "expect": "cu chulainn",
+      "kind": "prefix"
+    },
+    {
+      "input": "xing",
+      "expect": "xing tian",
+      "kind": "prefix"
+    },
+    {
+      "input": "cu",
+      "expect": "cu chulainn",
+      "kind": "nickname"
+    },
+    {
+      "input": "xt",
+      "expect": "xing tian",
+      "kind": "nickname"
+    },
+    {
+      "input": "cronos",
+      "expect": "chronos",
+      "kind": "typo"
+    },
+    {
+      "input": "bastett",
+      "expect": "bastet",
+      "kind": "typo"
+    },
+    {
+      "input": "bakasura",
+      "expect": null,
+      "kind": "junk"
+    },
+    {
+      "input": "cthulhu",
+      "expect": null,
+      "kind": "junk"
+    }
+  ]
+}

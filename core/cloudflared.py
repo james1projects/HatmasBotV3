@@ -41,6 +41,12 @@ class CloudflaredTunnel:
         self._proc: Optional[asyncio.subprocess.Process] = None
         self._log_task: Optional[asyncio.Task] = None
 
+    @property
+    def is_running(self) -> bool:
+        """True while the tunnel child process is alive. False when it
+        was never launched (exe missing / disabled) or has exited."""
+        return self._proc is not None and self._proc.returncode is None
+
     @staticmethod
     def _find_cloudflared() -> str:
         """Locate cloudflared.exe: PATH first, then MSI defaults."""

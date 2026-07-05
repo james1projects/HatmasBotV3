@@ -21,6 +21,7 @@ from __future__ import annotations
 from typing import Optional
 
 from core.config import BASE_DIR
+from core.god_resolver import resolve_sync
 
 
 class _GodNamesMixin:
@@ -55,24 +56,11 @@ class _GodNamesMixin:
                         self._god_names[lower] = name
 
     def _resolve_god_name(self, user_input: str) -> Optional[str]:
-        """Resolve user input to a proper god name. Supports partial matching."""
-        lower = user_input.lower().strip()
-        if not lower:
+        """Resolve user input to a proper god name via the shared
+        tiered resolver (exact/alias/prefix/contains/fuzzy — see
+        core/god_resolver.py). Money path: the nondeterministic LLM
+        tier is deliberately NOT used here."""
+        if not user_input or not user_input.strip():
             return None
-
-        # Exact match
-        if lower in self._god_names:
-            return self._god_names[lower]
-
-        # Partial match (prefix)
-        matches = [v for k, v in self._god_names.items() if k.startswith(lower)]
-        if len(matches) == 1:
-            return matches[0]
-
-        # Partial match (contains)
-        if not matches:
-            matches = [v for k, v in self._god_names.items() if lower in k]
-            if len(matches) == 1:
-                return matches[0]
-
-        return None
+        hit = resolve_sync(user_input, self._god_names.values())
+        return hit[0] if hit else None

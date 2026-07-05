@@ -93,6 +93,10 @@ class HatmasBot(commands.Bot):
         self._owner_id = owner_id
         self._bot_id = bot_id
         self._shoutout_cooldowns = {}  # raider_id -> last shoutout timestamp
+        # Unix timestamp of the last EventSub chat message received.
+        # Info-only signal on /health: proves events are flowing, but a
+        # quiet chat is not unhealthy, so it never fails the check.
+        self.last_event_time = None
 
     # =============================================================
     # SETUP
@@ -422,6 +426,7 @@ class HatmasBot(commands.Bot):
     # =============================================================
 
     async def event_message(self, payload: twitchio.ChatMessage):
+        self.last_event_time = time.time()
         chatter = payload.chatter
         if chatter and chatter.name.lower() == TWITCH_BOT_USERNAME.lower():
             return

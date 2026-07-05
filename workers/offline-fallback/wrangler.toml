@@ -1,0 +1,13 @@
+# Cloudflare Worker config for the hatmaster.tv offline fallback.
+# Deploy with `wrangler deploy` from this directory after
+# `wrangler login` (see README.md).
+
+name = "hatmaster-offline-fallback"
+main = "worker.js"
+compatibility_date = "2026-07-01"
+
+routes = [
+  { pattern = "hatmaster.tv/*", zone_name = "hatmaster.tv" },
+  # Uncomment if a www DNS record exists on the zone:
+  # { pattern = "www.hatmaster.tv/*", zone_name = "hatmaster.tv" },
+]

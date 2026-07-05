@@ -36,6 +36,7 @@ except ImportError:
 
 from core import db as _shared_db
 from core.config import BASE_DIR, ECONOMY_DB_PATH, TWITCH_CHANNEL
+from core.god_resolver import resolve_sync
 from core.youtube_parser import load_known_gods
 
 
@@ -95,8 +96,15 @@ class GodPoolPlugin:
         # startup race described there. Refresh here in case new
         # god icons landed between setup and on_ready (rare, but
         # cheap and idempotent).
+        self.reload_known_gods()
+
+    def reload_known_gods(self):
+        """Re-scan data/god_icons/ for the validation list. Also
+        called by godrequest's roster-refresh loop after it downloads
+        art for a newly released god, so !nominate knows the god
+        without a bot restart."""
         self._known_gods = load_known_gods(BASE_DIR)
-        print(f"[GodPool] Ready — {len(self._known_gods)} gods loaded for "
+        print(f"[GodPool] {len(self._known_gods)} gods loaded for "
               f"validation")
 
     async def cleanup(self):
@@ -168,27 +176,13 @@ class GodPoolPlugin:
     # ──────────────────────────────────────────────────────────────────
 
     def _resolve_god(self, raw: str) -> Optional[str]:
-        """Match user input to a known god, case-insensitive, with
-        prefix and substring fallback. Returns proper-cased name."""
-        if not raw:
+        """Match user input to a known god via the shared tiered
+        resolver (exact/alias/prefix/contains/fuzzy — see
+        core/god_resolver.py). Returns proper-cased name."""
+        if not raw or not raw.strip():
             return None
-        lower = raw.lower().strip()
-        if not lower:
-            return None
-        # Exact match
-        for g in self._known_gods:
-            if g.lower() == lower:
-                return g
-        # Prefix
-        prefix_matches = [g for g in self._known_gods
-                          if g.lower().startswith(lower)]
-        if len(prefix_matches) == 1:
-            return prefix_matches[0]
-        # Substring (only if exactly one)
-        sub_matches = [g for g in self._known_gods if lower in g.lower()]
-        if len(sub_matches) == 1:
-            return sub_matches[0]
-        return None
+        hit = resolve_sync(raw, self._known_gods)
+        return hit[0] if hit else None
 
     # ──────────────────────────────────────────────────────────────────
     #   COMMANDS
