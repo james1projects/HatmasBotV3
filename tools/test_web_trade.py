@@ -427,6 +427,63 @@ async def test_stream_status_has_market_open():
 
 
 # ──────────────────────────────────────────────────────────────────────
+#   HOLDING DISPLAY (buy-all / sell-all UI support)
+# ──────────────────────────────────────────────────────────────────────
+
+def _session_cookie(login="viewer1"):
+    token = ws.issue("1", login, login, secret=SECRET)
+    return {"Cookie": f"{ws.SESSION_COOKIE}={token}"}
+
+
+async def test_me_holding_returns_position():
+    h = await make_harness()
+    try:
+        r = await h.client.get("/api/me/holding/Ymir",
+                               headers=_session_cookie())
+        assert r.status == 200, r.status
+        data = await r.json()
+        assert data["ok"] is True, data
+        assert data["god"] == "Ymir", data
+        assert data["shares"] == 5.0, data
+        assert data["price"] == 200.0, data
+    finally:
+        await h.client.close()
+
+
+async def test_me_holding_requires_login():
+    h = await make_harness()
+    try:
+        r = await h.client.get("/api/me/holding/Ymir")
+        assert r.status == 401, r.status
+    finally:
+        await h.client.close()
+
+
+async def test_me_holding_unknown_god_is_zero():
+    h = await make_harness()
+    try:
+        r = await h.client.get("/api/me/holding/Zeus",
+                               headers=_session_cookie())
+        data = await r.json()
+        assert data["ok"] is True, data
+        assert data["shares"] == 0, data
+    finally:
+        await h.client.close()
+
+
+async def test_trade_response_carries_holding_shares():
+    h = await make_harness()
+    try:
+        r = await h.trade({"action": "buy", "god": "Ymir", "amount": 200})
+        data = await r.json()
+        assert data["ok"] is True, data
+        assert "holding_shares" in data, data
+        assert data["holding_shares"] == 5.0, data
+    finally:
+        await h.client.close()
+
+
+# ──────────────────────────────────────────────────────────────────────
 #   RUNNER
 # ──────────────────────────────────────────────────────────────────────
 

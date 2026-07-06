@@ -288,6 +288,8 @@ class PublicWebServer:
         self.app.router.add_get("/api/me", self._handle_api_me)
         self.app.router.add_get("/api/me/balance",
                                 self._handle_api_me_balance)
+        self.app.router.add_get("/api/me/holding/{god}",
+                                self._handle_api_me_holding)
         self.app.router.add_get("/api/me/settings",
                                 self._handle_api_me_settings)
         self.app.router.add_post("/api/me/visibility",
@@ -2111,6 +2113,39 @@ class PublicWebServer:
             "market_open": self._market_open(),
         }, headers=self._NO_STORE)
 
+    async def _handle_api_me_holding(self, request: web.Request):
+        """GET /api/me/holding/{god} — logged-in viewer's current
+        position in one god (shares + current price), so a page can
+        show "you own N" on load. Read-only; available whenever logged
+        in, independent of the trading switches."""
+        ident = self._session_identity(request)
+        if ident is None:
+            return web.json_response(
+                {"ok": False, "error": "not_logged_in"}, status=401,
+                headers=self._NO_STORE)
+        eco = self.economy
+        if eco is None or getattr(eco, "_db", None) is None:
+            return web.json_response(
+                {"ok": False, "error": "market_closed"}, status=503,
+                headers=self._NO_STORE)
+        god_input = request.match_info.get("god", "")
+        god_name = eco._resolve_god_name(god_input) or god_input
+        shares, avg_cost = 0.0, 0.0
+        try:
+            h = await eco._get_holding(ident.get("login", ""), god_name)
+            if h:
+                shares = round(float(h["shares"]), 4)
+                avg_cost = round(float(h.get("avg_cost", 0)), 2)
+        except Exception as e:
+            print(f"[PublicWebServer] holding read error: {e}")
+        return web.json_response({
+            "ok": True,
+            "god": god_name,
+            "shares": shares,
+            "avg_cost": avg_cost,
+            "price": eco._prices.get(god_name),
+        }, headers=self._NO_STORE)
+
     async def _handle_api_me_settings(self, request: web.Request):
         """GET /api/me/settings — logged-in viewer's account flags."""
         ident = self._session_identity(request)
@@ -2287,6 +2322,15 @@ class PublicWebServer:
             balance = await eco._get_balance(login)
         except Exception:
             pass
+        # Remaining position in this god after the trade, so the UI can
+        # show "you own N" without a follow-up request. Read-only, and
+        # a failure here must not mask a completed trade.
+        holding_shares = None
+        try:
+            h = await eco._get_holding(login, god_name)
+            holding_shares = round(float(h["shares"]), 4) if h else 0.0
+        except Exception:
+            pass
         print(f"[PublicWebServer] WEB TRADE: {login} {action} "
               f"{result.get('god_name', god_name)} for {hat_amount} hats")
         return web.json_response({
@@ -2298,6 +2342,7 @@ class PublicWebServer:
             "total": result.get("total_cost",
                                 result.get("net_received")),
             "balance": balance,
+            "holding_shares": holding_shares,
         }, headers=self._NO_STORE)
 
     # ──────────────────────────────────────────────────────────────────

@@ -20,6 +20,12 @@
       "port": 8090
     },
     {
+      "name": "antrts",
+      "runtimeExecutable": "C:\\Users\\james\\AppData\\Local\\Programs\\Python\\Python314\\python.exe",
+      "runtimeArgs": ["C:\\Projects\\AntRTS\\tools\\devserver.py", "8174"],
+      "port": 8174
+    },
+    {
       "name": "overlay-static",
       "runtimeExecutable": "C:\\Users\\james\\AppData\\Local\\Programs\\Python\\Python314\\python.exe",
       "runtimeArgs": ["-m", "http.server", "8123", "--directory", "C:\\Projects\\HatmasBot"],

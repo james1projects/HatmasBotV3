@@ -948,6 +948,11 @@
         '  <button class="trade-btn buy" id="trade-buy">BUY</button>' +
         '  <button class="trade-btn sell" id="trade-sell">SELL</button>' +
         '</div>' +
+        '<div class="trade-row trade-all">' +
+        '  <button class="trade-btn all buy" id="trade-buy-all">BUY ALL</button>' +
+        '  <button class="trade-btn all sell" id="trade-sell-all">SELL ALL</button>' +
+        '</div>' +
+        '<div class="trade-owned" id="trade-owned">YOU OWN: --</div>' +
         '<div class="trade-sub">' +
         '  <span id="trade-balance">BALANCE: --</span>' +
         '  <span id="trade-market"></span>' +
@@ -957,9 +962,13 @@
       var $amount = document.getElementById('trade-amount');
       var $buy = document.getElementById('trade-buy');
       var $sell = document.getElementById('trade-sell');
+      var $buyAll = document.getElementById('trade-buy-all');
+      var $sellAll = document.getElementById('trade-sell-all');
+      var $owned = document.getElementById('trade-owned');
       var $msg = document.getElementById('trade-msg');
       var $bal = document.getElementById('trade-balance');
       var $mkt = document.getElementById('trade-market');
+      var god = canonicalName || godNameRaw;
 
       async function refreshBalance() {
         var b = await HatmasAuth.balance();
@@ -970,27 +979,45 @@
           ? 'MARKET OPEN' : 'MARKET CLOSED';
       }
 
-      async function doTrade(action) {
-        var amt = $amount.value.trim().toLowerCase();
+      // "YOU OWN: N shares (~X hats)" for this god.
+      function setOwned(shares, price) {
+        // < 0.005 rounds to 0.00 at 2dp (post-"sell all" float dust) — show none.
+        if (!shares || shares < 0.005) { $owned.textContent = 'YOU OWN: none yet'; return; }
+        var val = price ? Math.round(shares * price) : 0;
+        $owned.innerHTML = 'YOU OWN: <span class="q">'
+          + Number(shares).toFixed(2) + '</span> SHARES'
+          + (val ? ' (~<span class="q">' + val.toLocaleString() + '</span> HATS)' : '');
+      }
+      async function refreshOwned() {
+        var h = await HatmasAuth.holding(god);
+        if (h && h.ok) setOwned(h.shares, h.price);
+      }
+
+      function setBusy(busy) {
+        $buy.disabled = busy; $sell.disabled = busy;
+        $buyAll.disabled = busy; $sellAll.disabled = busy;
+      }
+
+      // forced: 'all' for the buy-all/sell-all buttons.
+      async function doTrade(action, forced) {
+        var amt = forced || $amount.value.trim().toLowerCase();
         if (!amt) {
           $msg.className = 'trade-msg err';
           $msg.textContent = 'Enter an amount in hats, or all.';
           return;
         }
-        $buy.disabled = true;
-        $sell.disabled = true;
+        setBusy(true);
         $msg.className = 'trade-msg';
         $msg.textContent = 'Working...';
-        var god = canonicalName || godNameRaw;
         var res = await HatmasAuth.trade(action, god, amt);
-        $buy.disabled = false;
-        $sell.disabled = false;
+        setBusy(false);
         if (res.ok) {
           $msg.className = 'trade-msg ok';
           $msg.textContent = (action === 'buy' ? 'Bought ' : 'Sold ')
             + Number(res.shares).toFixed(2) + ' shares of ' + res.god
             + ' at ' + Math.round(res.price) + ' hats/share.';
           $amount.value = '';
+          if (res.holding_shares != null) setOwned(res.holding_shares, res.price);
           loadGod();
           refreshBalance();
         } else {
@@ -1000,8 +1027,11 @@
       }
 
       refreshBalance();
+      refreshOwned();
       $buy.addEventListener('click', function () { doTrade('buy'); });
       $sell.addEventListener('click', function () { doTrade('sell'); });
+      $buyAll.addEventListener('click', function () { doTrade('buy', 'all'); });
+      $sellAll.addEventListener('click', function () { doTrade('sell', 'all'); });
     });
   })();
 </script>

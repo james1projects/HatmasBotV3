@@ -534,6 +534,20 @@ html body {
   color: var(--text-dim);
 }
 .trade-login-note a { color: var(--accent); }
+/* Secondary row: buy-all / sell-all shortcuts under the main buttons. */
+.trade-row.trade-all { margin-top: 6px; }
+.trade-btn.all { flex: 1 1 0; font-size: 11px; padding: 7px 10px; color: var(--text-dim); }
+/* Current position for the selected god — shares + approx hat value. */
+.trade-owned {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-top: 8px;
+}
+.trade-owned .q { font-family: var(--font-mono); color: var(--text); }
 
 /* ─── Look-and-feel pass (June 2026, Fable) ──────────────────────
  * Display typography, brand-band hat mark, card depth language,

@@ -1230,7 +1230,8 @@ access).
 | `POST /auth/logout` | Clear the session cookie |
 | `GET /api/me` | Session identity for JS hydration (401 + capabilities when logged out) |
 | `GET /api/me/balance` | Logged-in viewer's hat balance from MixItUp |
-| `POST /api/trade` | Authenticated buy/sell — delegates to economy execute_buy/execute_sell behind nine guards (v2.7 section) |
+| `GET /api/me/holding/{god}` | Logged-in viewer's position in one god (shares + price) for the "you own N" trade display (v2.7.2) |
+| `POST /api/trade` | Authenticated buy/sell — delegates to economy execute_buy/execute_sell behind nine guards (v2.7 section); response carries `holding_shares` (v2.7.2) |
 | `GET /auth.js` | Shared login/trading JS client injected into every page's brand-band |
 | `GET /api/me/settings` | Logged-in viewer's account flags (leaderboard_hidden) |
 | `POST /api/me/visibility` | Self-serve leaderboard hide/show (replaces the never-implemented !hideme) |
@@ -1770,6 +1771,62 @@ so hidden users stay hidden when they buy a god they have never held.
 Tests: `tools/test_priority_request.py` grew to 18 (manual refund,
 list_payments); `tools/test_web_trade.py` to 20 (visibility round-trip
 + guards).
+
+---
+
+## v2.7.2 Update — Buy-all / sell-all + position display
+
+Quality-of-life pass on website trading (July 2026). Viewers can now
+one-click **BUY ALL** (spend entire hat balance) / **SELL ALL** (dump
+the whole position in a god) on both the portfolio page and each god
+page, and every trade surface shows a live **"YOU OWN: N shares (~X
+hats)"** line for the selected god.
+
+- **No new money-path logic.** `POST /api/trade` already accepted
+  `amount: "all"` for both buy and sell (see the `_handle_api_trade`
+  "all" branch — buy reads the balance, sell reads the holding and
+  clamps in `execute_sell`). The buttons just send `"all"`.
+- **New read-only endpoint `GET /api/me/holding/{god}`** →
+  `{ok, god, shares, avg_cost, price}` for the logged-in viewer. Lets
+  a page render "you own N" on load without scraping the whole
+  portfolio. Session-gated only (works even when the market is closed
+  for browsing); independent of the trading switches.
+- **`/api/trade` response gained `holding_shares`** — the viewer's
+  remaining position in that god after the trade, read alongside the
+  existing post-trade balance read (read-only; a failure there can't
+  mask a completed trade). The UI uses it to update "YOU OWN"
+  instantly, before the page's own refetch lands.
+- **Dust guard:** `"sell all"` can leave sub-0.01 share float dust (the
+  `round(shares*price)/price` round-trip; the real `execute_sell`
+  clamps overshoot but undershoot leaves a sliver). `setOwned()` in
+  both pages treats `shares < 0.005` as "none yet" so the line never
+  reads a confusing "0.00 SHARES".
+
+**Ops gotcha found during this work — Cloudflare overrides static-asset
+cache headers.** The origin sends `Cache-Control: no-cache` for
+`/auth.js` and `max-age=300` for `/theme.css`, but Cloudflare's default
+**Browser Cache TTL (4h / 14400s)** overrides them and edge-caches the
+`.js`/`.css`. Result: after shipping a JS change, returning visitors
+run stale `auth.js` for up to 4 hours — which silently drops any new
+`HatmasAuth.*` method (this is exactly how the buy-all UI shipped but
+"YOU OWN" stayed on its `--` placeholder: old cached `auth.js` had no
+`holding()`). Fix: Cloudflare dashboard → zone → Caching → Configuration
+→ Browser Cache TTL → **Respect Existing Headers** (the origin already
+sets sane per-asset headers, so this is the correct setting; god-icons
+keep their 24h cache). After any JS/CSS deploy, hard-refresh (Ctrl+Shift+R)
+to bust an already-cached copy.
+
+### Files added or significantly modified in v2.7.2
+
+```
+core/public_webserver.py   +GET /api/me/holding/{god}; +holding_shares in /api/trade response
+public/auth.js             +HatmasAuth.holding(god)
+public/portfolio.html      BUY ALL/SELL ALL buttons, YOU OWN line, updateOwned() on god-select + post-trade
+public/god.html            BUY ALL/SELL ALL buttons, YOU OWN line, refreshOwned() on load + post-trade
+public/theme.css           .trade-row.trade-all, .trade-btn.all, .trade-owned
+tools/dev_stub_site.py     logged-in trading state + /api/me/holding + POST /api/trade echo (preview support)
+tools/test_web_trade.py    +4 tests (holding endpoint, holding_shares field) -> 24 total
+```
 
 ---
 

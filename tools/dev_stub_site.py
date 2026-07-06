@@ -148,7 +148,13 @@ ROUTES = {
     "/api/social/tiktok": {"profile_url":
                            "https://www.tiktok.com/@awfulmasterhat"},
     "/api/social/bluesky": SOCIAL_BSKY,
-    "/api/me": {"logged_in": False},
+    # Logged-in + trading-enabled so the buy/sell trade card renders.
+    # login matches the portfolio the trade card gates on (/twitch/ymir_fan).
+    "/api/me": {"logged_in": True, "login": "ymir_fan", "name": "Ymir_Fan",
+                "img": "", "login_available": True,
+                "trading_enabled": True, "market_open": True},
+    "/api/me/balance": {"login": "ymir_fan", "balance": 8400,
+                        "market_open": True},
     "/api/prices": {"prices": {"Ymir": 142.5, "Atlas": 98.0,
                                "Achilles": 100.0}},
 }
@@ -163,6 +169,46 @@ PAGES = {
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         print("[stub]", fmt % args)
+
+    def _json(self, obj, status=200):
+        body = json.dumps(obj).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self):
+        path = self.path.split("?")[0]
+        length = int(self.headers.get("Content-Length", 0))
+        try:
+            body = json.loads(self.rfile.read(length) or b"{}") if length else {}
+        except Exception:
+            body = {}
+        if path == "/api/trade":
+            prices = ROUTES["/api/prices"]["prices"]
+            god = body.get("god", "Ymir")
+            price = prices.get(god, 100.0)
+            bal = ROUTES["/api/me/balance"]["balance"]
+            action = body.get("action", "buy")
+            amt = body.get("amount")
+            owned0 = next((h["shares"] for h in PORTFOLIO["holdings"]
+                           if h["god"].lower() == god.lower()), 0.0)
+            if isinstance(amt, str) and amt.strip().lower() == "all":
+                hats = bal if action == "buy" else round(owned0 * price)
+            else:
+                try:
+                    hats = int(str(amt).replace(",", ""))
+                except Exception:
+                    hats = 0
+            shares = round(hats / price, 4) if price else 0
+            owned = owned0 + shares if action == "buy" else max(0.0, owned0 - shares)
+            self._json({"ok": True, "action": action, "god": god,
+                        "shares": shares, "price": price, "total": hats,
+                        "balance": bal, "holding_shares": round(owned, 4)})
+            return
+        self.send_response(404)
+        self.end_headers()
 
     def do_GET(self):
         path = self.path.split("?")[0]
@@ -182,6 +228,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # Dynamic routes: god detail page/API, portfolio page/API,
         # god icons (hat.png stands in for every portrait).
         parts = path.lstrip("/").split("/")
+        if len(parts) == 4 and parts[:3] == ["api", "me", "holding"]:
+            god = parts[3].replace("%20", " ")
+            prices = ROUTES["/api/prices"]["prices"]
+            shares = next((h["shares"] for h in PORTFOLIO["holdings"]
+                           if h["god"].lower() == god.lower()), 0.0)
+            self._json({"ok": True, "god": god, "shares": shares,
+                        "avg_cost": 0, "price": prices.get(god)})
+            return
         if len(parts) == 3 and parts[0] == "api" and parts[1] == "god":
             data = dict(GOD_DETAIL)
             data["name"] = parts[2].replace("%20", " ")

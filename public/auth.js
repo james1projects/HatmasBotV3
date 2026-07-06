@@ -121,6 +121,19 @@ window.HatmasAuth = (function () {
     }
   }
 
+  // Current position in one god: { ok, god, shares, avg_cost, price }.
+  // Lets a page show "you own N" on load without scraping the portfolio.
+  async function holding(god) {
+    try {
+      const r = await fetch('/api/me/holding/' + encodeURIComponent(god),
+        { cache: 'no-store' });
+      if (!r.ok) return null;
+      return await r.json();
+    } catch (e) {
+      return null;
+    }
+  }
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
@@ -131,6 +144,7 @@ window.HatmasAuth = (function () {
     ready: ready,
     trade: trade,
     balance: balance,
+    holding: holding,
     get me() { return me; },
   };
 })();
