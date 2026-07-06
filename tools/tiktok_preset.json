@@ -1,0 +1,61 @@
+{
+  "schema_version": 2,
+  "name": "vertical_tiktok",
+  "notes": "TikTok safe-zone layout (2026-07-03): blurred/darkened static frame fills the whole canvas (V1); item bar band sits at y~220-477 clear of TikTok's top nav; gameplay is a wider crop (full source height, ~55% of source width) at y~477-1573 so the username/description zone only grazes its bottom edge. Geometry from the hand-tuned Vegas vertical_tiktok.tune.json, re-solved for the new layout. zoom/pan/tilt use Resolve's Edit-page units (crop = conformed-image px pre-zoom; pan/tilt post-zoom scaled by conformed/frame size, tilt positive = up); crop_norm are fractions of the source frame; everything is resolution-independent for 16:9 sources. Re-capture after GUI tuning with: resolve_tiktok.py --save",
+  "frame": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 60
+  },
+  "layers": [
+    {
+      "track": 1,
+      "name": "Blur BG",
+      "media": "blur_still",
+      "blur_radius": 45,
+      "brightness": 0.65
+    },
+    {
+      "track": 2,
+      "name": "Gameplay",
+      "media": "video",
+      "zoom": 2.11412,
+      "pan": 0.0,
+      "tilt": -490.43,
+      "crop_norm": {
+        "left": 0.0,
+        "right": 0.0,
+        "top": 0.0,
+        "bottom": 0.0
+      }
+    },
+    {
+      "track": 3,
+      "name": "Items Overlay",
+      "media": "video",
+      "zoom": 4.70957,
+      "pan": 1973.74,
+      "tilt": 5898.28,
+      "crop_norm": {
+        "left": 0.0057824,
+        "right": 0.7818842,
+        "top": 0.8936429,
+        "bottom": 0.0165
+      }
+    }
+  ],
+  "audio": {
+    "names": [
+      "Game",
+      "Mic",
+      "Discord",
+      "Misc"
+    ],
+    "enabled": [
+      true,
+      true,
+      false,
+      false
+    ]
+  }
+}
