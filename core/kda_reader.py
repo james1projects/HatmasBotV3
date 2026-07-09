@@ -131,6 +131,33 @@ GAMEPLAY_CHECK_MIN_STD = 25
 # even more heavily-tinted recordings (and accept some color leakage).
 KDA_SATURATION_THRESHOLD = 90
 
+# --- Fixed per-field digit windows ("fields" grouping mode) -----------------
+#
+# Measured 2026-07-09 across 122 real frames from 12 recordings (harvest
+# corpus, incl. double-digit K and D states): the Smite 2 KDA bar uses
+# FIXED slots — the sword/skull/hand icons sit at constant x regardless
+# of digit width (sub-pixel jitter only), and digits are center-aligned
+# in their slot.  Observed digit extents in bordered-8x coords
+# (KDA_REGION crop, 8x upscale, +20px border — the space
+# _binarize_and_find_digits components live in):
+#
+#     icon1(sword) 48-115 | K 138-260 | icon2(skull) 275-349
+#     | D 370-492 | icon3(hand) 513-579 | A 619-684 (single-digit)
+#
+# Windows below pad those extents generously (±~15px, A gets room for a
+# future double-digit which grows toward the strip's right edge).  A
+# digit component whose center-x falls in a window belongs to that
+# field; one that falls in NO window is positional noise and is
+# discarded.  This is what makes "fields" mode noise-robust: a stray
+# bright blob can only corrupt its own field (or nothing), while the
+# legacy "gaps" mode let one blob shift the two-widest-gap split and
+# corrupt all three fields at once.
+KDA_FIELD_WINDOWS = {
+    "K": (120, 285),
+    "D": (350, 510),
+    "A": (600, 736),
+}
+
 
 # --- Internal ---------------------------------------------------------------
 
@@ -160,7 +187,18 @@ class KdaReader:
         debug: bool = False,
         debug_dir: Optional[Path] = None,
         logger: Optional[logging.Logger] = None,
+        group_mode: str = "gaps",
     ):
+        # group_mode: how digit components are split into K / D / A.
+        #   "gaps"   — legacy: split at the two widest x-gaps.
+        #   "fields" — fixed positional windows (KDA_FIELD_WINDOWS);
+        #              components outside every window are discarded.
+        #              Opt-in pending benchmark vs "gaps" (2026-07-09).
+        # Affects read_kda() (live + VOD paths); the *_with_details
+        # debug path intentionally keeps the legacy grouping for now.
+        if group_mode not in ("gaps", "fields"):
+            raise ValueError(f"unknown group_mode: {group_mode!r}")
+        self._group_mode = group_mode
         self._data_dir = Path(data_dir) if data_dir else _default_data_dir()
         self._tesseract_path = tesseract_path
         self._debug = debug
@@ -1186,24 +1224,40 @@ class KdaReader:
 
         digits.sort(key=lambda c: c[0])
 
-        # Group by the two widest x-gaps (icon gaps between K|D|A).
-        gaps = []
-        for j in range(len(digits) - 1):
-            right_edge = digits[j][0] + digits[j][2]
-            left_edge = digits[j + 1][0]
-            gaps.append((left_edge - right_edge, j))
+        if self._group_mode == "fields":
+            # Fixed positional windows (see KDA_FIELD_WINDOWS): each
+            # digit belongs to the field whose window contains its
+            # center-x; components in no window are positional noise
+            # and are dropped.  Noise damage is field-local instead of
+            # corrupting the split points of all three fields.
+            buckets = {"K": [], "D": [], "A": []}
+            for comp in digits:
+                center = comp[0] + comp[2] / 2.0
+                for label, (w0, w1) in KDA_FIELD_WINDOWS.items():
+                    if w0 <= center <= w1:
+                        buckets[label].append(comp)
+                        break
+            groups = [buckets["K"], buckets["D"], buckets["A"]]
+        else:
+            # Legacy: group by the two widest x-gaps (icon gaps
+            # between K|D|A).
+            gaps = []
+            for j in range(len(digits) - 1):
+                right_edge = digits[j][0] + digits[j][2]
+                left_edge = digits[j + 1][0]
+                gaps.append((left_edge - right_edge, j))
 
-        if len(gaps) < 2:
-            return None
+            if len(gaps) < 2:
+                return None
 
-        gaps.sort(reverse=True)
-        split_indices = sorted([gaps[0][1], gaps[1][1]])
+            gaps.sort(reverse=True)
+            split_indices = sorted([gaps[0][1], gaps[1][1]])
 
-        groups = [
-            digits[: split_indices[0] + 1],
-            digits[split_indices[0] + 1 : split_indices[1] + 1],
-            digits[split_indices[1] + 1 :],
-        ]
+            groups = [
+                digits[: split_indices[0] + 1],
+                digits[split_indices[0] + 1 : split_indices[1] + 1],
+                digits[split_indices[1] + 1 :],
+            ]
 
         if not all(groups):
             return None

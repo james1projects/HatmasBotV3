@@ -80,7 +80,16 @@ def add_markers(timeline, events, fps: float, offset: float,
                 include: set[str]) -> tuple[int, int]:
     added = skipped = 0
     counts: dict[str, int] = {}
-    for ev in sorted(events, key=lambda e: e.get("timestamp_sec", 0.0)):
+    # Expand events the scan's overlap-merge absorbed (kill+death
+    # trades collapse into one kill-anchored clip event; the "merged"
+    # key preserves the constituents) so the timeline still gets a
+    # marker for each real moment.
+    expanded = []
+    for ev in events:
+        expanded.append(ev)
+        for sub in ev.get("merged") or []:
+            expanded.append({**sub, "pre_sec": 0.0, "post_sec": 0.0})
+    for ev in sorted(expanded, key=lambda e: e.get("timestamp_sec", 0.0)):
         kind = ev.get("type", "")
         if kind not in include or kind not in EVENT_STYLE:
             continue

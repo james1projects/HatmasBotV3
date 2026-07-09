@@ -1479,6 +1479,20 @@ class VodDetector:
             new_ev["note"] = self._format_merge_note(
                 anchor.get("note", ""), types_chrono
             )
+            # Keep the absorbed events recoverable.  The merge exists so
+            # highlight CLIPS don't double-cut a kill+death trade, but
+            # data consumers (timeline markers, chapters, KDA trails)
+            # still need to know the death happened — without this, a
+            # trade silently deletes the death from the record (found
+            # 7/9: two of two "missed" deaths in the harvest audit were
+            # exactly this).
+            new_ev["merged"] = [
+                {"type": e["type"],
+                 "timestamp_sec": e["timestamp_sec"],
+                 "note": e.get("note", "")}
+                for e in sorted(group, key=lambda e: e["timestamp_sec"])
+                if e is not anchor
+            ]
             merged.append(new_ev)
 
         return merged

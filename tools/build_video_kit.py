@@ -57,9 +57,16 @@ def build_chapters(events, offset=0.0, include_deaths=False):
     """Turn an events list (timestamp_sec/type/note dicts) into
     [(seconds, title)] YouTube chapters. Kills within
     MULTI_KILL_WINDOW_S collapse into multi-kill chapters."""
-    kills = sorted((e for e in events if e.get("type") == "kill"),
+    # Expand events the scan's overlap-merge absorbed (the "merged" key,
+    # added 7/9) — without this, the kills inside a multi-kill window
+    # collapse to one event and Double/Triple Kill titles can never fire.
+    flat = []
+    for e in events:
+        flat.append(e)
+        flat.extend(e.get("merged") or [])
+    kills = sorted((e for e in flat if e.get("type") == "kill"),
                    key=lambda e: e["timestamp_sec"])
-    deaths = [e for e in events if e.get("type") == "death"] \
+    deaths = [e for e in flat if e.get("type") == "death"] \
         if include_deaths else []
 
     groups = []
