@@ -71,6 +71,14 @@ def build_chapters(events, offset=0.0, include_deaths=False):
             groups.append([e])
 
     chapters = []
+    # Match boundaries (when the detector recorded them) become their
+    # own chapters — with the god's name when recordings span games.
+    starts = [e for e in events if e.get("type") == "game_start"]
+    for e in starts:
+        god = (e.get("god") or "").strip()
+        title = (f"Match Start — {god}"
+                 if god and len(starts) > 1 else "Match Start")
+        chapters.append((e["timestamp_sec"] + offset, title))
     kill_no = 0
     for g in groups:
         kill_no += len(g)
@@ -98,7 +106,10 @@ def build_chapters(events, offset=0.0, include_deaths=False):
 
     # First chapter must be 0:00 for YouTube to pick the list up at all.
     if not spaced or spaced[0][0] > 0:
-        lead = "Match Start" if offset == 0 else "Intro"
+        # If a real detector-recorded Match Start chapter exists later
+        # in the list, the forced 0:00 lead is pre-game content.
+        has_real_start = any(t.startswith("Match Start") for _, t in spaced)
+        lead = "Intro" if (offset > 0 or has_real_start) else "Match Start"
         # guard the 10s rule against a kill in the opening seconds
         spaced = [(0.0, lead)] + [c for c in spaced
                                   if c[0] >= MIN_CHAPTER_GAP_S]
@@ -108,6 +119,15 @@ def build_chapters(events, offset=0.0, include_deaths=False):
 def infer_god(args_god, events_doc, video_path):
     if args_god:
         return args_god
+    # Most precise source first: the per-game god attribution on the
+    # game_start / game_end markers (added 7/9).  Only trust it when
+    # every marked game agrees — a multi-god recording needs --god.
+    marker_gods = {
+        e["god"] for e in events_doc.get("events", [])
+        if e.get("type") in ("game_start", "game_end") and e.get("god")
+    }
+    if len(marker_gods) == 1:
+        return marker_gods.pop()
     gods = events_doc.get("gods_seen") or []
     if len(gods) == 1:
         return gods[0]

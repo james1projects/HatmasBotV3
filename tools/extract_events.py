@@ -256,6 +256,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--keep-scanning",
+        action="store_true",
+        help=(
+            "Don't stop the scan after ~2 minutes of no HUD "
+            "(post-match).  Use for recordings that span multiple "
+            "matches with long lobby gaps between them — the default "
+            "early-stop would otherwise never reach the later games."
+        ),
+    )
+    p.add_argument(
         "-v", "--verbose",
         action="store_true",
         help="Print per-sample detection progress.",
@@ -683,6 +693,7 @@ def main(argv: list[str] | None = None) -> int:
         lobby_skip=not args.no_lobby_skip,
         hwaccel=args.hwaccel,
         merge_overlaps=not args.no_merge_overlaps,
+        post_match_stop=not args.keep_scanning,
         misread_debug_dir=(
             Path(args.debug_misreads) if args.debug_misreads else None
         ),

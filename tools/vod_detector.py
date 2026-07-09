@@ -257,6 +257,21 @@ class VodDetectorOptions:
                                    # event.  Turns a "kill then die" pair
                                    # (windows overlap) into one Vegas clip
                                    # that covers both moments.
+    emit_game_markers: bool = True  # emit structural game_start /
+                                    # game_end events (with a "god" key)
+                                    # alongside the kill feed.  These
+                                    # bypass overlap-merging and the
+                                    # include filter — they mark match
+                                    # boundaries, not highlight clips.
+    post_match_stop: bool = True   # stop the scan after
+                                   # POST_MATCH_STOP_AFTER consecutive
+                                   # unreadable samples once gameplay has
+                                   # been seen (~2 min of no HUD).  Set
+                                   # False for recordings that span
+                                   # multiple matches with long lobby
+                                   # gaps in between — otherwise every
+                                   # game after the first long gap is
+                                   # never scanned.
     # God identification:
     enable_god_detection: bool = True  # run the portrait matcher on each
                                        # gameplay frame so the scan can
@@ -373,6 +388,10 @@ class VodDetector:
         self._god_confirm_name: Optional[str] = None
         self._god_confirm_count: int = 0
         self._gods_seen_set: set = set()
+        # (video_t, god) per confirmation — at most one per match thanks
+        # to the post-confirmation disarm.  Used to attribute a god to
+        # each game_start / game_end marker after the scan.
+        self.god_confirmations: list[tuple[float, str]] = []
         # Performance gate for _check_god — True until we've locked
         # in a god for the current match, then False until detect()
         # sees a 0/0/0 reset and calls rearm_god_check(). See
@@ -426,6 +445,7 @@ class VodDetector:
         self._god_confirm_name = None
         self._god_confirm_count = 0
         self._god_match_counts = {}
+        self.god_confirmations = []
         # Re-arm the per-frame god check for the new scan. _check_god
         # disarms itself after the first confirmation to save CPU; we
         # need a clean slate here.
@@ -457,6 +477,13 @@ class VodDetector:
             )
 
         events: list[dict] = []
+
+        # Structural match-boundary markers: {"t": float, "type":
+        # "game_start"|"game_end"}.  Gods are attributed after the scan
+        # (confirmations lag the 0/0/0 moment by a few samples) and the
+        # markers are appended after overlap-merge + include-filter so
+        # they can't be swallowed into highlight clip windows.
+        game_marks: list[dict] = []
 
         # Running state during the coarse scan.
         prev_kda: Optional[tuple[int, int, int]] = None
@@ -549,7 +576,8 @@ class VodDetector:
             if kda is None:
                 if seen_gameplay:
                     miss_streak += 1
-                    if miss_streak >= POST_MATCH_STOP_AFTER:
+                    if (miss_streak >= POST_MATCH_STOP_AFTER
+                            and getattr(self.opts, "post_match_stop", True)):
                         if self.opts.verbose:
                             self.log.info(
                                 f"  t={t:.1f}s — {miss_streak} consecutive "
@@ -657,6 +685,13 @@ class VodDetector:
                     self._commit_sample(trustworthy=True)
                     prev_kda = kda
                     prev_t = t
+                    if kda == (0, 0, 0):
+                        # HUD became readable at 0/0/0 — the recording
+                        # caught this match's start.  Anchor at the
+                        # first candidate sample, not the commit sample.
+                        game_marks.append(
+                            {"t": baseline_candidate_t, "type": "game_start"}
+                        )
                     if self.opts.verbose:
                         self.log.info(
                             f"  t={t:.1f}s — baseline committed "
@@ -744,6 +779,13 @@ class VodDetector:
                     events.extend(new_events)
                     prev_kda = kda
                     prev_t = t
+                    if baseline_candidate == (0, 0, 0):
+                        # Candidate was a match start; an event landed
+                        # inside the confirm window but the game still
+                        # began at the candidate's first sighting.
+                        game_marks.append(
+                            {"t": baseline_candidate_t, "type": "game_start"}
+                        )
                     continue
 
                 # Otherwise: this is a genuinely different read.  Treat
@@ -786,6 +828,10 @@ class VodDetector:
                         f"  t={t:.1f}s — KDA reset to 0/0/0 (was {prev_kda}), "
                         f"re-baselining for new match"
                     )
+                # The previous game ended at its last good read; the new
+                # one starts here (first readable frame of the new HUD).
+                game_marks.append({"t": prev_t, "type": "game_end"})
+                game_marks.append({"t": t, "type": "game_start"})
                 prev_kda = kda
                 prev_t = t
                 first_kill_emitted = False
@@ -1017,6 +1063,50 @@ class VodDetector:
             or (e["type"] == "assist" and self.opts.include_assists)
         ]
 
+        # Append match-boundary markers AFTER merging/filtering — they
+        # are structural metadata (intro/outro anchors, game selection),
+        # not highlight clips, so they must never be merged into a clip
+        # window or dropped by the include flags.
+        if getattr(self.opts, "emit_game_markers", True):
+            # A game that was still running when the scan ended (EOF or
+            # post-match early stop) closes at its last good read.  This
+            # also covers recordings that start mid-game: no game_start
+            # was ever seen, but the game_end anchor is still real.
+            if prev_kda is not None and (
+                not game_marks or game_marks[-1]["type"] != "game_end"
+            ):
+                game_marks.append({"t": prev_t, "type": "game_end"})
+
+            # Attribute a god to each marker: the first confirmation
+            # inside the marker's game window.  Windows are bounded by
+            # game_start times; 15s of pre-window slack covers a god
+            # confirmed a beat before the baseline anchor committed.
+            start_ts = sorted(
+                m["t"] for m in game_marks if m["type"] == "game_start"
+            )
+            for m in game_marks:
+                w_lo = max(
+                    (s for s in start_ts if s <= m["t"]), default=0.0
+                ) - 15.0
+                w_hi = min(
+                    (s for s in start_ts if s > m["t"]),
+                    default=float("inf"),
+                )
+                god = next(
+                    (g for (ct, g) in self.god_confirmations
+                     if w_lo <= ct < w_hi),
+                    "",
+                )
+                filtered.append({
+                    "timestamp_sec": round(m["t"], 1),
+                    "type": m["type"],
+                    "god": god,
+                    "note": "",
+                    "pre_sec": 0.0,
+                    "post_sec": 0.0,
+                })
+            filtered.sort(key=lambda e: e["timestamp_sec"])
+
         elapsed = time.time() - t_start_scan
         if self.opts.verbose:
             if merged_collapsed > 0:
@@ -1117,6 +1207,7 @@ class VodDetector:
         self,
         img: Image.Image,
         crop_origin: tuple[int, int],
+        video_t: Optional[float] = None,
     ) -> None:
         """Run portrait identification on one gameplay frame.
 
@@ -1181,6 +1272,13 @@ class VodDetector:
             self._god_confirm_count = 1
 
         if self._god_confirm_count >= self._GOD_CONFIRM_REQUIRED:
+            # Timestamped confirmation log for per-game god attribution
+            # (game_start / game_end markers).  Recorded even when the
+            # god is already in gods_seen — a later match on the same
+            # god still needs its own confirmation time.
+            self.god_confirmations.append(
+                (video_t if video_t is not None else -1.0, god_name)
+            )
             if god_name not in self._gods_seen_set:
                 self._gods_seen_set.add(god_name)
                 self.gods_seen.append(god_name)
@@ -1602,7 +1700,7 @@ class VodDetector:
         img = self._extract_frame(video_path, t)
         if img is None:
             return None
-        kda = self._read_from_image(img)
+        kda = self._read_from_image(img, video_t=t)
         if kda is not None:
             self.reader.discard_last_read()
         return kda
@@ -1621,7 +1719,7 @@ class VodDetector:
             img = self._extract_frame(video_path, t_try)
             if img is None:
                 continue
-            kda = self._read_from_image(img)
+            kda = self._read_from_image(img, video_t=t_try)
             if kda is not None:
                 # Refinement reads never enroll — see _read_at.
                 self.reader.discard_last_read()
@@ -1658,7 +1756,7 @@ class VodDetector:
         # moment we see the first KDA-readable gameplay frame, so any
         # candidates that accumulated during pre-match lobby get
         # discarded the moment we know we're really in a match.
-        self._check_god(img, crop_origin=origin)
+        self._check_god(img, crop_origin=origin, video_t=video_t)
         if self.reader.is_overlay_open(img_array, crop_origin=origin):
             self._fail_counts["overlay_open"] += 1
             return None

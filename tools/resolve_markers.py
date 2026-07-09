@@ -41,6 +41,8 @@ EVENT_STYLE = {
     "kill": ("Green", "Kill"),
     "death": ("Red", "Death"),
     "assist": ("Yellow", "Assist"),
+    "game_start": ("Blue", "Game Start"),
+    "game_end": ("Purple", "Game End"),
 }
 
 
@@ -85,7 +87,14 @@ def add_markers(timeline, events, fps: float, offset: float,
         color, label = EVENT_STYLE[kind]
         counts[kind] = counts.get(kind, 0) + 1
         note = (ev.get("note") or "").strip()
-        name = note.title() if note else f"{label} #{counts[kind]}"
+        if kind in ("game_start", "game_end"):
+            god = (ev.get("god") or "").strip()
+            name = f"{label} — {god}" if god else label
+            note = god
+        elif note:
+            name = note.title()
+        else:
+            name = f"{label} #{counts[kind]}"
         frame = max(0, int(round((ev["timestamp_sec"] + offset) * fps)))
         ok = timeline.AddMarker(frame, color, name, note, 1)
         if not ok:
@@ -112,13 +121,18 @@ def main() -> None:
                     help="Recording .mp4 or .events.json (picker if omitted)")
     ap.add_argument("--offset", type=float, default=0.0,
                     help="Seconds of timeline before the gameplay clip starts")
-    ap.add_argument("--include", default="kills,deaths,assists",
-                    help="Comma list: kills,deaths,assists (default all)")
+    ap.add_argument("--include", default="kills,deaths,assists,games",
+                    help="Comma list: kills,deaths,assists,games "
+                         "(default all; 'games' = the game_start / "
+                         "game_end match-boundary markers)")
     args = ap.parse_args()
 
     include = {w.strip().lower().rstrip("s")
                for w in args.include.split(",") if w.strip()}
-    include &= {"kill", "death", "assist"}
+    if "game" in include:
+        include.discard("game")
+        include |= {"game_start", "game_end"}
+    include &= {"kill", "death", "assist", "game_start", "game_end"}
     if not include:
         fail(f"--include matched nothing: {args.include!r}")
 
