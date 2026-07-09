@@ -180,13 +180,16 @@ async def db_upsert_video_god(db: aiosqlite.Connection, video_id: str,
     """
     if set_by == "manual":
         # `set` CLI: always wins, even over an existing manual entry.
+        # cmd_set has no title to offer (it passes ""), so keep whatever
+        # title an earlier auto-scan stored instead of blanking it.
         await db.execute("""
             INSERT INTO youtube_video_gods
                 (yt_video_id, god_name, title, set_at, set_by)
             VALUES (?, ?, ?, datetime('now'), 'manual')
             ON CONFLICT(yt_video_id) DO UPDATE SET
                 god_name = excluded.god_name,
-                title    = excluded.title,
+                title    = COALESCE(NULLIF(excluded.title, ''),
+                                    youtube_video_gods.title),
                 set_at   = excluded.set_at,
                 set_by   = 'manual'
         """, (video_id, god, title))
