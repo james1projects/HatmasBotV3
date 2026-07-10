@@ -479,9 +479,6 @@
            title="God request queue + viewer suggestions">
           Community
         </a>
-        <div class="status offline" id="band-status">
-          <span class="dot"></span><span id="band-status-text">OFFLINE</span>
-        </div>
       </div>
     </div>
 
@@ -597,16 +594,14 @@
 <script>
   // ─── unified "stream is live" state ─────────────────────────────
   // Single source of truth for the live/offline UI: toggles a
-  // body class (used by CSS to collapse the hero), updates the
-  // brand-band status pill, and lights up the Twitch platform pill.
+  // body class (used by CSS to collapse the hero) and lights up the
+  // Twitch platform pill. The brand-band LIVE/OFFLINE status pill
+  // was removed July 2026 — a permanent OFFLINE badge read wrong on
+  // a site that's now video-first.
   const $body          = document.body;
-  const $bandStatus    = document.getElementById('band-status');
-  const $bandStatusText= document.getElementById('band-status-text');
   const $pillTwitch    = document.getElementById('pill-twitch');
   function setLive(live) {
     $body.classList.toggle('stream-live', !!live);
-    if ($bandStatus) $bandStatus.classList.toggle('offline', !live);
-    if ($bandStatusText) $bandStatusText.textContent = live ? 'LIVE' : 'OFFLINE';
     if ($pillTwitch) $pillTwitch.classList.toggle('is-live', !!live);
   }
   setLive(false);  // default until first stream-status response

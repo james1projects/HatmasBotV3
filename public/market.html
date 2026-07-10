@@ -630,9 +630,6 @@
            title="God request queue + viewer suggestions">
           Community
         </a>
-        <div class="status offline" id="band-status">
-          <span class="dot"></span><span id="band-status-text">OFFLINE</span>
-        </div>
       </div>
     </div>
 
@@ -738,29 +735,9 @@
   // stays as a no-op so the data-load call sites don't need touching.
   function bumpPing() {}
 
-  // ─── brand-band LIVE pill ────────────────────────────────────────
-  // Trimmed stream-status poll: the stream embed lives on the home
-  // page now, so this page only lights the pill. Same endpoint,
-  // same 30s cadence.
-  const $bandStatus    = document.getElementById('band-status');
-  const $bandStatusText= document.getElementById('band-status-text');
-  function setLive(live) {
-    if ($bandStatus) $bandStatus.classList.toggle('offline', !live);
-    if ($bandStatusText) $bandStatusText.textContent = live ? 'LIVE' : 'OFFLINE';
-  }
-  setLive(false);  // default until first stream-status response
-
-  async function refreshStreamStatus() {
-    try {
-      const r = await fetch('/api/stream-status');
-      if (!r.ok) return;
-      const data = await r.json();
-      bumpPing();
-      setLive(!!data.is_live);
-    } catch (e) { /* silent — keep last state */ }
-  }
-  refreshStreamStatus();
-  setInterval(refreshStreamStatus, 30 * 1000);
+  // Brand-band LIVE pill (and its stream-status poll) removed July
+  // 2026 — a permanent OFFLINE badge read wrong on a video-first
+  // site, and this page had no other use for the endpoint.
 
   // ─── recent activity feed ───────────────────────────────────────
   // Bloomberg-tape style. Pulls /api/recent-events (UNION across
