@@ -43,7 +43,8 @@ from core.config import (
     OBS_WS_HOST, OBS_WS_PORT, OBS_WS_PASSWORD,
     DATA_DIR, TESSERACT_PATH,
 )
-from core.kda_reader import KdaReader
+from core.kda_reader import KdaReader, KDA_REGION
+from core.kda_session_recorder import KdaSessionRecorder
 
 
 # --- File logger ---
@@ -221,8 +222,22 @@ class KillDeathDetector:
         # Delta-confirmation state (DELTA_CONFIRM_READS): the increased
         # KDA value awaiting its confirming read(s), and how many
         # consecutive reads have produced exactly that value.
+        # _pending_crop holds the KDA-strip crop of the frame that
+        # STARTED the pending delta — if the delta dies unconfirmed,
+        # that crop is exactly the misread frame, and the session
+        # recorder archives it as a suppressed phantom.
         self._pending_kda = None
         self._pending_count = 0
+        self._pending_crop = None
+
+        # Flight recorder: every decision (accept / reject / suppressed
+        # phantom / rebaseline / reset) is journaled per session under
+        # data/kda_sessions/, with anomaly frame crops. Runs whenever
+        # detection runs, live or not — offstream practice sessions
+        # become diagnostic corpora for free. Failure-proof by design
+        # (never raises into the loop).
+        self._recorder = KdaSessionRecorder(DATA_DIR / "kda_sessions",
+                                            logger=_kd_logger)
 
         # Poisoned-baseline recovery state (REBASELINE_REQUIRED_READS):
         # the identical "decreased" value consecutive reads agree on.
@@ -646,6 +661,16 @@ class KillDeathDetector:
 
     # === SCREENSHOT CAPTURE ===
 
+    @staticmethod
+    def _kda_strip_crop(img: Image.Image) -> Image.Image | None:
+        """Tiny crop of the KDA bar for the session recorder's anomaly
+        archive. Never raises."""
+        try:
+            x1, y1, x2, y2 = KDA_REGION
+            return img.crop((x1, y1, x2, y2))
+        except Exception:
+            return None
+
     def _grab_screenshot(self) -> Image.Image | None:
         """Grab a screenshot of the Smite 2 game source from OBS."""
         if not self.obs_client:
@@ -779,6 +804,7 @@ class KillDeathDetector:
         self._recent_kill_times = []
         self._pending_kda = None
         self._pending_count = 0
+        self._pending_crop = None
         self._decrease_candidate = None
         self._decrease_candidate_count = 0
         self._non_gameplay_count = 0
@@ -1137,6 +1163,7 @@ class KillDeathDetector:
                 kda = self._reader.read_kda(img)
                 if kda is not None:
                     self._kda_read_failures = 0
+                    self._recorder.heartbeat(kda=kda)
 
                     # --- Startup validation ---
                     if not self._startup_validated:
@@ -1158,6 +1185,10 @@ class KillDeathDetector:
                             validated_kda = self._startup_reads[0]
                             self._startup_validated = True
                             self._startup_reads = []
+                            self._recorder.record(
+                                "startup_validated", kda=validated_kda,
+                                crop=self._kda_strip_crop(img),
+                            )
 
                             # How many kills/deaths/assists should we fire
                             # listener events for to bring downstream
@@ -1329,8 +1360,15 @@ class KillDeathDetector:
                                 self._zero_read_count = 0
                                 self._pending_kda = None
                                 self._pending_count = 0
+                                self._pending_crop = None
                                 self._decrease_candidate = None
                                 self._decrease_candidate_count = 0
+                                self._recorder.record(
+                                    "zero_reset", kda=kda,
+                                    prev=(prev_k, prev_d, prev_a),
+                                    note="new match auto-detected",
+                                    crop=self._kda_strip_crop(img),
+                                )
                                 self._save_state()
                                 await asyncio.sleep(SCREENSHOT_INTERVAL)
                                 continue
@@ -1402,11 +1440,19 @@ class KillDeathDetector:
                                     f"{self._decrease_candidate_count} "
                                     f"agreeing reads",
                                 )
+                                self._recorder.record(
+                                    "rebaseline", kda=floor,
+                                    prev=(prev_k, prev_d, prev_a),
+                                    note=f"-{corr_k}K/-{corr_d}D/"
+                                         f"-{corr_a}A corrected",
+                                    crop=self._kda_strip_crop(img),
+                                )
                                 self._prev_kda = floor
                                 self._decrease_candidate = None
                                 self._decrease_candidate_count = 0
                                 self._pending_kda = None
                                 self._pending_count = 0
+                                self._pending_crop = None
                                 self._save_state()
                                 await asyncio.sleep(SCREENSHOT_INTERVAL)
                                 continue
@@ -1427,6 +1473,13 @@ class KillDeathDetector:
                                 f"{cur_k}/{cur_d}/{cur_a} — misread "
                                 f"({self._decrease_candidate_count}/"
                                 f"{REBASELINE_REQUIRED_READS})",
+                            )
+                            self._recorder.record(
+                                "reject_decrease", kda=kda,
+                                prev=(prev_k, prev_d, prev_a),
+                                note=f"{self._decrease_candidate_count}/"
+                                     f"{REBASELINE_REQUIRED_READS}",
+                                crop=self._kda_strip_crop(img),
                             )
                             await asyncio.sleep(SCREENSHOT_INTERVAL)
                             continue
@@ -1461,6 +1514,12 @@ class KillDeathDetector:
                                 f"{cur_k}/{cur_d}/{cur_a} "
                                 f"(Δ={dk}/{dd}/{da}, max={max_jump})",
                             )
+                            self._recorder.record(
+                                "reject_jump", kda=kda,
+                                prev=(prev_k, prev_d, prev_a),
+                                note=f"delta {dk}/{dd}/{da} > {max_jump}",
+                                crop=self._kda_strip_crop(img),
+                            )
                             await asyncio.sleep(SCREENSHOT_INTERVAL)
                             continue
 
@@ -1478,8 +1537,22 @@ class KillDeathDetector:
                             if kda == self._pending_kda:
                                 self._pending_count += 1
                             else:
+                                if self._pending_kda is not None:
+                                    # A different value superseded an
+                                    # unconfirmed delta — the old one
+                                    # was a misread we just prevented
+                                    # from firing. Archive its frame.
+                                    self._recorder.record(
+                                        "suppressed_phantom",
+                                        kda=self._pending_kda,
+                                        prev=(prev_k, prev_d, prev_a),
+                                        note="superseded before confirm",
+                                        crop=self._pending_crop,
+                                    )
                                 self._pending_kda = kda
                                 self._pending_count = 1
+                                self._pending_crop = \
+                                    self._kda_strip_crop(img)
                             if self._pending_count < DELTA_CONFIRM_READS:
                                 if self._debug:
                                     _log(
@@ -1500,12 +1573,22 @@ class KillDeathDetector:
                                 continue
                             self._pending_kda = None
                             self._pending_count = 0
+                            self._pending_crop = None
                         else:
                             # Stable read equal to the baseline breaks
                             # any pending-confirmation streak — a real
                             # change doesn't flicker back.
+                            if self._pending_kda is not None:
+                                self._recorder.record(
+                                    "suppressed_phantom",
+                                    kda=self._pending_kda,
+                                    prev=(prev_k, prev_d, prev_a),
+                                    note="reverted to baseline",
+                                    crop=self._pending_crop,
+                                )
                             self._pending_kda = None
                             self._pending_count = 0
+                            self._pending_crop = None
 
                         self._last_kda_read_time = now
 
@@ -1534,6 +1617,12 @@ class KillDeathDetector:
                                 "accept",
                                 f"KILL +{new_kills} ({kill_type}) — "
                                 f"total {self.match_kills}",
+                            )
+                            self._recorder.record(
+                                "event_kill", kda=kda,
+                                prev=(prev_k, prev_d, prev_a),
+                                note=kill_type,
+                                crop=self._kda_strip_crop(img),
                             )
 
                             if self._debug:
@@ -1568,6 +1657,11 @@ class KillDeathDetector:
                                 f"DEATH +{new_deaths} — "
                                 f"total {self.match_deaths}",
                             )
+                            self._recorder.record(
+                                "event_death", kda=kda,
+                                prev=(prev_k, prev_d, prev_a),
+                                crop=self._kda_strip_crop(img),
+                            )
 
                             if self._debug:
                                 img.save(str(
@@ -1592,6 +1686,11 @@ class KillDeathDetector:
                                 "accept",
                                 f"ASSIST +{new_assists} — "
                                 f"total {self.match_assists}",
+                            )
+                            self._recorder.record(
+                                "event_assist", kda=kda,
+                                prev=(prev_k, prev_d, prev_a),
+                                crop=self._kda_strip_crop(img),
                             )
                             self._fire_listeners(
                                 self._assist_listeners, new_assists
