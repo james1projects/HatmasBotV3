@@ -265,7 +265,6 @@
            title="All god prices + the full market">
           Market
         </a>
-        <div class="status"><span class="dot" id="live-dot"></span><span id="status">connecting…</span></div>
       </div>
     </div>
 
@@ -357,8 +356,9 @@
   const $totalPL   = document.getElementById('total-pl');
   const $holdings  = document.getElementById('holdings');
   const $activity  = document.getElementById('activity');
-  const $status    = document.getElementById('status');
-  const $liveDot   = document.getElementById('live-dot');
+  // The brand-band connection-status pill ("connecting…"/"LIVE") was
+  // removed July 2026 with the other LIVE badges — the WebSocket
+  // still reconnects silently below.
 
   let state = {
     holdings: {},
@@ -525,8 +525,6 @@
       return;
     }
     ws.onopen = () => {
-      $status.textContent = 'LIVE';
-      $liveDot.className = 'dot connected';
       reconnectDelay = 1000;
     };
     ws.onmessage = (msg) => {
@@ -537,8 +535,6 @@
       } catch (e) {}
     };
     ws.onclose = () => {
-      $status.textContent = 'reconnecting…';
-      $liveDot.className = 'dot disconnected';
       scheduleReconnect();
     };
     ws.onerror = () => {};

@@ -341,7 +341,6 @@
            title="All god prices + the full market">
           Market
         </a>
-        <div class="status"><span class="dot" id="live-dot"></span><span id="status">connecting…</span></div>
       </div>
     </div>
 
@@ -452,8 +451,9 @@
   const $breakdown = document.getElementById('breakdown');
   const $breakdownCard = document.getElementById('breakdown-card');
   const $chart = document.getElementById('chart');
-  const $liveDot = document.getElementById('live-dot');
-  const $status = document.getElementById('status');
+  // The brand-band connection-status pill ("connecting…"/"LIVE") was
+  // removed July 2026 with the other LIVE badges — the WebSocket
+  // still reconnects silently, and load errors surface via $name.
 
   let priceHistory = [];
   let historyStamps = [];   // ISO-ish timestamps parallel to priceHistory
@@ -465,7 +465,6 @@
       const r = await fetch('/api/god/' + encodeURIComponent(godNameRaw));
       if (r.status === 404) {
         $name.textContent = 'GOD NOT FOUND';
-        $status.textContent = 'no data';
         return;
       }
       if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -475,7 +474,6 @@
       connectWebSocket();
     } catch (err) {
       $name.textContent = "ERR · couldn't load";
-      $status.textContent = err.message || 'error';
     }
   }
 
@@ -850,8 +848,6 @@
       return;
     }
     ws.onopen = () => {
-      $status.textContent = 'LIVE';
-      $liveDot.className = 'dot connected';
       reconnectDelay = 1000;
     };
     ws.onmessage = (msg) => {
@@ -862,8 +858,6 @@
       } catch (e) {}
     };
     ws.onclose = () => {
-      $status.textContent = 'reconnecting…';
-      $liveDot.className = 'dot disconnected';
       scheduleReconnect();
     };
     ws.onerror = () => {};
