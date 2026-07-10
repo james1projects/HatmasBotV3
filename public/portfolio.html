@@ -291,10 +291,15 @@
     <div class="card" id="trade-card" style="display:none">
       <div class="section-title">Trade</div>
       <div class="trade-row">
-        <input class="t-god" id="trade-god" list="trade-gods"
-               aria-label="God to trade"
-               placeholder="God" autocomplete="off">
-        <datalist id="trade-gods"></datalist>
+        <!-- Custom dropdown instead of a datalist: the native popup
+             can't be height-capped and swallowed the whole screen
+             with 110+ gods. -->
+        <div class="t-god-wrap">
+          <input class="t-god" id="trade-god"
+                 aria-label="God to trade"
+                 placeholder="God" autocomplete="off">
+          <div class="t-god-menu" id="trade-god-menu" role="listbox"></div>
+        </div>
         <input class="t-amount" id="trade-amount"
                aria-label="Number of Hats to trade"
                placeholder="Hats (or 'all')" autocomplete="off">
@@ -809,17 +814,84 @@
           $amount.focus();
         }
       });
+
+      // ── god picker dropdown ──
+      // Filter-as-you-type list capped at ~6 rows (see .t-god-menu
+      // in theme.css). Selection: click, or ArrowUp/Down + Enter.
+      // Options use mousedown+preventDefault so picking one wins
+      // the race against the input's blur, and the menu only closes
+      // on an outside mousedown — so dragging its scrollbar works.
+      var godList = [];
+      var $menu = document.getElementById('trade-god-menu');
+      var menuIdx = -1;
+
+      function closeMenu() {
+        $menu.classList.remove('open');
+        menuIdx = -1;
+      }
+      function pick(g) {
+        $god.value = g;
+        closeMenu();
+        updateOwned();
+        $amount.focus();
+      }
+      function renderMenu() {
+        var q = $god.value.trim().toLowerCase();
+        var matches = godList.filter(function (g) {
+          return !q || g.toLowerCase().indexOf(q) !== -1;
+        });
+        $menu.innerHTML = '';
+        menuIdx = -1;
+        if (!matches.length) { closeMenu(); return; }
+        matches.forEach(function (g) {
+          var d = document.createElement('div');
+          d.className = 'opt';
+          d.setAttribute('role', 'option');
+          d.textContent = g;
+          d.addEventListener('mousedown', function (ev) {
+            ev.preventDefault();
+            pick(g);
+          });
+          $menu.appendChild(d);
+        });
+        $menu.classList.add('open');
+      }
+      function moveActive(delta) {
+        var opts = $menu.querySelectorAll('.opt');
+        if (!opts.length) return;
+        menuIdx = (menuIdx + delta + opts.length) % opts.length;
+        opts.forEach(function (o, i) {
+          o.classList.toggle('active', i === menuIdx);
+        });
+        opts[menuIdx].scrollIntoView({ block: 'nearest' });
+      }
+      $god.addEventListener('focus', renderMenu);
+      $god.addEventListener('input', renderMenu);
+      $god.addEventListener('keydown', function (ev) {
+        if (!$menu.classList.contains('open')) return;
+        if (ev.key === 'ArrowDown') { ev.preventDefault(); moveActive(1); }
+        else if (ev.key === 'ArrowUp') { ev.preventDefault(); moveActive(-1); }
+        else if (ev.key === 'Enter') {
+          var opts = $menu.querySelectorAll('.opt');
+          if (menuIdx >= 0 && opts[menuIdx]) {
+            ev.preventDefault();
+            pick(opts[menuIdx].textContent);
+          }
+        } else if (ev.key === 'Escape' || ev.key === 'Tab') {
+          closeMenu();
+        }
+      });
+      document.addEventListener('mousedown', function (ev) {
+        if (!ev.target.closest || !ev.target.closest('.t-god-wrap')) {
+          closeMenu();
+        }
+      });
+
       try {
         var r = await fetch('/api/prices');
         var data = await r.json();
-        var dl = document.getElementById('trade-gods');
-        Object.keys((data && data.prices) || {}).sort()
-          .forEach(function (g) {
-            var o = document.createElement('option');
-            o.value = g;
-            dl.appendChild(o);
-          });
-      } catch (e) { /* datalist is a nicety */ }
+        godList = Object.keys((data && data.prices) || {}).sort();
+      } catch (e) { /* picker list is a nicety */ }
     });
   })();
 </script>

@@ -493,6 +493,36 @@ html body {
 .trade-row input:focus { outline: none; border-color: var(--accent); }
 .trade-row .t-god    { flex: 2 1 140px; }
 .trade-row .t-amount { flex: 1 1 100px; }
+/* God picker dropdown — replaces the native datalist popup, whose
+   height can't be capped by CSS. Short list, scrolls inside. */
+.t-god-wrap { position: relative; flex: 2 1 140px; display: flex; }
+.t-god-wrap .t-god { flex: 1 1 auto; width: 100%; }
+.t-god-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 198px;   /* ~6 rows, then scroll */
+  overflow-y: auto;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  z-index: 30;
+}
+.t-god-menu.open { display: block; }
+.t-god-menu .opt {
+  padding: 7px 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+.t-god-menu .opt:hover,
+.t-god-menu .opt.active {
+  background: var(--panel);
+  color: var(--accent);
+}
 .trade-btn {
   font-family: var(--font-sans);
   font-size: 12px;
