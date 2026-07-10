@@ -504,6 +504,68 @@
     color: var(--text-fade);
     text-align: center;
   }
+  .priority-card .pc-terms {
+    margin-top: 12px;
+    font-size: 11px;
+    color: var(--text-fade);
+    line-height: 1.6;
+  }
+  /* Logged-in nomination controls inside the spin pool card. Same
+     input treatment as the priority form, compacted to one row. */
+  .nominate-box, .nominate-hint {
+    border-top: 1px solid var(--border);
+    margin-top: 12px;
+    padding-top: 12px;
+  }
+  .nominate-row { display: flex; gap: 8px; }
+  .nominate-row select {
+    flex: 1;
+    min-width: 0;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13px;
+    padding: 8px 10px;
+  }
+  .nominate-row select:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .nominate-row button {
+    padding: 8px 14px;
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+    color: #1a1a1a;
+    font-family: var(--font-sans);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: filter 0.1s;
+  }
+  .nominate-row button:hover { filter: brightness(1.08); }
+  .nominate-row button[disabled] {
+    opacity: 0.5;
+    cursor: wait;
+    filter: none;
+  }
+  .nominate-note {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-dim);
+    display: none;
+  }
+  .nominate-note.err { color: var(--red, #ef4444); }
+  .nominate-note.shown { display: block; }
+  .nominate-hint {
+    font-size: 12px;
+    color: var(--text-fade);
+    display: none;
+  }
 </style>
 </head>
 <body>
@@ -546,8 +608,9 @@
         <div class="pc-price">$5.00</div>
       </div>
       <div class="pc-sub">
-        Skip the line. Your god gets dropped at the head of the queue
-        and Hatmaster plays them next. Secure payment via Stripe.
+        Skip the line. Your god goes to the head of the queue and gets
+        a dedicated full gameplay video on the Hatmaster YouTube
+        channel. Secure payment via Stripe.
       </div>
 
       <form id="priority-form" autocomplete="off">
@@ -584,6 +647,12 @@
           Priority requests are currently unavailable.
         </div>
       </form>
+      <div class="pc-terms">
+        Your $5 buys one god request placed at the head of the queue,
+        played as a full gameplay video on the Hatmaster YouTube
+        channel. If your god's video never gets made, you get a full
+        refund. Questions or refunds: whisper Hatmaster on Twitch.
+      </div>
     </div>
 
     <div class="card mod-card" id="mod-card">
@@ -612,6 +681,19 @@
           <div class="count" id="pool-count">--</div>
         </div>
         <div id="pool"></div>
+        <div class="nominate-box" id="nominate-box" style="display:none">
+          <div class="nominate-row">
+            <select id="nom-god" aria-label="God to nominate">
+              <option value="">Select a god…</option>
+            </select>
+            <button id="nom-btn" type="button">Nominate</button>
+          </div>
+          <div class="nominate-note" id="nom-note"></div>
+        </div>
+        <div class="nominate-hint" id="nominate-hint">
+          <a href="/auth/login">Log in with Twitch</a> to nominate a
+          god from here. One per day, same as chat's !nominate.
+        </div>
       </div>
     </div>
 
@@ -899,15 +981,72 @@
         .filter(Boolean)
         .sort((a, b) => a.localeCompare(b));
       if (!gods.length) throw new Error('empty list');
-      $pcGod.innerHTML = '<option value="">Select a god…</option>'
+      const options = '<option value="">Select a god…</option>'
         + gods.map(g => `<option value="${escapeHtml(g)}">`
                         + `${escapeHtml(g)}</option>`).join('');
+      $pcGod.innerHTML = options;
+      $nomGod.innerHTML = options;
     } catch (err) {
       $pcGod.innerHTML = '<option value="">Couldn\'t load god list</option>';
       $pcGod.disabled = true;
+      $nomGod.innerHTML = '<option value="">Couldn\'t load god list</option>';
+      $nomGod.disabled = true;
     }
   }
+  // ─── logged-in nomination (spin pool card) ───────────────────────
+  // Mirrors chat's !nominate via POST /api/nominate. The controls
+  // only appear for logged-in viewers; logged-out viewers get a
+  // login hint instead (and can always nominate from chat).
+  // Declared before the loadGods() call below because loadGods
+  // populates $nomGod too.
+
+  const $nomBox  = document.getElementById('nominate-box');
+  const $nomHint = document.getElementById('nominate-hint');
+  const $nomGod  = document.getElementById('nom-god');
+  const $nomBtn  = document.getElementById('nom-btn');
+  const $nomNote = document.getElementById('nom-note');
+
   loadGods();
+
+  HatmasAuth.ready.then((me) => {
+    if (me && me.logged_in) {
+      $nomBox.style.display = 'block';
+    } else if (me && me.login_available) {
+      $nomHint.style.display = 'block';
+    }
+  });
+
+  function nomShow(msg, isErr) {
+    $nomNote.textContent = msg;
+    $nomNote.classList.toggle('err', !!isErr);
+    $nomNote.classList.add('shown');
+  }
+
+  $nomBtn.addEventListener('click', async () => {
+    const god = $nomGod.value.trim();
+    if (!god) { nomShow('Pick a god first.', true); return; }
+    $nomBtn.disabled = true;
+    try {
+      const r = await fetch('/api/nominate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ god }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || !data.ok) {
+        nomShow(data.error || ('Request failed (' + r.status + ')'), true);
+        return;
+      }
+      nomShow(data.votes === 1
+        ? data.god + ' added to the spin pool.'
+        : '+1 vote for ' + data.god + ' (now ' + data.votes + ' total).');
+      refresh();
+    } catch (e) {
+      nomShow('Network error - try again.', true);
+    } finally {
+      $nomBtn.disabled = false;
+    }
+  });
 
   $pcForm.addEventListener('submit', async (e) => {
     e.preventDefault();

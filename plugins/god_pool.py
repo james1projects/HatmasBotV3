@@ -188,34 +188,31 @@ class GodPoolPlugin:
     #   COMMANDS
     # ──────────────────────────────────────────────────────────────────
 
-    async def cmd_nominate(self, message, args, whisper=False):
-        """!nominate <god> — add a god to the pool (1 per viewer per day)."""
+    async def do_nominate(self, username: str, raw_god: str,
+                          is_broadcaster: bool = False) -> dict:
+        """Pure nomination logic. Callable from any context (chat
+        command, webserver endpoint) — same pattern as ``do_spin``.
+
+        Chat and web nominations share the daily cap because both key
+        god_pool_votes on the lowercase Twitch login.
+
+        Returns a dict for the caller to phrase feedback from:
+            {"ok": False, "reason": "no_db"}
+            {"ok": False, "reason": "unknown_god"}
+            {"ok": False, "reason": "already_voted", "god": <today's pick>}
+            {"ok": True, "god": ..., "votes": n, "pool_size": n}
+        """
         if not self._db:
-            return
-        if not args or not args.strip():
-            await self.bot.send_reply(
-                message,
-                "Use !nominate <god> to add to the spin pool. "
-                "One nomination per day.",
-                whisper)
-            return
-
-        username = (message.chatter.name.lower()
-                    if message.chatter else "")
+            return {"ok": False, "reason": "no_db"}
+        username = (username or "").lower()
         if not username:
-            return
+            return {"ok": False, "reason": "no_user"}
 
-        god = self._resolve_god(args.strip())
+        god = self._resolve_god((raw_god or "").strip())
         if not god:
-            await self.bot.send_reply(
-                message,
-                f"Unknown god: '{args.strip()[:40]}'. Check spelling or "
-                f"try a partial name.",
-                whisper)
-            return
+            return {"ok": False, "reason": "unknown_god"}
 
         today = date.today().isoformat()
-        is_broadcaster = self._is_broadcaster(message.chatter)
 
         # Already voted today? Broadcaster bypasses this check so
         # Hatmaster can seed/curate the spin pool freely. The
@@ -228,11 +225,8 @@ class GodPoolPlugin:
                     (username, today)) as cur:
                 row = await cur.fetchone()
             if row:
-                await self.bot.send_reply(
-                    message,
-                    f"You already nominated {row[0]} today. Try again tomorrow.",
-                    whisper)
-                return
+                return {"ok": False, "reason": "already_voted",
+                        "god": row[0]}
 
         # Add to pool (or increment vote count if already there).
         # The added_by column captures the FIRST nominator only.
@@ -266,6 +260,48 @@ class GodPoolPlugin:
             row = await cur.fetchone()
         votes = row[0] if row else 1
 
+        return {"ok": True, "god": god, "votes": int(votes),
+                "pool_size": int(n_in_pool)}
+
+    async def cmd_nominate(self, message, args, whisper=False):
+        """!nominate <god> — add a god to the pool (1 per viewer per day)."""
+        if not self._db:
+            return
+        if not args or not args.strip():
+            await self.bot.send_reply(
+                message,
+                "Use !nominate <god> to add to the spin pool. "
+                "One nomination per day.",
+                whisper)
+            return
+
+        username = (message.chatter.name.lower()
+                    if message.chatter else "")
+        if not username:
+            return
+
+        result = await self.do_nominate(
+            username, args, self._is_broadcaster(message.chatter))
+
+        if not result["ok"]:
+            reason = result.get("reason")
+            if reason == "unknown_god":
+                await self.bot.send_reply(
+                    message,
+                    f"Unknown god: '{args.strip()[:40]}'. Check spelling or "
+                    f"try a partial name.",
+                    whisper)
+            elif reason == "already_voted":
+                await self.bot.send_reply(
+                    message,
+                    f"You already nominated {result['god']} today. "
+                    f"Try again tomorrow.",
+                    whisper)
+            return
+
+        god = result["god"]
+        votes = result["votes"]
+        n_in_pool = result["pool_size"]
         if votes == 1:
             msg = (f"{god} added to the spin pool! "
                    f"({n_in_pool} god{'s' if n_in_pool != 1 else ''} in pool)")

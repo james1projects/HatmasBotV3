@@ -151,7 +151,9 @@ ROUTES = {
     # Logged-in + trading-enabled so the buy/sell trade card renders.
     # login matches the portfolio the trade card gates on (/twitch/ymir_fan).
     "/api/me": {"logged_in": True, "login": "ymir_fan", "name": "Ymir_Fan",
-                "img": "", "login_available": True,
+                "img": "", "login_available": True, "uid": "12345",
+                "prov": "tw", "yt_login_available": True,
+                "yt_linked": False,
                 "trading_enabled": True, "market_open": True},
     "/api/me/balance": {"login": "ymir_fan", "balance": 8400,
                         "market_open": True},
@@ -163,6 +165,7 @@ PAGES = {
     "/": "landing.html",
     "/market": "market.html",
     "/community": "community.html",
+    "/priority-success": "priority-success.html",
 }
 
 
@@ -206,6 +209,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._json({"ok": True, "action": action, "god": god,
                         "shares": shares, "price": price, "total": hats,
                         "balance": bal, "holding_shares": round(owned, 4)})
+            return
+        if path == "/api/nominate":
+            # Stateless stub: first nomination of the session succeeds,
+            # repeats 409 like the real 1/day cap so the error path is
+            # exercisable in dev.
+            god = body.get("god") or "Ymir"
+            already = getattr(Handler, "_nominated", None)
+            if already:
+                self._json({"ok": False,
+                            "error": f"You already nominated {already} "
+                                     f"today. Try again tomorrow."},
+                           status=409)
+                return
+            Handler._nominated = god
+            self._json({"ok": True, "god": god, "votes": 1,
+                        "pool_size": 1})
             return
         self.send_response(404)
         self.end_headers()
