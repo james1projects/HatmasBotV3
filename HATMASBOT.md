@@ -2257,3 +2257,64 @@ production bot is up (worker port 8474 must be free).
   pens); more enrolled views + a higher FINDIT_SIM_THRESHOLD help.
 - The standalone prototype at C:\Users\james\FindIt still works
   (self-signed HTTPS on the LAN) but is now superseded by this.
+
+## v2.9 Update — YouTube Login, Account Merging, Web Nominations (2026-07-10)
+
+Launch-prep session. Three features plus the $5 rewording, all live
+behind the existing fail-closed switches.
+
+### $5 priority request is now a YouTube product
+
+Every viewer-facing surface (community card, terms blurb, Stripe
+line-item description, success page, chat shoutout) now promises a
+dedicated full gameplay video on the YouTube channel instead of
+"played next on stream". The success page's Watch button points at
+youtube.com/@Hatmaster. Mechanics unchanged: head-of-queue insert,
+refund tooling, 18-test suite still green.
+
+### Web nominations (POST /api/nominate)
+
+Logged-in viewers nominate a god into the spin pool from /community —
+same god_pool tables, same 1/day cap, and the same broadcaster bypass
+as chat's !nominate (the chat command now delegates to the shared
+GodPoolPlugin.do_nominate). Guard chain mirrors /api/trade minus the
+trading switches. Suite: tools/test_web_nominate.py (13 tests).
+
+### Login with YouTube (Google OAuth)
+
+Twin of the Twitch login with the identical zero-storage privacy
+model: youtube.readonly scope (the minimum that yields the UC channel
+id the YT portfolio tables are keyed on), one channels.list(mine)
+call, token discarded in-scope, identity only in the signed HttpOnly
+SameSite=Strict cookie. Session payloads now carry "prov" ("tw"/"yt";
+missing = tw so pre-existing cookies stay valid). YouTube sessions
+keep login empty so every login-keyed write path rejects them with a
+clear message. Setup steps for the Google Cloud OAuth client live in
+core/config.py above GOOGLE_CLIENT_ID; empty creds = the buttons
+simply don't render.
+
+### Account merging (one-time YT -> Twitch migration)
+
+The WEBSITE_TRADING_DESIGN.md §9 deferral, resolved. "Link YouTube"
+on a logged-in Twitch session runs the Google flow with ?link=1: the
+proven Twitch login rides across Google's redirect in a signed
+10-minute SameSite=Lax cookie (the session cookie is Strict and does
+not survive a cross-site redirect), and the callback calls
+core/account_linking.link_and_migrate(): account_links row, YT
+holdings folded into portfolios at weighted-average cost, ledgered on
+both sides (transactions 'yt_merge_in', youtube_transactions
+'merged_to_twitch' negative), youtube_holdings cleared so dividends
+can't double-count. Post-link comment grants route to the Twitch
+portfolio (youtube_rewards._grant_shares checks grant_target), where
+dividends pay real hats instead of compounding bonus shares.
+Idempotent; a channel linked to a different login gets
+"linked_elsewhere" and no writes. Suite:
+tools/test_account_linking.py (18 tests).
+
+### Stripe test-mode state (2026-07-10)
+
+The two stale duplicate TEST webhook endpoints (checkout-only events)
+were deleted and replaced by one endpoint with all three event types;
+config_local.py carries its signing secret. The LIVE go-live checklist
+in 7-6-2026-TODO.md still applies — include all three event types
+there too.
