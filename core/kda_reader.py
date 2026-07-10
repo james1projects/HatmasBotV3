@@ -187,13 +187,20 @@ class KdaReader:
         debug: bool = False,
         debug_dir: Optional[Path] = None,
         logger: Optional[logging.Logger] = None,
-        group_mode: str = "gaps",
+        group_mode: str = "fields",
     ):
         # group_mode: how digit components are split into K / D / A.
-        #   "gaps"   — legacy: split at the two widest x-gaps.
-        #   "fields" — fixed positional windows (KDA_FIELD_WINDOWS);
-        #              components outside every window are discarded.
-        #              Opt-in pending benchmark vs "gaps" (2026-07-09).
+        #   "fields" — DEFAULT since 2026-07-10: fixed positional
+        #              windows (KDA_FIELD_WINDOWS); components outside
+        #              every window are discarded. Promoted after the
+        #              gate passed: 122-frame benchmark AND an
+        #              18-recording batch A/B both produced detections
+        #              identical to "gaps", and it structurally blocks
+        #              icon-as-digit enrollment + cross-field grouping
+        #              corruption (the phantom-assist mechanism).
+        #   "gaps"   — legacy two-widest-x-gaps split. Pass
+        #              group_mode="gaps" to revert instantly if a HUD
+        #              patch ever moves the KDA bar's fixed slots.
         # Affects read_kda() (live + VOD paths); the *_with_details
         # debug path intentionally keeps the legacy grouping for now.
         if group_mode not in ("gaps", "fields"):

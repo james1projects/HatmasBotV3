@@ -256,6 +256,18 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--group-mode",
+        choices=("gaps", "fields"),
+        default="gaps",
+        help=(
+            "KDA digit grouping strategy (core/kda_reader.py). 'gaps' = "
+            "legacy two-widest-x-gaps split; 'fields' = fixed positional "
+            "windows measured 2026-07-09 (noise damage stays field-local, "
+            "icon remnants discarded). Default: gaps until the A/B "
+            "promotion gate passes."
+        ),
+    )
+    p.add_argument(
         "--keep-scanning",
         action="store_true",
         help=(
@@ -443,6 +455,7 @@ def _worker_init(
     data_dir_str: str,
     tesseract_path: Optional[str],
     opts_dict: dict,
+    group_mode: str = "gaps",
 ) -> None:
     """Initializer run once per ProcessPoolExecutor worker."""
     global _WORKER_DETECTOR
@@ -462,6 +475,7 @@ def _worker_init(
         data_dir=Path(data_dir_str),
         tesseract_path=tesseract_path,
         debug=False,
+        group_mode=group_mode,
     )
     opts = _VodDetectorOptions(**opts_dict)
     _WORKER_DETECTOR = _VodDetector(reader, opts)
@@ -526,6 +540,7 @@ def _run_parallel(
     dry_run: bool,
     include_deaths: bool,
     include_assists: bool,
+    group_mode: str = "gaps",
 ) -> tuple[int, int, int, int, int, int, int]:
     """Scan videos in parallel.  Returns aggregate counters.
 
@@ -567,7 +582,7 @@ def _run_parallel(
     with ProcessPoolExecutor(
         max_workers=workers,
         initializer=_worker_init,
-        initargs=(str(data_dir), tesseract_path, opts_dict),
+        initargs=(str(data_dir), tesseract_path, opts_dict, group_mode),
     ) as pool:
         future_to_info = {
             pool.submit(_worker_scan, str(video)): (idx, video)
@@ -668,6 +683,7 @@ def main(argv: list[str] | None = None) -> int:
         data_dir=args.data_dir,
         tesseract_path=tesseract_path,
         debug=False,
+        group_mode=args.group_mode,
     )
 
     if not reader.is_ready:
@@ -743,6 +759,7 @@ def main(argv: list[str] | None = None) -> int:
             dry_run=args.dry_run,
             include_deaths=include_deaths,
             include_assists=include_assists,
+            group_mode=args.group_mode,
         )
     else:
         detector = VodDetector(reader, opts)

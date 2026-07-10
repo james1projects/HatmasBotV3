@@ -116,6 +116,28 @@ STARTUP_REQUIRED_READS = 3
 # every read in the new match forever.
 ZERO_READ_RESET_THRESHOLD = 5
 
+# How many consecutive IDENTICAL increased reads before we accept a
+# delta and fire events (2 ≈ +0.8s announce latency at the default
+# cadence). A single plausible-looking misread — the classic live
+# failure: phantom assist / doubled first kill from kill-banner VFX
+# lighting up the HUD strip — almost never repeats the exact same
+# wrong digits on the next frame, while a real KDA change persists
+# indefinitely. Mirrors BASELINE_REQUIRED_READS in the VOD detector,
+# applied to every delta instead of just the first baseline.
+# (2026-07-09 overnight hardening.)
+DELTA_CONFIRM_READS = 2
+
+# Poisoned-baseline recovery, ported from tools/vod_detector.py
+# (REBASELINE_REQUIRED_READS there — the 7/4 fix that was never
+# mirrored to the live path). If a wrong-but-plausible increase ever
+# does commit, every real read afterwards looks like a "decrease" and
+# is rejected — the overlay stays wrong until the real KDA catches up
+# to the phantom. When this many consecutive reads agree on the exact
+# same "decreased" value, the committed baseline was the misread:
+# accept the agreeing reads as reality, correct the counters, emit
+# nothing for the corrected fields.
+REBASELINE_REQUIRED_READS = 3
+
 # Loud-failure observability. When the god is identified and we're in
 # gameplay but KDA reads keep failing, something is broken (region
 # drift, binarization regression, missing dependency). Every
@@ -195,6 +217,17 @@ class KillDeathDetector:
         # baseline instead of rejecting it as "KDA decreased."
         self._last_match_god = None
         self._zero_read_count = 0
+
+        # Delta-confirmation state (DELTA_CONFIRM_READS): the increased
+        # KDA value awaiting its confirming read(s), and how many
+        # consecutive reads have produced exactly that value.
+        self._pending_kda = None
+        self._pending_count = 0
+
+        # Poisoned-baseline recovery state (REBASELINE_REQUIRED_READS):
+        # the identical "decreased" value consecutive reads agree on.
+        self._decrease_candidate = None
+        self._decrease_candidate_count = 0
 
         # Stats for current match
         self.match_kills = 0
@@ -744,6 +777,10 @@ class KillDeathDetector:
         self._kda_read_failures = 0
         self._last_kda_read_time = 0
         self._recent_kill_times = []
+        self._pending_kda = None
+        self._pending_count = 0
+        self._decrease_candidate = None
+        self._decrease_candidate_count = 0
         self._non_gameplay_count = 0
         self._god_identified = False
         self._god_confirm_name = None
@@ -1290,6 +1327,10 @@ class KillDeathDetector:
                                 self._last_kda_read_time = now
                                 self._recent_kill_times = []
                                 self._zero_read_count = 0
+                                self._pending_kda = None
+                                self._pending_count = 0
+                                self._decrease_candidate = None
+                                self._decrease_candidate_count = 0
                                 self._save_state()
                                 await asyncio.sleep(SCREENSHOT_INTERVAL)
                                 continue
@@ -1313,20 +1354,87 @@ class KillDeathDetector:
                             or cur_d < prev_d
                             or cur_a < prev_a
                         ):
+                            # One or two decreased reads = the SAMPLE is
+                            # the misread (usual case, reject). But
+                            # REBASELINE_REQUIRED_READS consecutive
+                            # identical decreased reads = the committed
+                            # BASELINE was the misread (a phantom
+                            # increase got through) and the agreeing
+                            # reads are reality. Correct the baseline
+                            # and counters; fire nothing for corrected
+                            # fields. Ported from the VOD detector's
+                            # poisoned-baseline recovery (7/4).
+                            if kda == self._decrease_candidate:
+                                self._decrease_candidate_count += 1
+                            else:
+                                self._decrease_candidate = kda
+                                self._decrease_candidate_count = 1
+
+                            if (self._decrease_candidate_count
+                                    >= REBASELINE_REQUIRED_READS):
+                                floor = tuple(
+                                    min(kda[i], self._prev_kda[i])
+                                    for i in range(3)
+                                )
+                                corr_k = prev_k - floor[0]
+                                corr_d = prev_d - floor[1]
+                                corr_a = prev_a - floor[2]
+                                self.match_kills = max(
+                                    0, self.match_kills - corr_k)
+                                self.match_deaths = max(
+                                    0, self.match_deaths - corr_d)
+                                self.match_assists = max(
+                                    0, self.match_assists - corr_a)
+                                _log(
+                                    f"[KillDetector] REBASELINE: "
+                                    f"{self._decrease_candidate_count} "
+                                    f"consecutive reads say {kda}; "
+                                    f"baseline {self._prev_kda} was a "
+                                    f"misread — correcting "
+                                    f"(-{corr_k}K/-{corr_d}D/-{corr_a}A). "
+                                    f"Fields that increased meanwhile "
+                                    f"fire on the next confirmed read."
+                                )
+                                self._log_debug_event(
+                                    "state",
+                                    f"rebaseline {self._prev_kda} → "
+                                    f"{floor} after "
+                                    f"{self._decrease_candidate_count} "
+                                    f"agreeing reads",
+                                )
+                                self._prev_kda = floor
+                                self._decrease_candidate = None
+                                self._decrease_candidate_count = 0
+                                self._pending_kda = None
+                                self._pending_count = 0
+                                self._save_state()
+                                await asyncio.sleep(SCREENSHOT_INTERVAL)
+                                continue
+
                             if self._debug:
                                 _log(
                                     f"[KillDetector] KDA decreased "
                                     f"({self._prev_kda} → {kda}), "
-                                    f"likely OCR misread — skipping"
+                                    f"likely OCR misread — skipping "
+                                    f"({self._decrease_candidate_count}/"
+                                    f"{REBASELINE_REQUIRED_READS} toward "
+                                    f"rebaseline)"
                                 )
                             self._log_debug_event(
                                 "reject",
                                 f"KDA decreased "
                                 f"{prev_k}/{prev_d}/{prev_a} → "
-                                f"{cur_k}/{cur_d}/{cur_a} — misread",
+                                f"{cur_k}/{cur_d}/{cur_a} — misread "
+                                f"({self._decrease_candidate_count}/"
+                                f"{REBASELINE_REQUIRED_READS})",
                             )
                             await asyncio.sleep(SCREENSHOT_INTERVAL)
                             continue
+
+                        # Non-decreasing read: any rebaseline evidence
+                        # must be strictly consecutive to count.
+                        self._decrease_candidate = None
+                        self._decrease_candidate_count = 0
 
                         # Sanity check: reject implausible jumps.
                         dk = cur_k - prev_k
@@ -1355,6 +1463,49 @@ class KillDeathDetector:
                             )
                             await asyncio.sleep(SCREENSHOT_INTERVAL)
                             continue
+
+                        # Delta confirmation: an increased read must
+                        # repeat identically on DELTA_CONFIRM_READS
+                        # consecutive frames before anything fires.
+                        # Misreads (kill-banner VFX, gold popups over
+                        # the HUD strip) almost never produce the same
+                        # wrong digits twice at 0.8s spacing; real KDA
+                        # changes persist. Costs ~0.8s of announce
+                        # latency and stops phantom assists / doubled
+                        # first kills from ever reaching chat, overlay,
+                        # economy — or the template enroller.
+                        if kda != self._prev_kda:
+                            if kda == self._pending_kda:
+                                self._pending_count += 1
+                            else:
+                                self._pending_kda = kda
+                                self._pending_count = 1
+                            if self._pending_count < DELTA_CONFIRM_READS:
+                                if self._debug:
+                                    _log(
+                                        f"[KillDetector] Delta "
+                                        f"{self._prev_kda} → {kda} "
+                                        f"awaiting confirm "
+                                        f"({self._pending_count}/"
+                                        f"{DELTA_CONFIRM_READS})"
+                                    )
+                                self._log_debug_event(
+                                    "state",
+                                    f"delta {prev_k}/{prev_d}/{prev_a} → "
+                                    f"{cur_k}/{cur_d}/{cur_a} pending "
+                                    f"confirm {self._pending_count}/"
+                                    f"{DELTA_CONFIRM_READS}",
+                                )
+                                await asyncio.sleep(SCREENSHOT_INTERVAL)
+                                continue
+                            self._pending_kda = None
+                            self._pending_count = 0
+                        else:
+                            # Stable read equal to the baseline breaks
+                            # any pending-confirmation streak — a real
+                            # change doesn't flicker back.
+                            self._pending_kda = None
+                            self._pending_count = 0
 
                         self._last_kda_read_time = now
 
