@@ -178,3 +178,44 @@ class _TickingMixin:
             "history": self._price_history.get(god_name, [])[-10:],
             "cosmetic": True,
         })
+
+    async def on_correction(self, k_removed: int, d_removed: int,
+                            a_removed: int, corrected_kda) -> None:
+        """Detector rebaseline reverted phantom event(s) — resync the
+        cosmetic match KDA and push corrected numbers to the overlay.
+
+        Without this, a phantom that fired (the rare double-misread
+        that beats the delta-confirm gate) stayed baked into the
+        on-screen KDA and cosmetic price for the rest of the match.
+        The overlay client renders whatever `kda` payload it's sent,
+        so one corrective emit fixes the display; event type
+        "correction" matches no flash branch in the client, so the
+        numbers update quietly without a kill/death animation."""
+        if not self._match_god:
+            return
+
+        self._match_kda[0] = max(0, self._match_kda[0] - k_removed)
+        self._match_kda[1] = max(0, self._match_kda[1] - d_removed)
+        self._match_kda[2] = max(0, self._match_kda[2] - a_removed)
+        god_name = self._match_god
+        k, d, a = self._match_kda
+        new_price = self._cosmetic_price(self._match_start_price, k, d, a)
+        change_pct = (
+            ((new_price - self._match_start_price) / self._match_start_price) * 100
+            if self._match_start_price > 0 else 0.0
+        )
+
+        print(f"[Economy] Detector correction "
+              f"(-{k_removed}K/-{d_removed}D/-{a_removed}A): {god_name} "
+              f"cosmetic KDA resynced to {k}/{d}/{a}, price -> "
+              f"{new_price:.0f} [persisted price unchanged]")
+
+        self._emit_overlay_event("god_stock_update_kd", {
+            "god": god_name,
+            "price": round(new_price),
+            "change_pct": round(change_pct, 1),
+            "event": "correction",
+            "kda": {"k": k, "d": d, "a": a},
+            "history": self._price_history.get(god_name, [])[-10:],
+            "cosmetic": True,
+        })

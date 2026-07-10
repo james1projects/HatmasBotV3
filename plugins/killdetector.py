@@ -267,6 +267,13 @@ class KillDeathDetector:
         self._assist_listeners = []
         self._god_identified_listeners = []
         self._gameplay_ended_listeners = []
+        #   correction   async fn(k_removed, d_removed, a_removed,
+        #                         corrected_kda)  (fired via create_task)
+        # Fired when poisoned-baseline recovery reverts phantom events —
+        # consumers that accumulated those events (economy cosmetic KDA,
+        # overlays, death counter) resync instead of staying wrong for
+        # the rest of the match.
+        self._correction_listeners = []
 
         # God portrait matcher — identifies the god from the in-game
         # portrait before tracker.gg API responds (which has a 2-5 min
@@ -365,6 +372,12 @@ class KillDeathDetector:
     def add_assist_listener(self, fn):
         """Register an async callback for assist events. fn(count)."""
         self._assist_listeners.append(fn)
+
+    def add_correction_listener(self, fn):
+        """Register an async callback for rebaseline corrections.
+        fn(k_removed, d_removed, a_removed, corrected_kda) — the counts
+        are how many phantom kills/deaths/assists were reverted."""
+        self._correction_listeners.append(fn)
 
     def add_god_identified_listener(self, fn):
         """Register an async callback for portrait-identified-the-god events.
@@ -1447,6 +1460,17 @@ class KillDeathDetector:
                                          f"-{corr_a}A corrected",
                                     crop=self._kda_strip_crop(img),
                                 )
+                                # Resync accumulated consumers (economy
+                                # cosmetic KDA/price, overlays, death
+                                # counter) — they counted the phantom
+                                # when it fired and won't hear about
+                                # the correction otherwise.
+                                if corr_k or corr_d or corr_a:
+                                    self._fire_listeners(
+                                        self._correction_listeners,
+                                        int(corr_k), int(corr_d),
+                                        int(corr_a), floor,
+                                    )
                                 self._prev_kda = floor
                                 self._decrease_candidate = None
                                 self._decrease_candidate_count = 0

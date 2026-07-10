@@ -114,9 +114,18 @@ async def main():
         web.trigger_kill_event("death")
         death_counter.increment()
 
+    async def _overlay_on_correction(k_removed, d_removed, a_removed,
+                                     corrected_kda):
+        # Rebaseline reverted phantom event(s): walk back any deaths
+        # that reached the daily tally. (The economy overlay resyncs
+        # via its own correction listener.)
+        if d_removed:
+            death_counter.decrement(d_removed)
+
     kd.add_kill_listener(_overlay_on_kill)
     kd.add_multikill_listener(_overlay_on_multikill)
     kd.add_death_listener(_overlay_on_death)
+    kd.add_correction_listener(_overlay_on_correction)
     bot.register_plugin("killdetector", kd)
 
     # Voice line plugin — channel point redemptions for god voice lines
@@ -201,6 +210,9 @@ async def main():
     kd.add_kill_listener(economy.on_kill)
     kd.add_death_listener(economy.on_death)
     kd.add_assist_listener(economy.on_assist)
+    # Rebaseline corrections resync the cosmetic KDA/price a phantom
+    # inflated — one corrective emit repaints the live overlay.
+    kd.add_correction_listener(economy.on_correction)
 
     # Register economy API routes on webserver
     economy.register_api_routes(web.app)

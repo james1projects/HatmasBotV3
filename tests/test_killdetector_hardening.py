@@ -94,10 +94,17 @@ def run_script(script, timeout=20.0):
     async def on_multi(kill_type):
         multis.append(kill_type)
 
+    corrections = []
+
+    async def on_correction(k_rm, d_rm, a_rm, corrected):
+        corrections.append((k_rm, d_rm, a_rm, tuple(corrected)))
+
     det.add_kill_listener(on_kill)
     det.add_death_listener(on_death)
     det.add_assist_listener(on_assist)
     det.add_multikill_listener(on_multi)
+    det.add_correction_listener(on_correction)
+    det._corrections = corrections  # exposed for assertions
 
     async def main():
         det._running = True
@@ -163,9 +170,13 @@ def test_rebaseline_recovers_from_poison():
     # and the post-recovery kill still fired normally:
     assert ("player_kill", 1) in kills or kills, kills
     assert det.match_kills == 3  # 2 baseline catch-up + 1 live
+    # the correction listener told downstream consumers (economy
+    # cosmetic KDA, overlays, death counter) to walk back the phantom:
+    assert det._corrections == [(0, 0, 1, (2, 1, 0))], det._corrections
     print("ok  poisoned baseline recovers after "
           f"{kd.REBASELINE_REQUIRED_READS} agreeing reads; "
-          "counters corrected; later events fire")
+          "counters corrected; correction listener fired; "
+          "later events fire")
 
 
 def test_multikill_classification_survives_confirm_gate():

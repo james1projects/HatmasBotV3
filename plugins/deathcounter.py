@@ -90,6 +90,15 @@ class DeathCounterPlugin:
         print(f"[DeathCounter] Deaths today: {self._count}")
         return self._count
 
+    def decrement(self, n: int = 1) -> int:
+        """Remove n deaths from today's total (detector rebaseline
+        reverting phantom deaths). Floors at zero. Returns new count."""
+        self._check_day_reset()
+        self._count = max(0, self._count - n)
+        self._save_state()
+        print(f"[DeathCounter] Correction -{n}: deaths today: {self._count}")
+        return self._count
+
     def get_count(self) -> int:
         """Return today's death count, resetting first if the day changed."""
         self._check_day_reset()
