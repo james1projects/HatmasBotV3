@@ -106,16 +106,47 @@ def issue(uid: str, login: str, display_name: str = "",
           max_age: int = DEFAULT_MAX_AGE) -> str:
     """Build + sign a session token for a Twitch identity. login is
     stored lowercase — it's the key MixItUp balances and portfolios
-    rows use, and Helix logins are lowercase already."""
+    rows use, and Helix logins are lowercase already.
+
+    "prov": "tw" marks the provider. Cookies issued before the field
+    existed lack it — treat missing prov as Twitch."""
     now = int(time.time())
     return sign({
         "uid": str(uid),
         "login": (login or "").lower(),
         "name": display_name or login,
         "img": profile_image or "",
+        "prov": "tw",
         "iat": now,
         "exp": now + int(max_age),
     }, secret)
+
+
+def issue_youtube(channel_id: str, display_name: str = "",
+                  profile_image: str = "", secret=None,
+                  max_age: int = DEFAULT_MAX_AGE) -> str:
+    """Build + sign a session token for a YouTube identity. uid is
+    the UC... channel id — the key youtube_portfolios/holdings rows
+    use. login stays empty ON PURPOSE: it's the MixItUp/portfolios
+    key, and a YouTube session must never alias a Twitch account, so
+    every login-keyed guard (trade, nominate, mod) rejects these
+    sessions naturally."""
+    now = int(time.time())
+    return sign({
+        "uid": str(channel_id),
+        "login": "",
+        "name": display_name or "",
+        "img": profile_image or "",
+        "prov": "yt",
+        "iat": now,
+        "exp": now + int(max_age),
+    }, secret)
+
+
+def provider(payload: dict) -> str:
+    """Provider of a verified session payload: "tw" or "yt". Cookies
+    minted before the prov field default to Twitch."""
+    return (payload or {}).get("prov") or "tw"
 
 
 def make_state() -> str:

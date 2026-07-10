@@ -52,9 +52,11 @@ from core.config import (
     WEB_SESSION_SECRET, WEB_TRADING_ENABLED, WEB_TRADE_COOLDOWN,
     WEB_TRADE_MAX_PER_MIN, WEB_OAUTH_REDIRECT_URI, FINDIT_MAX_SESSIONS,
     YOUTUBE_API_KEY, YOUTUBE_CHANNEL_ID,
+    GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, WEB_GOOGLE_REDIRECT_URI,
     TIKTOK_USERNAME, TIKTOK_LATEST_VIDEO_URL, BLUESKY_HANDLE,
     SOCIAL_FEED_CACHE_TTL,
 )
+from core import account_linking as _links
 from core import web_session as _ws
 from core import config as _config
 
@@ -169,6 +171,15 @@ class PublicWebServer:
             print("[PublicWebServer] website login disabled — set "
                   "WEB_SESSION_SECRET in config_local.py (and Twitch "
                   "client id/secret) to enable")
+        # "Log in with YouTube" rides on the same session secret;
+        # Google creds are its only extra requirement (fail closed).
+        self._google_login_enabled = bool(
+            self._login_enabled
+            and GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
+        # account_links schema is ensured once, lazily (first request
+        # that needs it) — youtube_rewards.on_ready also creates it,
+        # but the webserver must not depend on that plugin being on.
+        self._links_schema_done = False
 
         # Per-portfolio WebSocket client sets, keyed on yt_channel_id.
         self._ws_clients: Dict[str, Set[web.WebSocketResponse]] = {}
@@ -284,6 +295,14 @@ class PublicWebServer:
         self.app.router.add_get("/auth/login", self._handle_auth_login)
         self.app.router.add_get("/auth/twitch/callback",
                                 self._handle_auth_callback)
+        # "Log in with YouTube" — same zero-storage flow via Google
+        # OAuth (youtube.readonly, token used once for channel id and
+        # discarded). ?link=1 turns the same flow into "link this
+        # YouTube channel to my logged-in Twitch account".
+        self.app.router.add_get("/auth/google/login",
+                                self._handle_google_login)
+        self.app.router.add_get("/auth/google/callback",
+                                self._handle_google_callback)
         self.app.router.add_post("/auth/logout", self._handle_auth_logout)
         self.app.router.add_get("/api/me", self._handle_api_me)
         self.app.router.add_get("/api/me/balance",
@@ -295,6 +314,10 @@ class PublicWebServer:
         self.app.router.add_post("/api/me/visibility",
                                  self._handle_api_me_visibility)
         self.app.router.add_post("/api/trade", self._handle_api_trade)
+        # Logged-in god nomination into the spin pool — same rules and
+        # tables as chat's !nominate (shared 1/day cap per Twitch login).
+        self.app.router.add_post("/api/nominate",
+                                 self._handle_api_nominate)
 
         # Social tabs (Social_Tabs_Plan.md) — read-only, cached 15 min.
         self.app.router.add_get("/api/social/youtube",
@@ -1918,6 +1941,14 @@ class PublicWebServer:
         return web.json_response({"ok": True, "action": "deleted"},
                                  headers=self._NO_STORE)
 
+    async def _ensure_links_schema(self):
+        """Create the account_links table on first use (once per
+        process — youtube_rewards.on_ready also ensures it, but the
+        webserver must not depend on that plugin being enabled)."""
+        if not self._links_schema_done and self._db is not None:
+            await _links.ensure_schema(self._db)
+            self._links_schema_done = True
+
     def _session_identity(self, request: web.Request) -> Optional[dict]:
         """Verified session payload, or None (= logged out)."""
         if not self._login_enabled:
@@ -2065,6 +2096,183 @@ class PublicWebServer:
         print(f"[PublicWebServer] website login: {u.get('login')}")
         return resp
 
+    # Link-mode cookie: carries the PROVEN Twitch login across the
+    # Google round-trip. The session cookie itself is SameSite=Strict
+    # so the browser will NOT attach it to Google's redirect back to
+    # our callback — instead we capture the identity at /auth/google/
+    # login time (a same-site request where the session IS present)
+    # and stash the login in this signed, 10-minute, SameSite=Lax
+    # cookie. Signed with the same session secret, so it can't be
+    # forged any more than a session can.
+    GOOGLE_LINK_COOKIE = "hatmas_oauth_link"
+
+    async def _handle_google_login(self, request: web.Request):
+        """GET /auth/google/login[?link=1] — redirect to Google's
+        consent screen with a state nonce. link=1 additionally
+        requires a live Twitch session and turns the callback into
+        an account-link instead of a login."""
+        if not self._google_login_enabled:
+            return web.Response(
+                status=503,
+                text="YouTube login is not configured on this site.")
+        if not self._ip_rate_ok(request):
+            return web.Response(status=429, text="Too many requests.")
+
+        link_login = ""
+        if request.query.get("link") == "1":
+            ident = self._session_identity(request)
+            if ident is None or _ws.provider(ident) != "tw" \
+                    or not ident.get("login"):
+                return web.Response(
+                    status=403,
+                    text="Log in with Twitch first, then link YouTube.")
+            link_login = ident["login"]
+
+        state = _ws.make_state()
+        params = urlencode({
+            "response_type": "code",
+            "client_id": GOOGLE_CLIENT_ID,
+            "redirect_uri": WEB_GOOGLE_REDIRECT_URI,
+            # Minimum scope that yields the UC... channel id the
+            # youtube_portfolios/holdings tables are keyed on. Plain
+            # openid identity gives a Google sub, which maps to
+            # nothing we store.
+            "scope": "https://www.googleapis.com/auth/youtube.readonly",
+            "state": state,
+            # No refresh token wanted; re-prompt account choice so
+            # multi-channel users can pick the right one.
+            "prompt": "select_account",
+        })
+        resp = web.HTTPFound(
+            f"https://accounts.google.com/o/oauth2/v2/auth?{params}")
+        resp.set_cookie(
+            _ws.OAUTH_STATE_COOKIE, state, max_age=600, httponly=True,
+            secure=self._cookie_secure, samesite="Lax", path="/")
+        if link_login:
+            now = int(time.time())
+            link_token = _ws.sign(
+                {"login": link_login, "mode": "link",
+                 "iat": now, "exp": now + 600},
+                WEB_SESSION_SECRET)
+            resp.set_cookie(
+                self.GOOGLE_LINK_COOKIE, link_token, max_age=600,
+                httponly=True, secure=self._cookie_secure,
+                samesite="Lax", path="/")
+        return resp
+
+    async def _handle_google_callback(self, request: web.Request):
+        """GET /auth/google/callback — verify state, exchange the
+        code server-side, resolve the YouTube channel, drop the
+        token. Then either issue a YouTube session (login mode) or
+        fold the channel into the caller's Twitch account (link
+        mode). Mirrors _handle_auth_callback's shape throughout."""
+        if not self._google_login_enabled:
+            return web.Response(
+                status=503,
+                text="YouTube login is not configured on this site.")
+        if not self._ip_rate_ok(request):
+            return web.Response(status=429, text="Too many requests.")
+
+        state = request.query.get("state", "")
+        cookie_state = request.cookies.get(_ws.OAUTH_STATE_COOKIE, "")
+        code = request.query.get("code", "")
+        if not state or not cookie_state or state != cookie_state \
+                or not code:
+            return web.Response(
+                status=403,
+                text="Login state mismatch. Return to hatmaster.tv "
+                     "and try logging in again.")
+
+        try:
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession(timeout=timeout) as http:
+                async with http.post(
+                    "https://oauth2.googleapis.com/token",
+                    data={
+                        "client_id": GOOGLE_CLIENT_ID,
+                        "client_secret": GOOGLE_CLIENT_SECRET,
+                        "code": code,
+                        "grant_type": "authorization_code",
+                        "redirect_uri": WEB_GOOGLE_REDIRECT_URI,
+                    },
+                ) as r:
+                    tok = await r.json()
+                access_token = tok.get("access_token")
+                if not access_token:
+                    print(f"[PublicWebServer] Google OAuth exchange "
+                          f"failed: {tok.get('error', 'no token')}")
+                    return web.HTTPFound("/?login=failed")
+                async with http.get(
+                    "https://www.googleapis.com/youtube/v3/channels",
+                    params={"part": "snippet", "mine": "true"},
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                    },
+                ) as r:
+                    chans = await r.json()
+        except Exception as e:
+            print(f"[PublicWebServer] Google OAuth callback error: {e}")
+            return web.HTTPFound("/?login=failed")
+        # access_token goes out of scope here — never persisted.
+
+        items = (chans or {}).get("items") or []
+        if not items:
+            # Google account with no YouTube channel — nothing to key
+            # a portfolio on.
+            print("[PublicWebServer] Google login: account has no "
+                  "YouTube channel")
+            return web.HTTPFound("/?login=nochannel")
+        chan = items[0]
+        channel_id = chan.get("id", "")
+        snippet = chan.get("snippet") or {}
+        title = snippet.get("title", "")
+        thumb = (((snippet.get("thumbnails") or {}).get("default")
+                  or {}).get("url", ""))
+        if not channel_id:
+            return web.HTTPFound("/?login=failed")
+
+        link_claim = _ws.verify(
+            request.cookies.get(self.GOOGLE_LINK_COOKIE),
+            WEB_SESSION_SECRET)
+
+        if link_claim and link_claim.get("mode") == "link" \
+                and link_claim.get("login"):
+            # ── link mode: both identities proven ──
+            login = link_claim["login"]
+            outcome = "failed"
+            if self._db is not None:
+                try:
+                    await self._ensure_links_schema()
+                    result = await _links.link_and_migrate(
+                        self._db, channel_id, login)
+                    if result.get("ok"):
+                        outcome = ("already" if result.get("already")
+                                   else "ok")
+                        moved = result.get("migrated") or []
+                        print(f"[PublicWebServer] LINKED yt:{channel_id}"
+                              f" -> twitch:{login} "
+                              f"({len(moved)} holdings migrated)")
+                    else:
+                        outcome = result.get("reason", "failed")
+                except Exception as e:
+                    print(f"[PublicWebServer] link_and_migrate "
+                          f"failed: {e}")
+            resp = web.HTTPFound(
+                f"/twitch/{login}?linked={outcome}")
+            resp.del_cookie(self.GOOGLE_LINK_COOKIE, path="/")
+            resp.del_cookie(_ws.OAUTH_STATE_COOKIE, path="/")
+            return resp
+
+        # ── login mode: issue a YouTube session ──
+        token = _ws.issue_youtube(
+            channel_id, title, thumb, secret=WEB_SESSION_SECRET)
+        resp = web.HTTPFound(f"/yt/{channel_id}")
+        self._set_session_cookie(resp, token)
+        resp.del_cookie(_ws.OAUTH_STATE_COOKIE, path="/")
+        print(f"[PublicWebServer] website login (yt): {channel_id} "
+              f"({title})")
+        return resp
+
     async def _handle_auth_logout(self, request: web.Request):
         """POST /auth/logout — POST (not GET) so a hostile <img> tag
         cannot log viewers out."""
@@ -2080,15 +2288,31 @@ class PublicWebServer:
             return web.json_response(
                 {"logged_in": False,
                  "login_available": self._login_enabled,
+                 "yt_login_available": self._google_login_enabled,
                  "trading_enabled": self._trading_allowed(),
                  "market_open": self._market_open()},
                 status=401, headers=self._NO_STORE)
+        prov = _ws.provider(ident)
+        # Twitch sessions: has this account already linked a YouTube
+        # channel? Drives the "Link YouTube" chip in auth.js.
+        yt_linked = False
+        if (prov == "tw" and self._google_login_enabled
+                and self._db is not None and ident.get("login")):
+            try:
+                await self._ensure_links_schema()
+                yt_linked = bool(await _links.get_links_for_twitch(
+                    self._db, ident["login"]))
+            except Exception as e:
+                print(f"[PublicWebServer] link lookup failed: {e}")
         return web.json_response({
             "logged_in": True,
             "uid": ident.get("uid"),
             "login": ident.get("login"),
             "name": ident.get("name"),
             "img": ident.get("img"),
+            "prov": prov,
+            "yt_login_available": self._google_login_enabled,
+            "yt_linked": yt_linked,
             "trading_enabled": self._trading_allowed(),
             "market_open": self._market_open(),
         }, headers=self._NO_STORE)
@@ -2179,6 +2403,13 @@ class PublicWebServer:
             return web.json_response(
                 {"ok": False, "error": "Log in with Twitch first."},
                 status=401, headers=self._NO_STORE)
+        if _ws.provider(ident) != "tw" or not ident.get("login"):
+            # leaderboard_opt_out lives on the Twitch portfolio row —
+            # a YouTube session has no login key to write to.
+            return web.json_response(
+                {"ok": False, "error": "This setting needs a Twitch "
+                                       "login."},
+                status=403, headers=self._NO_STORE)
         if not self._origin_ok(request):
             return web.json_response(
                 {"ok": False, "error": "Bad origin."},
@@ -2238,6 +2469,12 @@ class PublicWebServer:
         ident = self._session_identity(request)
         if ident is None:
             return err(401, "Log in with Twitch first.")
+        if _ws.provider(ident) != "tw":
+            # YouTube sessions have no Twitch login and no MixItUp
+            # balance — shares and hats are keyed on the Twitch side.
+            return err(403, "Trading needs a Twitch login. Log in "
+                            "with Twitch (you can link your YouTube "
+                            "account from there).")
         login = (ident.get("login") or "").lower()
         # 3. origin allowlist (CSRF backstop)
         if not self._origin_ok(request):
@@ -2343,6 +2580,84 @@ class PublicWebServer:
                                 result.get("net_received")),
             "balance": balance,
             "holding_shares": holding_shares,
+        }, headers=self._NO_STORE)
+
+    async def _handle_api_nominate(self, request: web.Request):
+        """POST /api/nominate — body {god}. Adds one god to the spin
+        pool for the logged-in viewer, exactly like chat's !nominate:
+        the same god_pool tables and the same 1/day cap (both key
+        god_pool_votes on the lowercase Twitch login, so a chat vote
+        and a web vote can't stack).
+
+        Guard chain mirrors /api/trade minus the trading switches and
+        the per-user cooldown — the 1/day cap is the real limiter and
+        the per-IP bucket backstops abuse. No hats move here, so the
+        MixItUp-up check doesn't apply either.
+        """
+        def err(status, message, **extra_headers):
+            return web.json_response(
+                {"ok": False, "error": message}, status=status,
+                headers={**self._NO_STORE, **extra_headers})
+
+        # 1. session
+        ident = self._session_identity(request)
+        if ident is None:
+            return err(401, "Log in with Twitch first.")
+        if _ws.provider(ident) != "tw":
+            # Nominations share chat's 1/day cap, keyed on the Twitch
+            # login — a YouTube session has none.
+            return err(403, "Nominating needs a Twitch login.")
+        login = (ident.get("login") or "").lower()
+        # 2. origin allowlist (CSRF backstop)
+        if not self._origin_ok(request):
+            return err(403, "Bad origin.")
+        # 3. excluded bot accounts
+        if not login or login in EXCLUDED_USERS_LOWER:
+            return err(403, "This account cannot nominate.")
+        # 4. per-IP bucket (shared with /api/trade + /auth/*)
+        if not self._ip_rate_ok(request):
+            return err(429, "Too many requests.")
+        # 5. plugin availability
+        god_pool = ((self.bot.plugins or {}).get("god_pool")
+                    if self.bot else None)
+        if god_pool is None or getattr(god_pool, "_db", None) is None:
+            return err(503, "Nominations are offline right now.")
+        # 6. body shape
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return err(400, "Bad JSON.")
+        god_input = (str(body.get("god") or "")).strip()
+        if not god_input:
+            return err(400, "god is required.")
+
+        # Broadcaster bypasses the daily cap on the site too — the
+        # same curation privilege chat grants (god_pool matches on
+        # login as its badge-less fallback, mirrored here).
+        channel = (getattr(_config, "TWITCH_CHANNEL", "") or "").lower()
+        is_broadcaster = bool(channel) and login == channel
+
+        result = await god_pool.do_nominate(
+            login, god_input, is_broadcaster=is_broadcaster)
+
+        if not result.get("ok"):
+            reason = result.get("reason")
+            if reason == "unknown_god":
+                return err(400, f"Unknown god: {god_input[:40]}. "
+                                f"Check spelling or try a partial name.")
+            if reason == "already_voted":
+                return err(409, f"You already nominated "
+                                f"{result.get('god')} today. "
+                                f"Try again tomorrow.")
+            return err(503, "Nominations are offline right now.")
+
+        print(f"[PublicWebServer] WEB NOMINATE: {login} -> "
+              f"{result['god']} ({result['votes']} votes)")
+        return web.json_response({
+            "ok": True,
+            "god": result["god"],
+            "votes": result["votes"],
+            "pool_size": result["pool_size"],
         }, headers=self._NO_STORE)
 
     # ──────────────────────────────────────────────────────────────────

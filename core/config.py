@@ -208,16 +208,17 @@ OBS_GODREQ_GROUP = ""                        # Group name if sources are in a gr
 # preventing a malicious POST from queuing for free, so the secret
 # MUST come from Stripe's dashboard, not a guess.
 #
-# Setup:
-#   1. stripe.com → Products → create "Priority God Request" at $5.00.
-#   2. Developers → API keys → copy Secret key (sk_test_... for dev,
+# Setup (no dashboard Product needed — checkout uses inline price_data):
+#   1. Developers → API keys → copy Secret key (sk_test_... for dev,
 #      sk_live_... when going live). Drop into config_local.py as
 #      STRIPE_SECRET_KEY.
-#   3. Developers → Webhooks → Add endpoint pointed at
+#   2. Developers → Webhooks → Add endpoint pointed at
 #      https://hatmaster.tv/api/stripe-webhook listening for
-#      "checkout.session.completed". Copy the Signing secret
-#      (whsec_...) into config_local.py as STRIPE_WEBHOOK_SECRET.
-#   4. For local testing: `stripe listen --forward-to
+#      "checkout.session.completed", "charge.refunded", and
+#      "charge.dispute.created" (all three — refunds/disputes must
+#      unqueue). Copy the Signing secret (whsec_...) into
+#      config_local.py as STRIPE_WEBHOOK_SECRET.
+#   3. For local testing: `stripe listen --forward-to
 #      http://localhost:8070/api/stripe-webhook` and use that CLI
 #      session's whsec_... in config_local.py while developing.
 #
@@ -256,6 +257,29 @@ WEB_TRADING_ENABLED = False     # master switch — flip after first live test
 WEB_TRADE_COOLDOWN = 3          # seconds between trades per user (mirrors chat TRADE_COOLDOWN)
 WEB_TRADE_MAX_PER_MIN = 30      # per-IP fixed-window cap on /api/trade + /auth/*
 WEB_OAUTH_REDIRECT_URI = "https://hatmaster.tv/auth/twitch/callback"
+
+# ── "Log in with YouTube" (Google OAuth) ──
+# Same zero-storage model as the Twitch login: the Google token is
+# used once server-side to resolve the viewer's YouTube channel id
+# (youtube.readonly scope + one channels.list(mine=true) call), then
+# discarded. The signed session cookie is the only artifact.
+#
+# Setup (console.cloud.google.com):
+#   1. Create a project (or reuse the one holding YOUTUBE_API_KEY).
+#   2. APIs & Services → Enable "YouTube Data API v3".
+#   3. OAuth consent screen → External. Add the youtube.readonly
+#      scope. Until Google verifies the app, users see an
+#      "unverified app" warning and a ~100-user cap — fine for
+#      launch, submit for verification when it matters.
+#   4. Credentials → Create OAuth client ID → Web application.
+#      Authorized redirect URIs: https://hatmaster.tv/auth/google/callback
+#      (plus the localhost variant below for dev).
+#   5. Drop client id + secret into config_local.py.
+# Empty values = the YouTube login button simply doesn't render
+# (fail closed, same as the Twitch login).
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+WEB_GOOGLE_REDIRECT_URI = "https://hatmaster.tv/auth/google/callback"
 # Dev override for config_local.py:
 #   WEB_OAUTH_REDIRECT_URI = "http://localhost:8070/auth/twitch/callback"
 

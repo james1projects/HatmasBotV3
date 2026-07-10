@@ -68,6 +68,7 @@ from core.config import (
     YOUTUBE_DEEP_SCAN_INTERVAL,
     YOUTUBE_DEEP_SCAN_VIDEOS,
 )
+from core import account_linking as _account_links
 from core.youtube_parser import parse_my_god, load_known_gods
 from core.youtube_schema import ensure_youtube_schema
 
@@ -136,6 +137,7 @@ class YouTubeRewardsPlugin:
             self._enabled = False
             return
         await ensure_youtube_schema(self._db)
+        await _account_links.ensure_schema(self._db)
         await self._ensure_pending_nominations_schema()
 
         self._known_gods = load_known_gods(BASE_DIR)
@@ -642,7 +644,32 @@ class YouTubeRewardsPlugin:
         Add `shares` of `god` to the channel's holdings, updating
         avg_cost as a weighted average. Records a row in
         `youtube_transactions` for history.
+
+        Linked channels (account_links, set when a viewer merges
+        their YouTube identity into their Twitch account on the
+        website) get the grant in their Twitch portfolio instead —
+        real shares that trade and earn hat dividends. The
+        youtube_transactions ledger still records the grant against
+        the channel so per-video history stays complete.
         """
+        try:
+            target = await _account_links.grant_target(
+                self._db, channel_id)
+        except Exception:
+            target = None  # table may not exist yet — normal path
+        if target:
+            await _account_links.grant_to_twitch(
+                self._db, target, god, shares, price,
+                txn_type="yt_comment_share")
+            await self._db.execute("""
+                INSERT INTO youtube_transactions
+                    (yt_channel_id, god_name, type, shares, price,
+                     yt_video_id)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (channel_id, god, f"{txn_type}_linked", shares,
+                  price, video_id))
+            return
+
         # Read current position to compute new avg_cost.
         async with self._db.execute("""
             SELECT shares, avg_cost FROM youtube_holdings

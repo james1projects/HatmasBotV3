@@ -30,6 +30,7 @@ window.HatmasAuth = (function () {
     const el = document.createElement('div');
     el.className = 'auth-chip';
     if (me && me.logged_in) {
+      const isYt = me.prov === 'yt';
       if (me.img) {
         const img = document.createElement('img');
         img.className = 'auth-avatar';
@@ -39,10 +40,24 @@ window.HatmasAuth = (function () {
       }
       const link = document.createElement('a');
       link.className = 'auth-name';
-      link.href = '/twitch/' + encodeURIComponent(me.login);
-      link.textContent = me.name || me.login;
+      // YouTube sessions have no Twitch login — their portfolio
+      // lives under the channel id.
+      link.href = isYt
+        ? '/yt/' + encodeURIComponent(me.uid)
+        : '/twitch/' + encodeURIComponent(me.login);
+      link.textContent = me.name || me.login || 'You';
       link.title = 'Your portfolio';
       el.appendChild(link);
+      if (!isYt && me.yt_login_available && !me.yt_linked) {
+        // One-time merge: prove YouTube ownership via Google, the
+        // server folds that channel's shares into this account.
+        const yt = document.createElement('a');
+        yt.className = 'icon-toggle';
+        yt.href = '/auth/google/login?link=1';
+        yt.textContent = 'Link YouTube';
+        yt.title = 'Move your YouTube comment shares into this account';
+        el.appendChild(yt);
+      }
       const out = document.createElement('button');
       out.className = 'icon-toggle';
       out.textContent = 'Log out';
@@ -54,13 +69,23 @@ window.HatmasAuth = (function () {
       el.appendChild(out);
       return el;
     }
-    if (me && me.login_available) {
-      const a = document.createElement('a');
-      a.className = 'icon-toggle';
-      a.href = '/auth/login';
-      a.textContent = 'Log in with Twitch';
-      a.title = 'Log in to trade from the site';
-      el.appendChild(a);
+    if (me && (me.login_available || me.yt_login_available)) {
+      if (me.login_available) {
+        const a = document.createElement('a');
+        a.className = 'icon-toggle';
+        a.href = '/auth/login';
+        a.textContent = 'Log in with Twitch';
+        a.title = 'Log in to trade from the site';
+        el.appendChild(a);
+      }
+      if (me.yt_login_available) {
+        const y = document.createElement('a');
+        y.className = 'icon-toggle';
+        y.href = '/auth/google/login';
+        y.textContent = 'Log in with YouTube';
+        y.title = 'See the shares your YouTube comments earned';
+        el.appendChild(y);
+      }
       return el;
     }
     return null; // login not configured — render nothing
