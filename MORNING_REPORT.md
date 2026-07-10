@@ -1,123 +1,114 @@
-# Morning Report — overnight run 2026-07-08 → 07-09
+# Morning Report — overnight run 2026-07-09 → 07-10 (KDA reliability night)
 
-Branch **`overnight-2026-07-08`** (worktree `C:\Projects\HatmasBot-overnight-0708`),
-6 commits, never pushed, main untouched. All 5 test suites pass in the worktree
-(economy, trading_hardening, web_session, web_trade, priority_request).
+Branch **`overnight-2026-07-09`** (worktree `C:\Projects\HatmasBot-overnight-0709`),
+3 commits, never pushed, main untouched. All 6 test suites green (the 5 usual +
+a new killdetector hardening suite).
 
-**Preview images to eyeball first:** `rendered/` in the MAIN tree —
-`intro_sylvanus_preview.png` (the new intro strip composited over real gameplay),
-`outro_sylvanus.png` (hat-priced outro from yesterday evening).
-
-## Merge
+## Merge — and ONE morning action that matters
 
 ```
 cd C:\Projects\HatmasBot
-git merge overnight-2026-07-08
-git worktree remove C:\Projects\HatmasBot-overnight-0708
+git merge overnight-2026-07-09
+git worktree remove C:\Projects\HatmasBot-overnight-0709
 ```
 
-Heads-up before merging: I MOVED last evening's untracked outro work
-(`tools/build_outro.py`, `assets/fonts/`) out of the main tree and committed it
-on this branch — so the merge brings it back tracked. If you still have those
-paths untracked in main (you shouldn't), the merge will say so; delete the
-untracked copies and re-merge.
+⚠️ **Then restart the bot** (it's been running since yesterday morning and keeps
+the OLD detector in memory until restarted). Kill the python task and let the
+logon task relaunch it, or just reboot.
 
-## The commits (what / why / risk / verification)
+## Why your live overlay misbehaved — both mechanisms found and fixed
 
-### 1. `2cff5ba` — Outro card builder (yesterday evening's work, committed)
-`tools/build_outro.py` + `assets/fonts/` (Bebas Neue, Inter, JetBrains Mono +
-OFL licenses). You saw and approved the renders live. **Risk: none** (new files).
+Your symptoms were precise and both traced to root causes:
 
-### 2. `b118db0` — Intro overlay builder
-`tools/build_intro.py` — transparent 1920×1080 PNG, slim top-center strip: god
-icon, name, K/W/L, win rate, no share price. Default `y=140` clears the SMITE 2
-scoreboard row (`--y 26` hugs the frame top if you prefer — the preview render
-of both is what sold me on 140). `--over <frame.png>` writes a `*_preview.png`
-composited over gameplay for legibility checks.
-**Usage:** `py tools\build_intro.py` (last god played) or `--god "Hou Yi"`.
-**Risk: none** (new file). **Verified:** rendered over a real captured frame.
+**"It messes up around 1st/2nd kill" / "says I have an assist when I don't"** —
+the live detector accepted ANY single frame that read as a plausible increase.
+Kill moments are exactly when the HUD strip is noisiest (kill banner, gold
+popups), so a one-frame misread like `0/0/0 → 0/0/1` instantly fired chat,
+overlay, an economy tick — and even **enrolled its garbage digits as new
+templates**, slowly polluting the matcher. Fix: `DELTA_CONFIRM_READS` — a
+change must repeat identically on 2 consecutive frames (0.8s apart) before
+anything fires. Misreads almost never produce the same wrong digits twice;
+real kills persist. Cost: kill popups arrive ~1s later. (`5ef1e36`)
 
-### 3. `e16247b` — Video kit builder
-`tools/build_video_kit.py` — one command per sorted recording:
+**"...and then it stays messed up"** — once a phantom committed, every real
+read afterwards looked like a *decrease* and was rejected, forever, until your
+real KDA caught up to the phantom. This was the poisoned-baseline recovery the
+7/4 run added to the VOD scanner but never mirrored live (it was an open
+thread in my notes). Now 3 consecutive agreeing "decreased" reads correct the
+baseline and the on-screen counters. (`5ef1e36`)
 
-```
-py tools\build_video_kit.py "recordings\Atlas\Atlas-46.mp4"
-```
+Also promoted `group_mode="fields"` (yesterday's positional-window grouping) to
+the **default** for both live and VOD paths after the promotion gate passed —
+see A/B below. Instant revert if a SMITE patch moves the HUD:
+`KdaReader(group_mode="gaps")`.
 
-writes next to the video: `intro_<stem>.png`, `outro_<stem>.png`, and
-`<stem>.chapters.txt` — a paste-ready YouTube chapter list from the kill feed
-(First Blood / Double Kill / Triple Kill titles, YouTube's 0:00-first and
-10s-minimum-gap rules enforced, `--offset N` if your edit prepends N seconds,
-`--include-deaths` for self-deprecating "It Gets Worse" chapters).
-God inferred from `gods_seen` → folder name; `--god` overrides.
-**Risk: none** (new file). **Verified:** real Atlas fixture + synthetic
-multi-kill/spacing/offset/empty cases.
+## The A/B (promotion gate) — double confirmation
 
-### 4. `278dccd` — Bug fix: manual retag wiped stored YouTube titles
-`mark_youtube_video.py set <id> <god>` passes `title=""` and the manual upsert
-wrote it through, blanking whatever title `--auto-scan` had stored. Now
-`COALESCE(NULLIF(...))` keeps the old title unless a non-empty one is given.
-**Risk: low** (one SQL expression). **Verified:** in-memory DB, 3 scenarios.
-*(Found by the local fleet — the 1 confirmed hit out of ~6 concrete claims; the
-fps-truncation, Vegas-rename, shadow-canvas and HEALTHZ_TIMEOUT claims were all
-false alarms on verification, right on the usual ~80% rate.)*
+Rescanned 20 recordings (~5.5h footage) with fields mode and diffed against
+your batch's gaps-mode output:
+- **Primary detections: identical on all 20.** Zero regression. Gate passed.
+- The only diffs were the merged-key fix (yesterday's `deb0f88`) doing its job:
+  10 recordings gained back trade deaths/assists the old merge silently
+  swallowed — including both cases I autopsied yesterday, at exactly the
+  predicted timestamps (Horus death@226.8s, Atlas-101 death@1062.5s).
 
-### 5. `364bf6d` — Kill-feed markers on the DaVinci timeline ⭐
-`tools/resolve_markers.py` — the `.events.json` files have had **no consumer on
-the editing side since Vegas retired**; this closes that gap. After
-`resolve_import.py`, run:
+## Your offstream ranked sessions are now diagnosis sessions (`adfb15d`)
+
+The detector got a **flight recorder**: every decision (event, reject,
+suppressed phantom, rebaseline, reset) is journaled to
+`data/kda_sessions/<timestamp>/` with the KDA-strip crop saved for each
+anomaly. Zero configuration — it runs whenever detection runs, live or not.
+
+After you play with your girlfriend, just run:
 
 ```
-py tools\resolve_markers.py "recordings\Atlas\Atlas-46.mp4"
+py tools\kda_session_report.py
 ```
 
-and every kill/death/assist becomes a Green/Red/Yellow marker on the timeline —
-jump between fights with Shift+Up/Down on the Edit page. Same-frame collisions
-auto-nudge; `--offset` / `--include` as you'd expect.
-**Risk: low** (new file; writes only markers + SaveProject).
-**Verified LIVE:** launched Resolve Studio, built a scratch Atlas-46 project,
-added 6 synthetic events (incl. a same-frame kill+assist), read every marker
-back at the exact expected frame/color, deleted the scratch project, quit
-Resolve. Your project list is as you left it.
+You get a timeline of everything the detector decided, plus a verdict like
+*"3 phantom reads caught by the confirm gate before firing — these would have
+been live misfires before 7/10"*. The suppressed-phantom frames are saved
+PNGs — every misread the gate catches becomes labeled evidence, so if
+anything ever still misbehaves we'll have the exact frame that did it.
 
-### 6. (this file) — report commit
+## Commits
 
-## Brainstorm — video pipeline, ranked (your picked focus)
+| commit | what | verification |
+|---|---|---|
+| `5ef1e36` | delta confirm + rebaseline recovery + fields default + `--group-mode` A/B flag | new test suite drives the REAL detection loop with scripted reads: confirmed kill, phantom suppression, flicker, poison recovery, multikill-through-gate — all green; 20-recording A/B |
+| `adfb15d` | flight recorder + session report tool | report timeline of the test-suite session matches the script exactly |
+| *(uses yesterday's `deb0f88`)* | merged-key + fields groundwork | committed on main yesterday |
 
-1. **One-button "edit-ready" import** — fold `resolve_markers` + `build_video_kit`
-   into `resolve_import.py` (flag or new Stream Deck wrapper): pick recording →
-   project + markers + intro/outro/chapters all appear. ~30 lines; tonight's
-   tools were shaped so this is trivial. *Recommend as next quick win.*
-2. **DaVinci highlight builder** — successor to Vegas HighlightBuilder.cs. The
-   events already carry `pre_sec`/`post_sec` clip windows; auto-assemble a
-   highlight timeline (or a TikTok vertical via the resolve_tiktok template)
-   from them. Medium effort, high payoff — this was the whole point of
-   events.json and it's been idle since 7/2.
-3. **Render-queue automation** — `resolve_render.py`: add current timeline to
-   the render queue with a named preset, start it, Discord-ping when done.
-   Small-medium.
-4. **Auto-thumbnail hook** — after `process_recordings.py` sorts a single-god
-   recording, call `build_thumbnail.py` with the `single.json` preset
-   automatically so every video has a draft thumbnail waiting. Small.
-5. **YouTube upload + description automation** — needs OAuth (API key can't
-   upload). Upload, paste chapters into description, auto-run
-   `mark_youtube_video.py set`. Medium; the chapters/tagging halves already
-   exist as of tonight.
-6. **Session recap card** — "tonight on stream": all gods played, session K/D,
-   biggest share-price movers. Companion to the outro for stream VODs. Small.
-7. **Legacy sweep** — `process_vods.py` + `vegas_scripts/` are dead weight now
-   (also: its `is_vegas_running()` hardcodes `vegas210.exe`, confirmed). Move to
-   `archive/` when you're comfortable. Zero urgency.
-8. **extract_events console hardening** — non-ASCII filenames can wedge output
-   on cp1252 consoles (same family as the test_economy emoji issue). One-line
-   `errors="replace"` wrapper. Tiny.
+## Brainstorm — ranked
+
+1. **Overlay resync on rebaseline** — when a correction fires, push the fixed
+   KDA to the on-stream overlay immediately instead of waiting for the next
+   event. Small; the listener plumbing already exists.
+2. **Digit-template audit** — templates enrolled before tonight's confirm gate
+   may include garbage from phantom frames. One-off tool: re-match every
+   template against the 122-frame corpus, quarantine the ones that never win
+   cleanly. Small-medium; directly improves read quality.
+3. **Rescan favorite recordings** for the `merged` key (your 7/9 batch predates
+   it): `py tools\extract_events.py recordings\<God> --overwrite` per folder
+   you care about. Batch-sized but optional — only affects markers/chapters
+   completeness on trades.
+4. **Kill-feed cross-confirmation** (bigger): read SMITE's kill-feed banner as
+   a second independent signal; fire instantly when both agree, hold 1 read
+   when they disagree. Would recover the 0.8s latency the confirm gate added.
+5. **Detector health in /health** — surface per-session counts (phantoms
+   caught, rebaselines) on the dashboard badge so drift is visible weekly.
+6. **One-button edit-ready import** (carried from last night, still the best
+   video-pipeline win): fold markers + video kit into resolve_import.py.
+7. **OBS replay-buffer auto-clip on kill** — now that kill events are
+   confirmed-reliable, trigger OBS's replay buffer save on multikills for
+   instant clips. Fun, medium.
+8. **A≥10 watchlist** (carried): first double-digit-assist recording tests the
+   strip-edge clip risk.
 
 ## Notes
 
-- Worktree has read-only conveniences that are NOT commits: junctions
-  `data/god_cards`, `data/god_icons`, `Custom God Cards` → main tree, plus a
-  point-in-time `data/economy.db` snapshot (its WAL wasn't checkpointed, so
-  worktree renders show marginally stale stats — main-tree runs read live data).
-  `git worktree remove` cleans all of it up.
-- economy.db was opened **read-only** everywhere; the live bot was never touched.
-- Keepawake sentinel deleted at end of run — PC back on normal sleep policy.
+- The running bot was never touched; economy.db opened read-only throughout.
+- Worktree junctions (god art, digit templates) + A/B hardlinks are scratch —
+  `git worktree remove` after merge cleans the tree; A/B files live in my
+  session scratchpad and vanish with it.
+- Keepawake sentinel deleted at end of run — normal sleep policy restored.
