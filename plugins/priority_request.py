@@ -260,8 +260,8 @@ class PriorityRequestPlugin:
                         "product_data": {
                             "name": PRIORITY_REQUEST_PRODUCT_NAME,
                             "description": (
-                                f"Skip the line: {canon} requested by "
-                                f"{uname} on Hatmaster.tv"
+                                f"YouTube full gameplay: {canon} "
+                                f"requested by {uname} on Hatmaster.tv"
                             ),
                         },
                         "unit_amount": PRIORITY_REQUEST_PRICE_CENTS,
@@ -502,7 +502,8 @@ class PriorityRequestPlugin:
                 amount = session.get("amount_total",
                                      PRIORITY_REQUEST_PRICE_CENTS) / 100
                 shout = (f"Priority request: {uname} paid ${amount:.2f} "
-                         f"for {canon} to jump the queue.")
+                         f"for a {canon} YouTube full gameplay. "
+                         f"Straight to the head of the queue.")
                 if msg:
                     shout += f' Message: "{msg}"'
                 asyncio.create_task(self.bot.send_chat(shout))

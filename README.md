@@ -12,7 +12,7 @@ A Twitch chat bot, stream-automation suite, and companion website for Hatmaster'
 - **Auto Predictions & Scene Switching** — Detects live matches, opens channel-point predictions, switches OBS scenes, and rewrites the stream title from templates.
 - **Song Requests** — Dual Spotify/YouTube queue with likes, vote-skip, and a Now Playing overlay; gapless Spotify↔YouTube handoff.
 - **God Requests** — Viewers spend God Tokens to request gods, with auto-complete when the god is detected in-match.
-- **Priority God Requests (Stripe)** — Viewers pay $5 on `hatmaster.tv/community` to jump the queue, with a crash-safe webhook lifecycle and refund/dispute handling.
+- **Priority God Requests (Stripe)** — Viewers pay $5 on `hatmaster.tv/community` to put their god at the head of the queue for a YouTube full-gameplay video, with a crash-safe webhook lifecycle and refund/dispute handling.
 - **Hatmas Market** — A stock market for gods: viewers buy/sell shares in Hats, prices settle on Hatmaster's verified match results, dividends pay holders, and 7 overlays render the ticker, trades, dividends, leaderboard, and portfolios.
 - **God Pool / Spin Wheel** — Viewers `!nominate` gods into a pool; a mod `!spin` picks a weighted-random winner with a slot-machine overlay. Also triggerable silently from a Stream Deck (see below).
 - **Gamble** — Wager Hats on a dice roll with a jackpot pool and sound/visual alerts.
