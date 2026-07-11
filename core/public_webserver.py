@@ -274,6 +274,11 @@ class PublicWebServer:
         self.app.router.add_get("/priority-success",
                                  self._handle_priority_success_page)
 
+        # Privacy policy — static page. Linked from the landing page
+        # (Google OAuth verification requires the policy be reachable
+        # from the homepage).
+        self.app.router.add_get("/privacy", self._handle_privacy_page)
+
         # Website login + trading — WEBSITE_TRADING_DESIGN.md. The
         # ONLY state-changing routes besides Stripe + admin-gated
         # nominations: OAuth callback (sets a cookie), logout (clears
@@ -2901,6 +2906,16 @@ class PublicWebServer:
         path = PUBLIC_DIR / "priority-success.html"
         if not path.exists():
             return web.Response(text="Success page missing.", status=500)
+        return web.FileResponse(
+            path, headers={"Cache-Control": "no-cache"})
+
+    async def _handle_privacy_page(
+            self, request: web.Request) -> web.Response:
+        """GET /privacy — static privacy policy. Required (and
+        linked from the homepage) for Google OAuth verification."""
+        path = PUBLIC_DIR / "privacy.html"
+        if not path.exists():
+            return web.Response(text="Privacy page missing.", status=500)
         return web.FileResponse(
             path, headers={"Cache-Control": "no-cache"})
 

@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#202C39">
+<title>Privacy — Hatmaster.tv</title>
+<meta name="description" content="What Hatmaster.tv stores (very little), what it never stores (your tokens), and how to get your data removed.">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="stylesheet" href="/theme.css">
+<style>
+  .wrap {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 24px 16px 60px;
+  }
+  .brand-band {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border);
+    padding: 8px 0 12px;
+    margin-bottom: 40px;
+    font-family: var(--font-sans);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-dim);
+  }
+  .brand-band a.left {
+    color: var(--accent);
+    font-weight: 700;
+    text-decoration: none;
+  }
+  h1 {
+    font-family: var(--font-display);
+    font-size: 44px;
+    font-weight: 400;
+    letter-spacing: 0.02em;
+    line-height: 1;
+    text-transform: uppercase;
+    margin: 0 0 6px;
+  }
+  .effective {
+    font-family: var(--font-sans);
+    font-size: 12px;
+    color: var(--text-fade);
+    margin: 0 0 32px;
+  }
+  h2 {
+    font-family: var(--font-sans);
+    font-size: 14px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent);
+    margin: 32px 0 10px;
+  }
+  p, li {
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.65;
+    color: var(--text);
+    margin: 0 0 12px;
+  }
+  ul { padding-left: 20px; margin: 0 0 12px; }
+  li { margin-bottom: 6px; }
+  code {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 1px 5px;
+  }
+  a { color: var(--accent); }
+  .summary {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 14px 16px;
+    margin-bottom: 8px;
+  }
+  .summary p { margin: 0; color: var(--text); }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand-band">
+      <a class="left" href="/"><img class="brand-hat" src="/hat.png" alt="">HATMASTER.TV</a>
+      <div>PRIVACY</div>
+    </div>
+
+    <h1>Privacy</h1>
+    <p class="effective">Effective July 10, 2026</p>
+
+    <div class="summary">
+      <p>The short version: logging in stores your public identity in
+      a signed cookie in your own browser and nothing else. This site
+      never stores your passwords or access tokens, never sees your
+      card number, and runs no ads, analytics, or trackers.</p>
+    </div>
+
+    <h2>Logging in with Twitch</h2>
+    <p>When you log in with Twitch, this site asks Twitch for your
+    public identity only — no permissions on your account (the OAuth
+    request carries zero scopes). Your Twitch user id, username,
+    display name, and avatar URL are placed in a signed cookie in
+    your browser. That cookie is the entire record of your login:
+    there is no server-side session, and the access token Twitch
+    returns is used once to read your identity and immediately
+    discarded.</p>
+
+    <h2>Logging in with YouTube (Google user data)</h2>
+    <p>When you log in with YouTube, this site requests the read-only
+    <code>youtube.readonly</code> permission and uses it exactly
+    once: a single API call to learn your own channel's id, name, and
+    thumbnail, so your share portfolio can be found. The Google
+    access token is then discarded — it is never stored, and no other
+    data is read from your account. Your channel id, name, and
+    thumbnail go into the same kind of signed browser cookie as a
+    Twitch login.</p>
+    <p>Hatmaster.tv's use and transfer of information received from
+    Google APIs adheres to the
+    <a href="https://developers.google.com/terms/api-services-user-data-policy"
+       target="_blank" rel="noopener noreferrer">Google API Services
+    User Data Policy</a>, including the Limited Use requirements.</p>
+
+    <h2>Linking your YouTube channel to your Twitch account</h2>
+    <p>If you choose to link the two, this site stores one record:
+    your YouTube channel id next to your Twitch username, so shares
+    earned by your YouTube comments land in your Twitch portfolio.
+    That is the only thing the link stores.</p>
+
+    <h2>What the market keeps</h2>
+    <p>The Hatmas Market is a game, and game state is kept
+    server-side: share holdings, trades, dividends, god nominations,
+    and requests, keyed to your Twitch username or YouTube channel
+    id. Usernames and holdings appear on public leaderboards — you
+    can hide yourself with the visibility toggle on your portfolio
+    page. Hat balances live in the streaming tooling, keyed to your
+    Twitch username.</p>
+
+    <h2>Payments</h2>
+    <p>The $5 priority god request is processed entirely by
+    <a href="https://stripe.com/privacy" target="_blank"
+       rel="noopener noreferrer">Stripe</a> on their hosted checkout
+    page. This site never sees or stores your card details. It keeps
+    what fulfillment needs: the god you chose, the Twitch username
+    you entered, your optional message, the amount, and Stripe's
+    receipt id — used to queue your request and to issue refunds.</p>
+
+    <h2>Cookies</h2>
+    <ul>
+      <li><code>hatmas_session</code> — your signed login identity,
+      expires after 30 days. Logging out deletes it.</li>
+      <li><code>hatmas_oauth_state</code> and
+      <code>hatmas_oauth_link</code> — short-lived (10 minute)
+      security cookies that only exist during a login or
+      account-link round trip.</li>
+    </ul>
+    <p>That's all of them. No advertising, analytics, or third-party
+    tracking cookies.</p>
+
+    <h2>Removing your data</h2>
+    <p>Want your portfolio, transactions, account link, or payment
+    records deleted, or your YouTube channel unlinked? Whisper
+    Hatmaster on Twitch, or use the contact on the
+    <a href="/community">community page</a>, and it will be removed.
+    Logging out already removes the only login record that exists —
+    the cookie in your browser. You can also revoke this site's
+    YouTube access any time at
+    <a href="https://myaccount.google.com/permissions" target="_blank"
+       rel="noopener noreferrer">myaccount.google.com/permissions</a>
+    (it holds no standing access, but revoking is your right).</p>
+
+    <h2>Changes</h2>
+    <p>If this policy changes, the new version is posted here with an
+    updated effective date.</p>
+  </div>
+</body>
+</html>

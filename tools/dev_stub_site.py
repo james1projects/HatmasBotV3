@@ -166,6 +166,7 @@ PAGES = {
     "/market": "market.html",
     "/community": "community.html",
     "/priority-success": "priority-success.html",
+    "/privacy": "privacy.html",
 }
 
 
