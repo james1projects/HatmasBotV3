@@ -473,6 +473,22 @@ html body {
 }
 .market-chip.open   { color: var(--green); border-color: var(--green); }
 .market-chip.closed { color: var(--text-dim); }
+/* Cross-platform badge in the auth chip: shows when the logged-in
+   identity has its other platform linked (YT Linked on a Twitch
+   session, Linked to Twitch on a YouTube session). */
+.linked-chip {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border: 1px solid var(--green);
+  border-radius: var(--radius-sm);
+  color: var(--green);
+  white-space: nowrap;
+  cursor: default;
+}
 
 /* ─── Trade panel (portfolio + god pages) ───────────────────────── */
 .trade-row {

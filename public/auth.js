@@ -41,22 +41,46 @@ window.HatmasAuth = (function () {
       const link = document.createElement('a');
       link.className = 'auth-name';
       // YouTube sessions have no Twitch login — their portfolio
-      // lives under the channel id.
+      // lives under the channel id, unless the channel merged into
+      // a Twitch account, in which case THAT portfolio holds the
+      // shares and the chip should point there.
       link.href = isYt
-        ? '/yt/' + encodeURIComponent(me.uid)
+        ? (me.yt_linked_to
+            ? '/twitch/' + encodeURIComponent(me.yt_linked_to)
+            : '/yt/' + encodeURIComponent(me.uid))
         : '/twitch/' + encodeURIComponent(me.login);
       link.textContent = me.name || me.login || 'You';
       link.title = 'Your portfolio';
       el.appendChild(link);
-      if (!isYt && me.yt_login_available && !me.yt_linked) {
-        // One-time merge: prove YouTube ownership via Google, the
-        // server folds that channel's shares into this account.
-        const yt = document.createElement('a');
-        yt.className = 'icon-toggle';
-        yt.href = '/auth/google/login?link=1';
-        yt.textContent = 'Link YouTube';
-        yt.title = 'Move your YouTube comment shares into this account';
-        el.appendChild(yt);
+      if (!isYt && me.yt_login_available) {
+        if (me.yt_linked) {
+          // Linked state, made visible: comment shares from the
+          // linked channel land in this portfolio.
+          const badge = document.createElement('span');
+          badge.className = 'linked-chip';
+          badge.textContent = 'YT Linked';
+          badge.title = 'Your YouTube channel is linked. Shares from '
+            + 'your YouTube comments land in this portfolio.';
+          el.appendChild(badge);
+        } else {
+          // One-time merge: prove YouTube ownership via Google, the
+          // server folds that channel's shares into this account.
+          const yt = document.createElement('a');
+          yt.className = 'icon-toggle';
+          yt.href = '/auth/google/login?link=1';
+          yt.textContent = 'Link YouTube';
+          yt.title = 'Move your YouTube comment shares into this account';
+          el.appendChild(yt);
+        }
+      }
+      if (isYt && me.yt_linked_to) {
+        const badge = document.createElement('span');
+        badge.className = 'linked-chip';
+        badge.textContent = 'Linked to Twitch';
+        badge.title = 'This channel is linked to '
+          + me.yt_linked_to
+          + '. Your shares live in that portfolio.';
+        el.appendChild(badge);
       }
       const out = document.createElement('button');
       out.className = 'icon-toggle';

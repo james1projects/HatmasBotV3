@@ -2269,13 +2269,26 @@ class PublicWebServer:
             return resp
 
         # ── login mode: issue a YouTube session ──
+        # If the channel already merged into a Twitch account, land
+        # on the portfolio that actually holds the shares (the /yt/
+        # page is empty after migration). The session stays yt-only:
+        # viewing rights, never the Twitch account's trading rights.
+        dest = f"/yt/{channel_id}"
+        if self._db is not None:
+            try:
+                await self._ensure_links_schema()
+                linked = await _links.get_link(self._db, channel_id)
+                if linked:
+                    dest = f"/twitch/{linked}"
+            except Exception as e:
+                print(f"[PublicWebServer] link lookup failed: {e}")
         token = _ws.issue_youtube(
             channel_id, title, thumb, secret=WEB_SESSION_SECRET)
-        resp = web.HTTPFound(f"/yt/{channel_id}")
+        resp = web.HTTPFound(dest)
         self._set_session_cookie(resp, token)
         resp.del_cookie(_ws.OAUTH_STATE_COOKIE, path="/")
         print(f"[PublicWebServer] website login (yt): {channel_id} "
-              f"({title})")
+              f"({title}) -> {dest}")
         return resp
 
     async def _handle_auth_logout(self, request: web.Request):
@@ -2298,15 +2311,24 @@ class PublicWebServer:
                  "market_open": self._market_open()},
                 status=401, headers=self._NO_STORE)
         prov = _ws.provider(ident)
-        # Twitch sessions: has this account already linked a YouTube
-        # channel? Drives the "Link YouTube" chip in auth.js.
+        # Link state drives the auth chip: Twitch sessions learn
+        # whether a YouTube channel is linked ("YT Linked" badge vs
+        # the "Link YouTube" action); YouTube sessions learn which
+        # Twitch login their channel merged into, so the chip can
+        # point at the portfolio that actually holds their shares.
         yt_linked = False
-        if (prov == "tw" and self._google_login_enabled
-                and self._db is not None and ident.get("login")):
+        yt_linked_to = None
+        if self._db is not None:
             try:
-                await self._ensure_links_schema()
-                yt_linked = bool(await _links.get_links_for_twitch(
-                    self._db, ident["login"]))
+                if (prov == "tw" and self._google_login_enabled
+                        and ident.get("login")):
+                    await self._ensure_links_schema()
+                    yt_linked = bool(await _links.get_links_for_twitch(
+                        self._db, ident["login"]))
+                elif prov == "yt" and ident.get("uid"):
+                    await self._ensure_links_schema()
+                    yt_linked_to = await _links.get_link(
+                        self._db, ident["uid"])
             except Exception as e:
                 print(f"[PublicWebServer] link lookup failed: {e}")
         return web.json_response({
@@ -2318,6 +2340,7 @@ class PublicWebServer:
             "prov": prov,
             "yt_login_available": self._google_login_enabled,
             "yt_linked": yt_linked,
+            "yt_linked_to": yt_linked_to,
             "trading_enabled": self._trading_allowed(),
             "market_open": self._market_open(),
         }, headers=self._NO_STORE)

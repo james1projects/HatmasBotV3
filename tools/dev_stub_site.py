@@ -153,7 +153,7 @@ ROUTES = {
     "/api/me": {"logged_in": True, "login": "ymir_fan", "name": "Ymir_Fan",
                 "img": "", "login_available": True, "uid": "12345",
                 "prov": "tw", "yt_login_available": True,
-                "yt_linked": False,
+                "yt_linked": True, "yt_linked_to": None,
                 "trading_enabled": True, "market_open": True},
     "/api/me/balance": {"login": "ymir_fan", "balance": 8400,
                         "market_open": True},
