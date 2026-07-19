@@ -6,21 +6,25 @@ One-button "video -> ready-to-edit DaVinci Resolve project" for gameplay
 recordings.  Designed for a Stream Deck button (see resolve_import.bat).
 
 What it does:
-  1. Pops a file picker over the recordings folder (skipped when a video
-     path is passed on the command line).
+  1. Pops a file picker over the recordings folder (skipped when video
+     paths are passed on the command line).  Pick the parts in playback
+     order — the picker re-opens for the next part until you hit Cancel —
+     for sessions split across several OBS recordings (e.g. stopped the
+     recording between the lobby and the match).
   2. Connects to DaVinci Resolve, launching it first if it isn't running.
-  3. Creates a fresh project named after the recording (unique-ified with
-     " (2)", " (3)", ... if the name is taken) by importing
+  3. Creates a fresh project named after the first recording (unique-ified
+     with " (2)", " (3)", ... if the name is taken) by importing
      resolve_gameplay_template.drp — the template carries the 1080p60
      master settings *including the playback frame rate*, which the API
      cannot set (SetSetting("timelinePlaybackFrameRate", ...) always
      returns False in Resolve 21 and GetSetting reads back a stale value;
      a project left at the default 24 plays a 60fps timeline in slow
      motion at 40% speed).
-  4. Re-checks timeline resolution and frame rate against the clip in
-     case a recording ever deviates from 1080p60.
-  5. Imports the recording and builds a timeline from it.  OBS multi-track
-     audio comes in as one stereo timeline track per OBS track.
+  4. Re-checks timeline resolution and frame rate against the first clip
+     in case a recording ever deviates from 1080p60.
+  5. Imports the recordings and builds one timeline with the clips
+     back-to-back in the order picked.  OBS multi-track audio comes in as
+     one stereo timeline track per OBS track.
   6. Names the audio tracks (Game / Mic / Discord / Misc), switches to the
      Edit page and saves.
 
@@ -29,8 +33,8 @@ scripting) with external scripting permitted (Preferences > System >
 General > "External scripting using" set to Local — the default works).
 
 Usage:
-    python tools/resolve_import.py             # file picker
-    python tools/resolve_import.py <video>     # skip the picker
+    python tools/resolve_import.py                        # file picker
+    python tools/resolve_import.py <video> [video2 ...]   # skip the picker
 """
 
 from __future__ import annotations
@@ -56,7 +60,7 @@ RESOLVE_MODULES = (
     r"C:\ProgramData\Blackmagic Design\DaVinci Resolve"
     r"\Support\Developer\Scripting\Modules"
 )
-RESOLVE_LAUNCH_TIMEOUT = 180  # seconds to wait for the API after launching
+RESOLVE_LAUNCH_TIMEOUT = 300  # seconds to wait for the API after launching
 
 
 def fail(msg: str) -> "NoReturn":
@@ -64,14 +68,15 @@ def fail(msg: str) -> "NoReturn":
     sys.exit(1)
 
 
-# --- step 1: pick the video --------------------------------------------------
+# --- step 1: pick the videos --------------------------------------------------
 
-def pick_video() -> Path:
+def pick_videos() -> list[Path]:
     if len(sys.argv) > 1:
-        video = Path(sys.argv[1])
-        if not video.is_file():
-            fail(f"video not found: {video}")
-        return video
+        videos = [Path(arg) for arg in sys.argv[1:]]
+        for video in videos:
+            if not video.is_file():
+                fail(f"video not found: {video}")
+        return videos
 
     import tkinter as tk
     from tkinter import filedialog
@@ -79,18 +84,36 @@ def pick_video() -> Path:
     root = tk.Tk()
     root.withdraw()
     root.attributes("-topmost", True)  # picker must beat Resolve for focus
+
+    # One dialog per part so the pick order *is* the timeline order — a
+    # single multi-select dialog wouldn't preserve the order of selection.
+    videos: list[Path] = []
     initial = RECORDINGS_DIR if RECORDINGS_DIR.is_dir() else Path.home()
-    name = filedialog.askopenfilename(
-        parent=root,
-        title="Import gameplay into DaVinci Resolve",
-        initialdir=str(initial),
-        filetypes=VIDEO_EXTENSIONS,
-    )
+    while True:
+        if videos:
+            title = (f"Part {len(videos) + 1} — pick the next video, "
+                     f"or Cancel to finish")
+        else:
+            title = "Import gameplay into DaVinci Resolve (pick part 1)"
+        name = filedialog.askopenfilename(
+            parent=root,
+            title=title,
+            initialdir=str(initial),
+            filetypes=VIDEO_EXTENSIONS,
+        )
+        if not name:
+            break
+        video = Path(name)
+        if video in videos:
+            print(f"Skipping duplicate pick: {video}")
+        else:
+            videos.append(video)
+        initial = video.parent
     root.destroy()
-    if not name:
+    if not videos:
         print("No file selected — nothing to do.")
         sys.exit(0)
-    return Path(name)
+    return videos
 
 
 # --- step 2: connect to Resolve ----------------------------------------------
@@ -132,13 +155,14 @@ def unique_project_name(pm, base: str) -> str:
 
 
 def main() -> None:
-    video = pick_video()
-    print(f"Video: {video}")
+    videos = pick_videos()
+    for i, video in enumerate(videos, start=1):
+        print(f"Video {i}/{len(videos)}: {video}")
 
     resolve = connect_resolve()
     pm = resolve.GetProjectManager()
 
-    name = unique_project_name(pm, video.stem)
+    name = unique_project_name(pm, videos[0].stem)
     if PROJECT_TEMPLATE.is_file():
         # ImportProject + LoadProject instead of CreateProject: the template
         # bakes in the playback frame rate, which is not API-settable.
@@ -157,16 +181,31 @@ def main() -> None:
     print(f"Project: {name}")
 
     media_pool = project.GetMediaPool()
-    clips = media_pool.ImportMedia([str(video)])
-    if not clips:
-        fail("Resolve could not import the video (unsupported codec/container?)")
-    clip = clips[0]
+    imported = media_pool.ImportMedia([str(v) for v in videos])
+    if not imported:
+        fail("Resolve could not import the videos (unsupported codec/container?)")
+
+    # Re-order the imported clips to match the pick order — don't trust
+    # ImportMedia's return order, match each clip back by its file path.
+    clip_by_path = {}
+    for clip in imported:
+        path = clip.GetClipProperty("File Path")
+        if path:
+            clip_by_path[Path(path).resolve()] = clip
+    clips = []
+    for video in videos:
+        clip = clip_by_path.get(video.resolve())
+        if clip is None:
+            fail(f"Resolve imported the media but {video} is missing from the "
+                 f"media pool (unsupported codec/container?)")
+        clips.append(clip)
 
     # The template is already 1080p60; adjust only if this recording differs.
     # Must happen *before* the timeline exists — frame rate is locked per
-    # timeline once created.
-    fps = clip.GetClipProperty("FPS")
-    resolution = clip.GetClipProperty("Resolution") or ""
+    # timeline once created.  Project settings follow the first clip.
+    first = clips[0]
+    fps = first.GetClipProperty("FPS")
+    resolution = first.GetClipProperty("Resolution") or ""
     if fps:
         fps = str(int(fps) if float(fps) == int(float(fps)) else fps)
         if fps != "60":
@@ -180,14 +219,21 @@ def main() -> None:
         width, height = resolution.split("x")
         project.SetSetting("timelineResolutionWidth", width)
         project.SetSetting("timelineResolutionHeight", height)
+    for video, clip in zip(videos[1:], clips[1:]):
+        clip_fps = clip.GetClipProperty("FPS")
+        clip_res = clip.GetClipProperty("Resolution") or ""
+        if str(clip_fps) != str(first.GetClipProperty("FPS")) or clip_res != resolution:
+            print(f"WARNING: {video.name} is {clip_res} @ {clip_fps}fps but the "
+                  f"timeline follows the first clip ({resolution} @ {fps}fps) — "
+                  f"this part will be conformed (scaled/retimed) to match.")
 
-    timeline = media_pool.CreateTimelineFromClips(video.stem, [clip])
+    timeline = media_pool.CreateTimelineFromClips(videos[0].stem, clips)
     if not timeline:
         fail("could not create timeline")
 
     audio_tracks = timeline.GetTrackCount("audio")
-    print(f"Timeline: {timeline.GetName()} "
-          f"({timeline.GetTrackCount('video')} video / {audio_tracks} audio tracks)")
+    print(f"Timeline: {timeline.GetName()} ({len(clips)} clip(s), "
+          f"{timeline.GetTrackCount('video')} video / {audio_tracks} audio tracks)")
     if audio_tracks < len(AUDIO_TRACK_NAMES):
         print(f"WARNING: expected {len(AUDIO_TRACK_NAMES)} audio tracks, "
               f"got {audio_tracks} — was this recorded with all OBS tracks enabled?")
