@@ -24,6 +24,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SESSIONS_DIR = REPO_ROOT / "data" / "kda_sessions"
 
+# Timeline arrows are U+2192; the Windows console default (cp1252)
+# can't encode them and the report dies mid-print.
+if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 def fmt_t(seconds: float) -> str:
     m, s = divmod(int(seconds), 60)

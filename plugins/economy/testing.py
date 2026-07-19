@@ -76,6 +76,7 @@ class _TestingMixin:
                 self._match_id = None
                 self._match_start_price = 0.0
                 self._match_kda = [0, 0, 0]
+                self._match_price_series = []
             else:
                 print("[Economy] Cannot simulate — match already in progress (use force=True to override)")
                 return {"error": "Match already in progress"}

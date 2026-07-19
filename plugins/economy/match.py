@@ -129,6 +129,7 @@ class _MatchMixin:
         self._match_god = god_name
         self._match_start_price = self._prices[god_name]
         self._match_kda = [0, 0, 0]
+        self._match_price_series = [self._match_start_price]
 
         print(f"[Economy] Visual god set: {god_name} "
               f"(cosmetic base price: {self._match_start_price:.0f}) "
@@ -141,6 +142,8 @@ class _MatchMixin:
             "god": god_name,
             "price": self._prices[god_name],
             "volatility": self._get_volatility(god_name)[1],
+            "kda": {"k": 0, "d": 0, "a": 0},
+            "match_series": list(self._match_price_series),
         })
 
     async def on_match_confirmed(self, data: Dict):
@@ -176,14 +179,26 @@ class _MatchMixin:
 
         await self._ensure_god_exists(god_name)
 
+        # Promote visual -> authoritative. If the portrait matcher
+        # already armed this same god, KEEP the accumulated cosmetic
+        # KDA: kills/deaths between god identification and tracker.gg
+        # confirmation (typically the first death of the match) were
+        # being wiped by an unconditional reset here, leaving the
+        # overlay one death short for the rest of the match.
+        if self._match_god != god_name:
+            self._match_kda = [0, 0, 0]
+            self._match_price_series = []
         self._match_active = True
         self._match_god = god_name
         self._match_id = match_id
         self._match_start_price = self._prices[god_name]
-        self._match_kda = [0, 0, 0]
+        if not self._match_price_series:
+            self._match_price_series = [self._match_start_price]
 
+        k, d, a = self._match_kda
         print(f"[Economy] Match confirmed by tracker.gg: {god_name} "
-              f"(match_id={match_id}, price={self._match_start_price:.0f})")
+              f"(match_id={match_id}, price={self._match_start_price:.0f}, "
+              f"carried KDA {k}/{d}/{a})")
 
         # Pay 5% dividend to all holders. Gated on broadcaster_live
         # so a Smite session played offline doesn't pay viewers who
@@ -196,11 +211,15 @@ class _MatchMixin:
             print(f"[Economy] Skipping start dividend for {god_name} — "
                   f"broadcaster not live on Twitch")
 
-        # Emit economy event for overlays (animates regardless of live)
+        # Emit economy event for overlays (animates regardless of live).
+        # Includes the carried KDA so the client can resync instead of
+        # resetting its display on the same-god re-show.
         self._emit_overlay_event("economy_god_detected", {
             "god": god_name,
             "price": self._prices[god_name],
             "volatility": self._get_volatility(god_name)[1],
+            "kda": {"k": k, "d": d, "a": a},
+            "match_series": list(self._match_price_series),
         })
 
     async def on_match_end(self, data: Dict):
@@ -257,6 +276,7 @@ class _MatchMixin:
             self._match_id = None
             self._match_start_price = 0.0
             self._match_kda = [0, 0, 0]
+            self._match_price_series = []
 
     async def on_match_result(self, data: Dict):
         """
@@ -285,6 +305,7 @@ class _MatchMixin:
         self._match_id = None
         self._match_start_price = 0.0
         self._match_kda = [0, 0, 0]
+        self._match_price_series = []
 
         print(f"[Economy] on_match_result for {god_name} "
               f"(match_id={match_id}) — triggering immediate backfill")

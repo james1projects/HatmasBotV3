@@ -95,6 +95,10 @@ class EconomyPlugin(
         self._match_id: Optional[str] = None      # tracker.gg match_id for the current match
         self._match_start_price: float = 0.0
         self._match_kda = [0, 0, 0]               # cosmetic KDA counter for overlays
+        # Cosmetic price at each tick THIS match — what the live match
+        # panel charts. (_price_history is one point per settled match
+        # and belongs to sparklines, not the live chart.)
+        self._match_price_series: List[float] = []
 
         # Simulator escape hatch — when True, _is_broadcaster_live()
         # returns True regardless of stream-status state, so the

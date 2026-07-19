@@ -254,12 +254,34 @@
         return;
       }
 
-      // Initial show — full state reset
+      if (state.god === data.god) {
+        // Same-god re-show without an event: the visual->authoritative
+        // promotion (tracker.gg confirm) re-emits economy_god_detected.
+        // Keep accumulated price history and KDA — resetting here wiped
+        // early-match deaths off the display. Sync KDA/series if provided.
+        if (data.kda) {
+          state.kda = data.kda;
+          updateKDADisplay();
+        }
+        if (data.match_series && data.match_series.length) {
+          state.priceHistory = data.match_series;
+          redrawChart();
+        }
+        return;
+      }
+
+      // Initial show — full state reset. `match_series` is this match's
+      // cosmetic price series from the server (survives an OBS
+      // browser-source refresh mid-match). NOT `history` — that field
+      // is the per-settled-match sparkline for the ticker, and charting
+      // it here is what made the graph shape unrelated to the match.
       state.god = data.god;
       state.openPrice = data.price || 0;
       state.currentPrice = data.price || 0;
-      state.priceHistory = [state.openPrice];
-      state.kda = { k: 0, d: 0, a: 0 };
+      state.priceHistory = (data.match_series && data.match_series.length)
+        ? data.match_series
+        : [state.openPrice];
+      state.kda = data.kda || { k: 0, d: 0, a: 0 };
       state.lastEvent = null;
 
       // Update god name
@@ -275,6 +297,7 @@
 
       // Update price display
       updatePriceDisplay();
+      updateKDADisplay();
 
       // Reset chart
       redrawChart();
@@ -284,8 +307,8 @@
       if (!data || !data.god) return;
 
       state.currentPrice = data.price || state.currentPrice;
-      if (data.history && Array.isArray(data.history)) {
-        state.priceHistory = data.history;
+      if (data.match_series && Array.isArray(data.match_series)) {
+        state.priceHistory = data.match_series;
       }
       if (data.kda) {
         state.kda = data.kda;

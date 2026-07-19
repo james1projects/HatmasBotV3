@@ -59,8 +59,32 @@ class _TickingMixin:
                                     on_match_confirmed. Cosmetic base.
       self._prices                  read-only here - we don't mutate it
       self._price_history           read-only here - we don't append
+      self._match_price_series      cosmetic price per tick THIS match —
+                                    appended here, seeded/cleared by
+                                    match.py. Emitted as "match_series"
+                                    and charted by the live match panel.
+                                    ("history" stays the per-SETTLED-
+                                    match sparkline for the ticker; it
+                                    used to double as the live chart's
+                                    data, which made the graph shape
+                                    unrelated to the match being played.)
     Calls into _OverlaysMixin (_emit_overlay_event, _trigger_voiceline).
     """
+
+    # Bound on the in-match series. A very long match tops out around
+    # ~100 K/D/A events; the cap only guards a runaway loop.
+    _MATCH_SERIES_CAP = 200
+
+    def _tick_series(self, new_price: float) -> list:
+        """Append a cosmetic tick to this match's price series and
+        return the series for the overlay payload."""
+        if not self._match_price_series and self._match_start_price > 0:
+            self._match_price_series = [self._match_start_price]
+        self._match_price_series.append(round(new_price))
+        if len(self._match_price_series) > self._MATCH_SERIES_CAP:
+            self._match_price_series = \
+                self._match_price_series[-self._MATCH_SERIES_CAP:]
+        return list(self._match_price_series)
 
     def _cosmetic_price(self, start_price: float, k: int, d: int, a: int
                         ) -> float:
@@ -110,6 +134,7 @@ class _TickingMixin:
             "event": "kill",
             "kda": {"k": k, "d": d, "a": a},
             "history": self._price_history.get(god_name, [])[-10:],
+            "match_series": self._tick_series(new_price),
             "cosmetic": True,
         })
 
@@ -143,6 +168,7 @@ class _TickingMixin:
             "event": "death",
             "kda": {"k": k, "d": d, "a": a},
             "history": self._price_history.get(god_name, [])[-10:],
+            "match_series": self._tick_series(new_price),
             "cosmetic": True,
         })
 
@@ -176,6 +202,7 @@ class _TickingMixin:
             "event": "assist",
             "kda": {"k": k, "d": d, "a": a},
             "history": self._price_history.get(god_name, [])[-10:],
+            "match_series": self._tick_series(new_price),
             "cosmetic": True,
         })
 
@@ -217,5 +244,6 @@ class _TickingMixin:
             "event": "correction",
             "kda": {"k": k, "d": d, "a": a},
             "history": self._price_history.get(god_name, [])[-10:],
+            "match_series": self._tick_series(new_price),
             "cosmetic": True,
         })

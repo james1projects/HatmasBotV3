@@ -391,6 +391,64 @@ async def run_tests():
 
     print()
 
+    # ── Test 11: Visual→authoritative promotion keeps early KDA ──
+    print("─" * 40)
+    print("TEST 11: Tracker.gg confirm must not wipe pre-confirm KDA")
+    print("─" * 40)
+
+    # Live sequence from the 2026-07-11 session: portrait matcher arms
+    # the god ~1 min in, first death lands ~3:19, tracker.gg confirms
+    # ~4-5 min in. The confirm used to reset _match_kda, so the overlay
+    # ran one death short for the rest of the match.
+    await economy.on_god_detected_visual({"name": "Sylvanus"})
+    await economy.on_death()                      # death before confirm
+    await economy.on_match_confirmed({
+        "match_id": "test_011",
+        "god": "Sylvanus",
+        "team": "Order",
+    })
+    await economy.on_kill("player_kill")          # kill after confirm
+
+    assert economy._match_kda == [1, 1, 0], (
+        f"pre-confirm death was wiped: expected [1, 1, 0], "
+        f"got {economy._match_kda}"
+    )
+    print(f"  KDA after visual death + confirm + kill: "
+          f"{economy._match_kda} ✓ (death survived the promotion)")
+
+    # The live chart series: [start, after-death, after-kill]. It must
+    # be THIS match's cosmetic prices (death dips, kill rises), not the
+    # per-settled-match sparkline history it used to chart.
+    series = economy._match_price_series
+    assert len(series) == 3, f"expected 3 series points, got {series}"
+    assert series[1] < series[0], f"death should dip the series: {series}"
+    assert series[2] > series[1], f"kill should raise the series: {series}"
+    print(f"  Match price series: {series} ✓ (dips on death, rises on kill)")
+
+    # Different god at confirm (visual misread) must still reset.
+    await economy.on_match_end({"match_id": "test_011",
+                                "god": {"name": "Sylvanus"}})
+    await economy.on_god_detected_visual({"name": "Loki"})
+    await economy.on_death()
+    await economy.on_match_confirmed({
+        "match_id": "test_011b",
+        "god": "Ymir",
+        "team": "Order",
+    })
+    assert economy._match_kda == [0, 0, 0], (
+        f"god-mismatch confirm should reset KDA, got {economy._match_kda}"
+    )
+    print(f"  KDA after god-mismatch confirm: {economy._match_kda} ✓ (reset)")
+    assert economy._match_price_series == [economy._prices["Ymir"]], (
+        f"god-mismatch confirm should reseed the series, "
+        f"got {economy._match_price_series}"
+    )
+    print(f"  Series after god-mismatch confirm: "
+          f"{economy._match_price_series} ✓ (reseeded at Ymir's price)")
+    await economy.on_match_end({"match_id": "test_011b",
+                                "god": {"name": "Ymir"}})
+    print()
+
     # Cleanup. close_db() matters twice over: it releases the file
     # lock so os.remove works, and it stops aiosqlite's non-daemon
     # worker thread — without it the process hangs forever at exit.

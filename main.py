@@ -112,7 +112,10 @@ async def main():
 
     async def _overlay_on_death(count=1):
         web.trigger_kill_event("death")
-        death_counter.increment()
+        # count is the confirmed delta from the detector — a read gap
+        # spanning two deaths arrives as one event with count=2, and
+        # the daily tally must add all of them.
+        death_counter.increment(count)
 
     async def _overlay_on_correction(k_removed, d_removed, a_removed,
                                      corrected_kda):

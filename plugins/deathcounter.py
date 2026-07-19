@@ -82,10 +82,10 @@ class DeathCounterPlugin:
             self._save_state()
             print("[DeathCounter] New day detected, count reset to 0")
 
-    def increment(self) -> int:
-        """Add one death to today's total. Returns the new count."""
+    def increment(self, n: int = 1) -> int:
+        """Add n deaths to today's total. Returns the new count."""
         self._check_day_reset()
-        self._count += 1
+        self._count += n
         self._save_state()
         print(f"[DeathCounter] Deaths today: {self._count}")
         return self._count
