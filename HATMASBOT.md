@@ -2318,3 +2318,89 @@ were deleted and replaced by one endpoint with all three event types;
 config_local.py carries its signing secret. The LIVE go-live checklist
 in 7-6-2026-TODO.md still applies — include all three event types
 there too.
+
+## v2.10 Update — God Aspects (2026-07-17)
+
+Aspects are alternate god kits toggleable in the SMITE 2 lobby.
+Viewers can now request them everywhere god requests exist: the word
+"aspect" anywhere in !nominate / !godreq / !godrequest input flags
+the request ("!nominate Khepri aspect please" works), the community
+page has Aspect checkboxes on the $5 Stripe form and the nominate
+box, and the $5 metadata carries use_aspect end to end.
+
+**Identity rule:** (god, use_aspect) is the request identity. Khepri
+and Khepri (Aspect) are separate pool entries with separate vote
+counts, separate queue entries, and never block each other in !spin's
+already-queued filter. Display convention is "Khepri (Aspect)" in
+chat (core.aspect_roster.display_god), an orange ASPECT pill on the
+website, and an aspect-icon badge on the spin reel cards + winner
+line.
+
+**Validation:** core/aspect_roster.py owns "which gods have an
+Aspect". Source of truth is the wiki, scraped in two api.php calls —
+Category:Aspect icons members, then fileusage of those files (god
+pages embed the shared aspect icons; patch-note pages are dropped by
+intersecting with the god roster). 70 gods at snapshot. Cache at
+data/aspect_roster.json + bundled fallback; refresh() rides
+godrequest's 6h roster loop (so it runs at bot launch), never
+shrinks the set, and ignores implausibly small fetches (<40).
+Requests for an aspect-less god are rejected up front ("Ymir doesn't
+have an Aspect in SMITE 2 (yet)"), including a 400 before Stripe
+checkout is created.
+
+**Schema migrations (idempotent, automatic):** god_pool rebuilt to
+PRIMARY KEY (god_name, use_aspect) (old rows become use_aspect=0);
+god_pool_votes + priority_payments gain a use_aspect column.
+Detection-driven auto-complete still matches on base god name only —
+the portrait can't tell an Aspect game apart — and clears the exact
+(god, aspect) pool row for spin entries.
+
+**Cloudflare note:** wiki fetches now impersonate chrome124 —
+generic "chrome" started getting challenge pages (403) in July 2026,
+which had silently broken the god-roster refresh too. Fixed in
+core/god_roster._fetch_url (shared by both rosters).
+
+**Asset:** the small orange aspect icon goes at public/aspect-icon.png
+(NOT data/god_icons/ — that folder scan defines the known-god list).
+Served at /aspect-icon.png (public site) and /icons/aspect.png (OBS
+webserver); every <img> onerror-hides so a missing file degrades
+cleanly.
+
+New endpoint: GET /api/aspects -> {"gods": [names]} for the checkbox
+gating. Suites: tools/test_aspects.py (9), plus updated
+test_priority_request.py (18) and test_web_nominate.py (14, new
+aspect passthrough test).
+
+## v2.10.1 Fix — Tracker.gg concatenated god names (2026-07-17)
+
+Xing Tian full gameplay: portrait matcher set the custom .gif
+correctly, then tracker.gg returned godName "XingTian" (Hi-Rez's
+display-name mapping is incomplete for multi-word gods — same class
+of leak as the old "Gods.Atlas" prefix). The SEARCHING->FOUND
+"tracker corrected the god" branch compared "xing tian" !=
+"xingtian", treated it as a real correction, looked up an image for
+"XingTian", found none, and cleared the portrait mid-game. The same
+leak also opened a duplicate "XingTian" god_prices stock (7/14 and
+7/17 matches settled against it).
+
+Fix, at the single ingestion choke point
+(plugins/smite/history.py:_clean_god_name — every tracker name flows
+through it: live segments, all-players, god stats, history listing
+the economy backfills from): after the "Gods." prefix strip, the
+name is canonicalized against the god roster via the shared resolver,
+EXACT tier only (normalized/squashed equality — "XingTian" ->
+"Xing Tian"), positive hits cached, unknown names pass through.
+Defense in depth: the portrait-vs-tracker comparison in
+match_state.py now uses _same_god_name (squash-insensitive), so even
+a not-yet-rostered god can't false-fire a correction and clear the
+portrait.
+
+tools/cleanup_god_names.py generalized: dirty detection is now "any
+stored god_name whose _clean_god_name form differs" (imports the
+boundary helper, so tool and boundary can't disagree) instead of
+LIKE 'Gods.%'. Ran 2026-07-17: merged the phantom XingTian
+god_prices row (clean row wins; the two phantom matches' price
+movement is discarded, nobody held phantom shares), renamed 3
+price_history + 2 processed_matches rows. Suite:
+tools/test_clean_god_name.py (6, incl. exhaustive
+every-roster-god-concatenated round-trip).

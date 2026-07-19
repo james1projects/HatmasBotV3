@@ -87,9 +87,11 @@ class FakeGodReq:
         return None
 
     def queue_add(self, god, requester, source="paid",
-                  token_spent=False, position="end"):
+                  token_spent=False, position="end",
+                  use_aspect=False):
         entry = {"god": god, "requester": requester,
-                 "source": source, "token_spent": token_spent}
+                 "source": source, "token_spent": token_spent,
+                 "use_aspect": bool(use_aspect)}
         if position == "head":
             self.queue.insert(0, entry)
         else:

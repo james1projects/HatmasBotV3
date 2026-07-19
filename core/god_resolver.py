@@ -63,6 +63,32 @@ MIN_PARTIAL_LEN = 3
 _PUNCT_RE = re.compile(r"[’'\-.!?,:;]")
 _WS_RE = re.compile(r"\s+")
 
+# "aspect" keyword — viewers append it to request a god's Aspect
+# (alternate kit): "!nominate Khepri aspect please". Split out BEFORE
+# resolution so the remaining words resolve as a normal god name.
+_ASPECT_RE = re.compile(r"\b(?:aspect|aspects)\b", re.IGNORECASE)
+
+# Courtesy filler that chat appends to requests ("khepri please!").
+# Stripped only as a retry after full resolution fails, so a filler
+# word can never shadow part of an actual god name.
+_FILLER_RE = re.compile(
+    r"\b(?:please|pls|plz|plse|thanks|thank|thx|ty|tyvm|you)\b",
+    re.IGNORECASE)
+
+
+def split_aspect(text):
+    """('Khepri aspect please!') -> ('Khepri  please!', True).
+
+    Detects and removes the standalone word "aspect"/"aspects" from a
+    god-request string. Returns (cleaned_text, use_aspect). No god
+    name contains the word, so removal is always safe.
+    """
+    if not text:
+        return "", False
+    use_aspect = bool(_ASPECT_RE.search(text))
+    cleaned = _ASPECT_RE.sub(" ", text) if use_aspect else text
+    return cleaned, use_aspect
+
 
 def _normalize(text: str) -> str:
     """Lowercase, strip punctuation that varies in chat (apostrophes,
@@ -83,12 +109,16 @@ def _phonetic(text: str) -> str:
             .replace("c", "k").replace("y", "i"))
 
 
-def resolve_sync(text, candidates, *, fuzzy=True):
+def resolve_sync(text, candidates, *, fuzzy=True, _retry=True):
     """Resolve `text` against `candidates` using tiers 1-5.
 
     candidates: iterable of canonical god names, any casing; the hit
     returns the candidate string exactly as given.
     Returns (candidate, tier) or None.
+
+    If every tier misses, courtesy filler ("please", "thanks", ...)
+    is stripped and the tiers run once more — "khepri please!" should
+    resolve exactly like "khepri". One level of retry only.
     """
     query = _normalize(text)
     if not query:
@@ -147,6 +177,16 @@ def resolve_sync(text, candidates, *, fuzzy=True):
             runner_up = next((s for s, c in scored[1:] if c != best), 0.0)
             if best_score - runner_up >= FUZZY_MARGIN:
                 return best, TIER_FUZZY
+
+    # Retry once with courtesy filler removed ("khepri please!" ->
+    # "khepri"). Only runs when a filler word was actually present,
+    # and only after every tier missed on the raw input, so filler
+    # stripping can never override a direct match.
+    if _retry:
+        stripped = _FILLER_RE.sub(" ", text)
+        if _normalize(stripped) != query:
+            return resolve_sync(stripped, cands, fuzzy=fuzzy,
+                                _retry=False)
 
     return None
 

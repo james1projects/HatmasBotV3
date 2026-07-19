@@ -204,6 +204,19 @@
     border-radius: 3px;
     border: 1px solid var(--hm-gold-glow);
   }
+  /* Aspect marker — the small orange in-game aspect icon, top-left
+     (votes badge owns top-right). Distinguishes "Khepri (Aspect)"
+     cards from plain "Khepri" cards in the same reel. */
+  .card .aspect-badge {
+    position: absolute;
+    top: 3px; left: 3px;
+    width: 20px; height: 20px;
+    padding: 2px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.7);
+    border: 1px solid rgba(255, 145, 40, 0.8);
+    object-fit: contain;
+  }
 
   /* Winner card glows + scales */
   .card.winner {
@@ -269,6 +282,30 @@
     letter-spacing: 0.18em;
     text-transform: uppercase;
   }
+  /* "ASPECT" tag next to the winner name when the spun entry is an
+     aspect request. Orange to match the in-game aspect accent. */
+  .result .aspect-tag {
+    display: none;
+    vertical-align: middle;
+    margin-left: 10px;
+    padding: 3px 8px 3px 5px;
+    border-radius: 5px;
+    background: rgba(0, 0, 0, 0.7);
+    border: 1px solid rgba(255, 145, 40, 0.85);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    letter-spacing: 0.2em;
+    color: #ff9128;
+    -webkit-text-stroke: 0;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  }
+  .result .aspect-tag img {
+    width: 16px; height: 16px;
+    vertical-align: -3px;
+    margin-right: 5px;
+    object-fit: contain;
+  }
+  .result .aspect-tag.shown { display: inline-block; }
 
   /* ─── Toast (spin couldn't run) ──────────────────────────── */
   /* Shown in place of the reel when do_spin reports an empty pool
@@ -320,7 +357,10 @@
 
     <div class="result" id="result">
       <span class="winner-label">Selected</span>
-      <span class="winner-name" id="resultName"></span>
+      <span class="winner-name" id="resultName"><span id="resultNameText"></span><span
+            class="aspect-tag" id="resultAspect"><img
+            src="/icons/aspect.png" alt=""
+            onerror="this.style.display='none'">ASPECT</span></span>
       <span class="winner-meta" id="resultMeta"></span>
     </div>
 
@@ -525,7 +565,13 @@
   let landTimer = null;
   let toastTimer = null;
 
-  function buildReel(candidates, chosen) {
+  // (god, aspect) is the entry identity — a base god and its aspect
+  // can ride the same reel as separate cards.
+  function sameEntry(c, god, aspect) {
+    return c.god === god && !!c.aspect === !!aspect;
+  }
+
+  function buildReel(candidates, chosen, chosenAspect) {
     const track = document.getElementById('track');
     track.classList.remove('spinning', 'landed');
     // Kill any leftover inline transition from a previous spin so the
@@ -568,11 +614,13 @@
       for (const c of shuffleCopy(candidates)) sequence.push(c);
     }
 
-    const nonWinners = candidates.filter(c => c.god !== chosen);
+    const nonWinners = candidates.filter(
+      c => !sameEntry(c, chosen, chosenAspect));
     for (const c of shuffleCopy(nonWinners)) sequence.push(c);
 
-    const chosenObj = candidates.find(c => c.god === chosen)
-                       || { god: chosen, votes: 1 };
+    const chosenObj = candidates.find(
+                        c => sameEntry(c, chosen, chosenAspect))
+                       || { god: chosen, aspect: !!chosenAspect, votes: 1 };
     sequence.push(chosenObj);
 
     const tailCount = Math.min(4, Math.max(2, nonWinners.length));
@@ -605,6 +653,14 @@
       nm.textContent = c.god;
       card.appendChild(img);
       card.appendChild(nm);
+      if (c.aspect) {
+        const a = document.createElement('img');
+        a.className = 'aspect-badge';
+        a.src = '/icons/aspect.png';
+        a.alt = 'Aspect';
+        a.onerror = function() { this.style.display = 'none'; };
+        card.appendChild(a);
+      }
       if (c.votes && c.votes > 1) {
         const v = document.createElement('div');
         v.className = 'votes';
@@ -617,7 +673,7 @@
     return { track, winnerIndex };
   }
 
-  function spin(candidates, chosen, chosenVotes) {
+  function spin(candidates, chosen, chosenAspect, chosenVotes) {
     // If a previous spin is still mid-animation, cancel its landing
     // timer + pending audio and start fresh — back-to-back !spins
     // shouldn't be silently dropped.
@@ -631,7 +687,8 @@
     // Reset the result line
     const resultEl = document.getElementById('result');
     resultEl.classList.remove('shown');
-    document.getElementById('resultName').textContent = '';
+    document.getElementById('resultNameText').textContent = '';
+    document.getElementById('resultAspect').classList.remove('shown');
     document.getElementById('resultMeta').textContent = '';
 
     // Adaptive duration so the reveal pass in buildReel reads at a
@@ -643,7 +700,8 @@
       + Math.max(0, poolSize - SPIN_DURATION_FREE_GODS)
         * SPIN_DURATION_PER_GOD_MS;
 
-    const { track, winnerIndex } = buildReel(candidates, chosen);
+    const { track, winnerIndex } = buildReel(candidates, chosen,
+                                             chosenAspect);
 
     // Force layout so the translateX(0) + transition:none reset in
     // buildReel commits before we re-arm the transition. Without this,
@@ -686,7 +744,9 @@
     landTimer = setTimeout(() => {
       track.classList.add('landed');
       resultEl.classList.add('shown');
-      document.getElementById('resultName').textContent = chosen;
+      document.getElementById('resultNameText').textContent = chosen;
+      document.getElementById('resultAspect').classList
+        .toggle('shown', !!chosenAspect);
       const v = chosenVotes || 1;
       document.getElementById('resultMeta').textContent =
         `${v} vote${v === 1 ? '' : 's'}`;
@@ -723,15 +783,18 @@
       if (!data || !data.chosen) return;
       const candidates = Array.isArray(data.candidates)
                           ? data.candidates : [];
-      // If the candidate list is somehow missing the chosen god (race
-      // with pool deletion), inject it so the reel still has a winner
-      // card to land on.
+      // If the candidate list is somehow missing the chosen entry
+      // (race with pool deletion), inject it so the reel still has a
+      // winner card to land on. Identity is (god, aspect).
       if (candidates.length === 0
-          || !candidates.some(c => c.god === data.chosen)) {
+          || !candidates.some(
+               c => sameEntry(c, data.chosen, data.chosen_aspect))) {
         candidates.push({ god: data.chosen,
+                          aspect: !!data.chosen_aspect,
                           votes: data.chosen_votes || 1 });
       }
-      spin(candidates, data.chosen, data.chosen_votes);
+      spin(candidates, data.chosen, !!data.chosen_aspect,
+           data.chosen_votes);
     },
     onHide() {
       clearScheduledAudio();
@@ -742,6 +805,7 @@
       track.innerHTML = '';
       const resultEl = document.getElementById('result');
       resultEl.classList.remove('shown');
+      document.getElementById('resultAspect').classList.remove('shown');
       document.getElementById('container').classList.remove('toast-mode');
       busy = false;
     }

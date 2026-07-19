@@ -173,6 +173,16 @@ h1 {
 .queue-song { color: #e8ddd0; flex: 1; }
 .queue-user { color: rgba(196,168,130,0.5); margin-left: 8px; }
 
+/* Compact inline buttons for the spin-pool rows — .big-btn is a
+   full-width block button, so undo that inside a flex row. */
+.big-btn.pool-btn {
+  width: auto;
+  flex: none;
+  margin: 0;
+  padding: 2px 9px;
+  font-size: 12px;
+}
+
 .queue-empty {
   color: rgba(196,168,130,0.3);
   font-style: italic;
@@ -372,6 +382,27 @@ h1 {
       <button class="big-btn stop" onclick="action('god_clear')" style="margin:0;flex:1">CLEAR ALL</button>
     </div>
     <div id="godMiuStatus" style="font-size:11px;color:rgba(196,168,130,0.3);margin-top:6px;text-align:center"></div>
+  </div>
+
+  <!-- Spin Pool manager: every (god, aspect) entry with its vote
+       count, editable in place. Votes are the !spin weighting, so
+       this is where test nominations get pruned without waiting for
+       tomorrow's daily-cap reset. -->
+  <div class="card">
+    <div class="card-title">spin pool</div>
+    <div id="spinPool">
+      <div class="queue-empty">Pool empty</div>
+    </div>
+    <div style="display:flex;gap:6px;margin-top:8px;align-items:center">
+      <input type="text" id="poolAddGod" class="title-input"
+             placeholder="Add god (name or partial)" style="flex:1;margin:0">
+      <label style="font-size:10px;color:#ff9128;display:flex;align-items:center;gap:3px;white-space:nowrap;cursor:pointer">
+        <input type="checkbox" id="poolAddAspect">ASPECT
+      </label>
+      <button class="big-btn pool-btn" onclick="poolAdd()"
+              style="padding:8px 16px">ADD</button>
+    </div>
+    <div id="poolStatus" style="font-size:11px;color:rgba(196,168,130,0.5);margin-top:6px;text-align:center"></div>
   </div>
 
   <!-- Stats -->
@@ -594,7 +625,9 @@ async function loadPriorityPayments() {
       html += '<tr style="border-top:1px solid rgba(196,168,130,0.12)">' +
         `<td style="padding:3px 6px;white-space:nowrap">${when}</td>` +
         `<td>${escapeHtmlCP(p.username || '?')}</td>` +
-        `<td>${escapeHtmlCP(p.god || '?')}</td>` +
+        `<td>${escapeHtmlCP(p.god || '?')}${p.use_aspect
+            ? ' <span style="color:#ff9128;font-size:9px">ASPECT</span>'
+            : ''}</td>` +
         `<td>${(p.amount_cents / 100).toFixed(2)}</td>` +
         `<td style="color:${color}">${status}</td>` +
         '<td style="text-align:right">' +
@@ -636,6 +669,107 @@ async function refundPriority(sessionId, username) {
 
 loadPriorityPayments();
 setInterval(loadPriorityPayments, 30000);
+
+// --- Spin pool manager ---
+// Rows are addressed by index into poolEntries (never by inlining the
+// god name into onclick attributes — names like Chang'e would break
+// the quoting).
+let poolEntries = [];
+
+async function loadSpinPool() {
+  try {
+    const r = await fetch(`${API}/api/god_pool`);
+    const data = await r.json();
+    poolEntries = data.pool || [];
+    renderSpinPool();
+  } catch (e) { console.error(e); }
+}
+
+function renderSpinPool() {
+  const el = document.getElementById('spinPool');
+  if (!poolEntries.length) {
+    el.innerHTML = '<div class="queue-empty">Pool empty. Viewers add gods with !nominate.</div>';
+    return;
+  }
+  el.innerHTML = poolEntries.map((p, i) => {
+    const aspectTag = p.use_aspect
+      ? ' <span style="color:#ff9128;font-size:10px">ASPECT</span>' : '';
+    const by = p.added_by
+      ? `<span class="queue-user">${escapeHtmlCP(p.added_by)}</span>` : '';
+    return `
+    <div class="queue-item" style="gap:6px">
+      <span class="queue-song">${escapeHtmlCP(p.god)}${aspectTag}</span>
+      ${by}
+      <button class="big-btn pool-btn" onclick="poolAdjust(${i}, -1)" title="Remove one vote">&minus;</button>
+      <span style="min-width:22px;text-align:center;flex:none">${p.votes}</span>
+      <button class="big-btn pool-btn" onclick="poolAdjust(${i}, 1)" title="Add one vote">+</button>
+      <button class="big-btn stop pool-btn" onclick="poolRemove(${i})" title="Remove from pool">&times;</button>
+    </div>`;
+  }).join('');
+}
+
+function poolStatus(msg, isErr) {
+  const st = document.getElementById('poolStatus');
+  st.textContent = msg;
+  st.style.color = isErr ? '#DF2935' : 'rgba(80,200,120,0.7)';
+}
+
+async function poolSetVotes(god, useAspect, votes) {
+  try {
+    const r = await fetch(`${API}/api/action`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({action: 'set_pool_votes', god,
+                            use_aspect: useAspect, votes})
+    });
+    const data = await r.json();
+    if (!r.ok || data.error) {
+      poolStatus(data.error || `Failed (${r.status})`, true);
+    } else {
+      const label = data.god + (data.use_aspect ? ' (Aspect)' : '');
+      poolStatus(data.votes === 0
+        ? `${label} removed from pool`
+        : `${label} set to ${data.votes} vote${data.votes === 1 ? '' : 's'}`);
+    }
+  } catch (e) {
+    poolStatus('Network error', true);
+  }
+  loadSpinPool();
+}
+
+function poolAdjust(i, delta) {
+  const p = poolEntries[i];
+  if (!p) return;
+  // The minus button stops at 1 — removal is the explicit x button,
+  // so mashing minus can't silently drop an entry.
+  const votes = Math.max(1, p.votes + delta);
+  if (votes === p.votes) {
+    poolStatus('Already at 1 vote. Use the x button to remove.', true);
+    return;
+  }
+  poolSetVotes(p.god, p.use_aspect, votes);
+}
+
+function poolRemove(i) {
+  const p = poolEntries[i];
+  if (!p) return;
+  const label = p.god + (p.use_aspect ? ' (Aspect)' : '');
+  if (!confirm(`Remove ${label} (${p.votes} vote${p.votes === 1 ? '' : 's'}) from the spin pool?`)) return;
+  poolSetVotes(p.god, p.use_aspect, 0);
+}
+
+function poolAdd() {
+  const god = document.getElementById('poolAddGod').value.trim();
+  if (!god) { poolStatus('Type a god name first.', true); return; }
+  const aspect = document.getElementById('poolAddAspect').checked;
+  document.getElementById('poolAddGod').value = '';
+  // Absolute set: adding a god that's already pooled resets it to 1
+  // vote (the status line says exactly what happened).
+  poolSetVotes(god, aspect, 1);
+}
+
+loadSpinPool();
+setInterval(loadSpinPool, 30000);
 
 async function sendChat() {
   const input = document.getElementById('chatMsg');
@@ -733,9 +867,12 @@ function renderGodQueue(godReqs) {
       const userLine = g.requester
         ? `<span class="queue-user">${g.requester}${g.token_spent ? '' : ' (mod)'}</span>`
         : '';
+      const aspectTag = g.use_aspect
+        ? ' <span style="color:#ff9128;font-size:10px">ASPECT</span>'
+        : '';
       return `
       <div class="queue-item">
-        <span class="queue-song">${i+1}. ${g.god}</span>
+        <span class="queue-song">${i+1}. ${g.god}${aspectTag}</span>
         ${userLine}
       </div>`;
     }).join('');

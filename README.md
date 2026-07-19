@@ -111,6 +111,7 @@ Bind a key to `http://localhost:8069/api/spin` (GET or POST) to run the wheel ex
 | `!godrequest <god>` | Spend 1 God Token to request a god |
 | `!godqueue` / `!godlist` / `!godtokens` | Queue preview, full queue, token balance |
 | `!nominate <god>` / `!pool` | Add a god to the spin pool (1/day), view the pool |
+| `… <god> aspect` | Any god request/nomination with the word "aspect" targets the god's Aspect (own entry, wiki-validated) |
 | `!buy [god] [amt\|all]` / `!sell [god] [amt\|all]` | Trade god shares for Hats |
 | `!portfolio` / `!price [god]` | Holdings + P&L; current price and trend |
 | `!market` / `!stocks` / `!dividend` | Top movers; latest dividend |

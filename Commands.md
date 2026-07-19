@@ -41,12 +41,24 @@ Every command starts with `!`. Commands marked **(mods)** need mod or broadcaste
 
 - **!godrequest <god>** - Spends 1 God Token to request a god.
 - **!godreq <god>** (mods) - Adds a god to the queue for free.
+- Add the word **aspect** anywhere in a request (`!godreq Khepri aspect`)
+  to request the god's Aspect. Only works for gods that have one
+  (auto-checked against the SMITE 2 wiki); an aspect request is a
+  separate queue entry from the base god.
 - **!godqueue** - Shows the next 5 gods in the queue.
 - **!godlist** - Shows the entire queue.
 - **!godtokens** - Shows your God Token balance.
 - **!godskip** (mods) - Removes the next god from the queue.
 - **!remove <pos>** (mods) - Removes the god at a given queue position.
 - **!godclear** (mods) - Clears the entire queue.
+
+## Spin Pool
+
+- **!nominate <god>** - Adds a god to the spin pool (1 per viewer per day).
+  Add the word **aspect** to nominate the god's Aspect as its own entry.
+- **!pool** - Shows the top 5 most-voted pool entries.
+- **!spin** (mods) - Picks a weighted-random entry and queues it next.
+- **!poolclear** (mods) - Wipes the pool.
 
 ## Gamble
 

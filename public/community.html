@@ -180,6 +180,29 @@
     margin-top: 3px;
     line-height: 1.3;
   }
+  /* ASPECT pill — inline next to the god name on aspect requests, in
+     both the queue and the pool. Orange to match the in-game aspect
+     marker; the small icon hides itself if the asset isn't there. */
+  .aspect-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    vertical-align: 2px;
+    margin-left: 6px;
+    font-family: var(--font-sans);
+    font-size: 9px;
+    padding: 1px 5px;
+    border: 1px solid #ff9128;
+    color: #ff9128;
+    border-radius: 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 700;
+  }
+  .aspect-pill img {
+    width: 11px; height: 11px;
+    object-fit: contain;
+  }
 
   /* ─── God pool ────────────────────────────────────────────────── */
   .pool-row {
@@ -553,6 +576,36 @@
     cursor: wait;
     filter: none;
   }
+  /* Aspect checkbox — appears under a god picker only when the
+     selected god actually has an Aspect (list from /api/aspects).
+     label.aspect-check outranks the generic `.priority-card label`
+     display rule, which would otherwise force it visible. */
+  label.aspect-check {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    font-family: var(--font-sans);
+    font-size: 12px;
+    color: var(--text-dim);
+    cursor: pointer;
+    user-select: none;
+    text-transform: none;
+    letter-spacing: normal;
+  }
+  label.aspect-check.available { display: flex; }
+  .aspect-check input {
+    accent-color: #ff9128;
+    width: 14px; height: 14px;
+    margin: 0;
+    cursor: pointer;
+  }
+  .aspect-check img {
+    width: 14px; height: 14px;
+    object-fit: contain;
+  }
+  .aspect-check b { color: #ff9128; font-weight: 600; }
+
   .nominate-note {
     margin-top: 8px;
     font-size: 12px;
@@ -594,7 +647,9 @@
       adds to the priority queue.
       <code>!nominate &lt;god&gt;</code> adds to the spin pool, once per
       viewer per day. Hatmaster runs <code>!spin</code> to randomly pick
-      one (weighted by votes).
+      one (weighted by votes). Add the word <code>aspect</code>
+      (e.g. <code>!nominate Khepri aspect</code>) to request a god's
+      Aspect — it counts as its own entry, separate from the base god.
     </div>
 
     <!-- Priority god request: $5 via Stripe Checkout to push a god
@@ -620,6 +675,12 @@
             <select id="pc-god" name="god" required>
               <option value="">Loading gods…</option>
             </select>
+            <label class="aspect-check" id="pc-aspect-wrap">
+              <input type="checkbox" id="pc-aspect">
+              <img src="/aspect-icon.png" alt=""
+                   onerror="this.style.display='none'">
+              Request the <b>Aspect</b> version of this god
+            </label>
           </div>
           <div>
             <label for="pc-twitch">Your Twitch username</label>
@@ -688,6 +749,12 @@
             </select>
             <button id="nom-btn" type="button">Nominate</button>
           </div>
+          <label class="aspect-check" id="nom-aspect-wrap">
+            <input type="checkbox" id="nom-aspect">
+            <img src="/aspect-icon.png" alt=""
+                 onerror="this.style.display='none'">
+            Nominate the <b>Aspect</b> version
+          </label>
           <div class="nominate-note" id="nom-note"></div>
         </div>
         <div class="nominate-hint" id="nominate-hint">
@@ -724,6 +791,25 @@
   // Footer (and its DATA freshness tag) removed July 2026. bumpPing
   // stays as a no-op so the data-load call sites don't need touching.
   function bumpPing() {}
+
+  // Gods that have an Aspect (alternate kit), from /api/aspects —
+  // wiki-refreshed server-side. Gates the "Aspect" checkboxes so you
+  // can't request an aspect that doesn't exist.
+  let aspectSet = new Set();
+  async function loadAspects() {
+    try {
+      const r = await fetch('/api/aspects');
+      if (!r.ok) return;
+      const data = await r.json();
+      aspectSet = new Set(data.gods || []);
+      // Re-run the gating in case the god selects already have a value.
+      syncAspectChecks();
+    } catch (e) { /* checkbox just stays hidden */ }
+  }
+  function aspectPill() {
+    return '<span class="aspect-pill"><img src="/aspect-icon.png" ' +
+           'alt="" onerror="this.style.display=\'none\'">Aspect</span>';
+  }
 
   async function refresh() {
     try {
@@ -772,7 +858,8 @@
         `<img class="icon" src="${iconUrl(it.god)}" alt="" loading="lazy" ` +
         `     onerror="this.style.opacity=0.3">` +
         `<div class="info">` +
-        `  <div class="god">${escapeHtml(it.god || '?')}</div>` +
+        `  <div class="god">${escapeHtml(it.god || '?')}` +
+        `${it.use_aspect ? aspectPill() : ''}</div>` +
         reqLine + msgLine +
         `</div>` + badge;
       $queue.appendChild(row);
@@ -799,7 +886,8 @@
         `<img class="icon" src="${iconUrl(it.god)}" alt="" loading="lazy" ` +
         `     onerror="this.style.opacity=0.3">` +
         `<div class="info">` +
-        `  <div class="god">${escapeHtml(it.god || '?')}</div>` +
+        `  <div class="god">${escapeHtml(it.god || '?')}` +
+        `${it.use_aspect ? aspectPill() : ''}</div>` +
         `  <div class="added">first by ` +
         `    <span class="by">${escapeHtml(it.added_by || '?')}</span></div>` +
         `</div>` +
@@ -1006,7 +1094,27 @@
   const $nomBtn  = document.getElementById('nom-btn');
   const $nomNote = document.getElementById('nom-note');
 
+  // Aspect checkboxes: visible only while the selected god has an
+  // Aspect. Hiding also unchecks, so a stale tick can't ride along
+  // after switching to a god without one.
+  const $pcAspectWrap  = document.getElementById('pc-aspect-wrap');
+  const $pcAspect      = document.getElementById('pc-aspect');
+  const $nomAspectWrap = document.getElementById('nom-aspect-wrap');
+  const $nomAspect     = document.getElementById('nom-aspect');
+
+  function syncAspectChecks() {
+    [[$pcGod, $pcAspectWrap, $pcAspect],
+     [$nomGod, $nomAspectWrap, $nomAspect]].forEach(([sel, wrap, box]) => {
+      const ok = aspectSet.has(sel.value);
+      wrap.classList.toggle('available', ok);
+      if (!ok) box.checked = false;
+    });
+  }
+  $pcGod.addEventListener('change', syncAspectChecks);
+  $nomGod.addEventListener('change', syncAspectChecks);
+
   loadGods();
+  loadAspects();
 
   HatmasAuth.ready.then((me) => {
     if (me && me.logged_in) {
@@ -1025,21 +1133,23 @@
   $nomBtn.addEventListener('click', async () => {
     const god = $nomGod.value.trim();
     if (!god) { nomShow('Pick a god first.', true); return; }
+    const aspect = $nomAspect.checked;
     $nomBtn.disabled = true;
     try {
       const r = await fetch('/api/nominate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ god }),
+        body: JSON.stringify({ god, aspect }),
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok || !data.ok) {
         nomShow(data.error || ('Request failed (' + r.status + ')'), true);
         return;
       }
+      const label = data.god + (data.use_aspect ? ' (Aspect)' : '');
       nomShow(data.votes === 1
-        ? data.god + ' added to the spin pool.'
-        : '+1 vote for ' + data.god + ' (now ' + data.votes + ' total).');
+        ? label + ' added to the spin pool.'
+        : '+1 vote for ' + label + ' (now ' + data.votes + ' total).');
       refresh();
     } catch (e) {
       nomShow('Network error - try again.', true);
@@ -1055,6 +1165,7 @@
     const god     = $pcGod.value.trim();
     const twitch  = $pcTwitch.value.trim().replace(/^@/, '');
     const message = $pcMessage.value.trim();
+    const aspect  = $pcAspect.checked;
 
     if (!god) { pcShowError('Pick a god first.'); return; }
     if (!twitch) { pcShowError('Twitch username required so we can shout you out.'); return; }
@@ -1071,7 +1182,7 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          god, twitch_username: twitch, message,
+          god, twitch_username: twitch, message, aspect,
         }),
       });
 
@@ -1092,6 +1203,8 @@
         const err = data.error || ('HTTP ' + r.status);
         if (err.startsWith('unknown_god:')) {
           pcShowError('That god name didn\'t match the SMITE 2 roster.');
+        } else if (err.startsWith('no_aspect:')) {
+          pcShowError('That god doesn\'t have an Aspect in SMITE 2 (yet).');
         } else if (err === 'bad_twitch_username') {
           pcShowError('Twitch username is invalid.');
         } else if (err === 'upstream_failed') {

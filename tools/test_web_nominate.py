@@ -43,10 +43,12 @@ class FakeGodPool:
     def __init__(self):
         self._db = object()
         self.calls = []
-        self.result = {"ok": True, "god": "Atlas", "votes": 1, "pool_size": 3}
+        self.result = {"ok": True, "god": "Atlas", "use_aspect": False,
+                       "votes": 1, "pool_size": 3}
 
-    async def do_nominate(self, username, raw_god, is_broadcaster=False):
-        self.calls.append((username, raw_god, is_broadcaster))
+    async def do_nominate(self, username, raw_god, is_broadcaster=False,
+                          use_aspect=False):
+        self.calls.append((username, raw_god, is_broadcaster, use_aspect))
         return self.result
 
 class Harness:
@@ -234,10 +236,30 @@ async def test_happy_path():
 
         # Check that do_nominate was called correctly
         assert len(fake_pool.calls) == 1
-        username, raw_god, is_broadcaster = fake_pool.calls[0]
+        username, raw_god, is_broadcaster, use_aspect = fake_pool.calls[0]
         assert username == "viewer1"
         assert raw_god == "Atlas"
         assert is_broadcaster is False
+        assert use_aspect is False
+    finally:
+        await harness.client.close()
+
+async def test_aspect_flag():
+    harness = await make_harness()
+    try:
+        fake_pool = harness.server.bot.plugins["god_pool"]
+        fake_pool.result = {"ok": True, "god": "Atlas", "use_aspect": True,
+                            "votes": 1, "pool_size": 3}
+        resp = await harness.nominate({"god": "Atlas", "aspect": True})
+        assert resp.status == 200
+        data = await resp.json()
+        assert data["ok"] is True
+        assert data["use_aspect"] is True
+
+        assert len(fake_pool.calls) == 1
+        username, raw_god, is_broadcaster, use_aspect = fake_pool.calls[0]
+        assert raw_god == "Atlas"
+        assert use_aspect is True
     finally:
         await harness.client.close()
 
@@ -254,7 +276,7 @@ async def test_broadcaster_flag():
 
             # Check that do_nominate was called with is_broadcaster=True
             assert len(fake_pool.calls) == 1
-            username, raw_god, is_broadcaster = fake_pool.calls[0]
+            username, raw_god, is_broadcaster, use_aspect = fake_pool.calls[0]
             assert username == "hatmaster"
             assert raw_god == "Atlas"
             assert is_broadcaster is True

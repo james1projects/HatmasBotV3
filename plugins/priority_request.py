@@ -54,7 +54,9 @@ try:
 except ImportError:
     aiosqlite = None
 
+from core import aspect_roster
 from core import db as _shared_db
+from core.aspect_roster import display_god
 from core.config import (
     PRIORITY_REQUEST_ENABLED,
     PRIORITY_REQUEST_PRICE_CENTS,
@@ -186,6 +188,13 @@ class PriorityRequestPlugin:
             if col not in cols:
                 await self._db.execute(
                     f"ALTER TABLE priority_payments ADD COLUMN {col} TEXT")
+        #   use_aspect — 1 when the $5 request is for the god's Aspect
+        #       (alternate kit). Part of the request identity end to
+        #       end: metadata → queue entry → dashboard.
+        if "use_aspect" not in cols:
+            await self._db.execute(
+                "ALTER TABLE priority_payments "
+                "ADD COLUMN use_aspect INTEGER NOT NULL DEFAULT 0")
         await self._db.commit()
 
     # ──────────────────────────────────────────────────────────────────
@@ -211,13 +220,18 @@ class PriorityRequestPlugin:
         return godreq._match_god(raw)
 
     async def create_session(self, god: str, twitch_username: str,
-                             message: str) -> dict:
+                             message: str,
+                             use_aspect: bool = False) -> dict:
         """Create a Stripe Checkout Session for a priority request.
 
         Validates inputs, persists a `pending` row in priority_payments
         so we can audit attempted-but-not-completed sessions, then
         hands back the Checkout Session URL the browser should
         redirect to.
+
+        ``use_aspect`` marks a request for the god's Aspect (alternate
+        kit) — validated against the wiki-refreshed aspect roster so
+        nobody pays for an aspect that doesn't exist.
 
         Raises ValueError on bad input. Raises RuntimeError on Stripe
         errors. The web handler maps these to 400 / 502.
@@ -229,6 +243,10 @@ class PriorityRequestPlugin:
         canon = self.resolve_god(god)
         if not canon:
             raise ValueError(f"unknown_god:{god!r}")
+
+        use_aspect = bool(use_aspect)
+        if use_aspect and not aspect_roster.has_aspect(canon):
+            raise ValueError(f"no_aspect:{canon!r}")
 
         # ── validate twitch username ──
         # Twitch usernames are 4–25 chars, alnum + underscore.
@@ -260,7 +278,8 @@ class PriorityRequestPlugin:
                         "product_data": {
                             "name": PRIORITY_REQUEST_PRODUCT_NAME,
                             "description": (
-                                f"YouTube full gameplay: {canon} "
+                                f"YouTube full gameplay: "
+                                f"{display_god(canon, use_aspect)} "
                                 f"requested by {uname} on Hatmaster.tv"
                             ),
                         },
@@ -274,6 +293,8 @@ class PriorityRequestPlugin:
                     "god": canon,
                     "twitch_username": uname,
                     "message": msg,
+                    # Stripe metadata values must be strings.
+                    "use_aspect": "1" if use_aspect else "0",
                 },
             )
         except Exception as e:
@@ -288,12 +309,13 @@ class PriorityRequestPlugin:
             await self._db.execute("""
                 INSERT INTO priority_payments
                        (stripe_session_id, twitch_username, god, message,
-                        amount_cents, currency, status)
-                VALUES (?, ?, ?, ?, ?, ?, 'pending')
+                        amount_cents, currency, use_aspect, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
                 ON CONFLICT(stripe_session_id) DO NOTHING
             """, (session.id, uname, canon, msg,
                   PRIORITY_REQUEST_PRICE_CENTS,
-                  PRIORITY_REQUEST_CURRENCY))
+                  PRIORITY_REQUEST_CURRENCY,
+                  1 if use_aspect else 0))
             await self._db.commit()
         except Exception as e:
             # Non-fatal: the webhook handler will still queue from
@@ -392,6 +414,7 @@ class PriorityRequestPlugin:
         god = metadata.get("god")
         uname = metadata.get("twitch_username")
         msg = metadata.get("message", "")
+        use_aspect = metadata.get("use_aspect") == "1"
         if not god or not uname:
             print(f"[PriorityRequest] session {session_id} missing "
                   f"metadata; cannot queue")
@@ -417,13 +440,14 @@ class PriorityRequestPlugin:
                 await self._db.execute("""
                     INSERT INTO priority_payments
                            (stripe_session_id, twitch_username, god,
-                            message, amount_cents, currency,
+                            message, amount_cents, currency, use_aspect,
                             payment_intent, paid_at, status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), 'paid')
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), 'paid')
                     ON CONFLICT(stripe_session_id) DO NOTHING
                 """, (session_id, uname, god, msg,
                       session.get("amount_total", 0),
                       session.get("currency", PRIORITY_REQUEST_CURRENCY),
+                      1 if use_aspect else 0,
                       payment_intent))
             else:
                 await self._db.execute("""
@@ -479,6 +503,7 @@ class PriorityRequestPlugin:
                 source="paid_priority",
                 token_spent=False,
                 position="head",
+                use_aspect=use_aspect,
             )
             # queue_add doesn't accept extra fields; patch the entry it
             # returns and re-save. stripe_session_id is what lets the
@@ -502,7 +527,8 @@ class PriorityRequestPlugin:
                 amount = session.get("amount_total",
                                      PRIORITY_REQUEST_PRICE_CENTS) / 100
                 shout = (f"Priority request: {uname} paid ${amount:.2f} "
-                         f"for a {canon} YouTube full gameplay. "
+                         f"for a {display_god(canon, use_aspect)} "
+                         f"YouTube full gameplay. "
                          f"Straight to the head of the queue.")
                 if msg:
                     shout += f' Message: "{msg}"'
@@ -511,9 +537,10 @@ class PriorityRequestPlugin:
             print(f"[PriorityRequest] chat shoutout failed: {e}")
 
         print(f"[PriorityRequest] FULFILLED session {session_id}: "
-              f"{uname} -> {canon} "
+              f"{uname} -> {display_god(canon, use_aspect)} "
               f"(${session.get('amount_total', 0) / 100:.2f})")
-        return {"ok": True, "action": "queued", "god": canon}
+        return {"ok": True, "action": "queued", "god": canon,
+                "use_aspect": use_aspect}
 
     async def _handle_refund_event(self, event) -> dict:
         """charge.refunded / charge.dispute.created — money went (or
@@ -528,7 +555,8 @@ class PriorityRequestPlugin:
             return {"ok": True, "action": "refund_no_payment_intent"}
 
         async with self._db.execute(
-            "SELECT stripe_session_id, twitch_username, god, status "
+            "SELECT stripe_session_id, twitch_username, god, status, "
+            "use_aspect "
             "FROM priority_payments WHERE payment_intent = ?",
             (payment_intent,)
         ) as c:
@@ -536,12 +564,13 @@ class PriorityRequestPlugin:
         if row is None:
             return {"ok": True, "action": "refund_unmatched"}
 
-        session_id, uname, god, status = row
+        session_id, uname, god, status, use_aspect = row
         is_dispute = event.get("type") == "charge.dispute.created"
-        removed = await self._apply_refund_locally(session_id, uname, god)
+        removed = await self._apply_refund_locally(
+            session_id, uname, display_god(god, use_aspect))
         kind = "dispute" if is_dispute else "refund"
         print(f"[PriorityRequest] {kind.upper()} for session "
-              f"{session_id} ({uname} -> {god}); "
+              f"{session_id} ({uname} -> {display_god(god, use_aspect)}); "
               f"queue entry removed: {removed}")
         return {"ok": True, "action": f"{kind}_processed",
                 "queue_entry_removed": removed}
@@ -600,14 +629,16 @@ class PriorityRequestPlugin:
         if self._db is None:
             return {"ok": False, "error": "db_unavailable"}
         async with self._db.execute(
-            "SELECT twitch_username, god, status, payment_intent "
+            "SELECT twitch_username, god, status, payment_intent, "
+            "use_aspect "
             "FROM priority_payments WHERE stripe_session_id = ?",
             (session_id,)
         ) as c:
             row = await c.fetchone()
         if row is None:
             return {"ok": False, "error": "not_found"}
-        uname, god, status, pi = row
+        uname, god, status, pi, use_aspect = row
+        god = display_god(god, use_aspect)
         if status == "refunded":
             return {"ok": True, "already_refunded": True}
 
@@ -646,7 +677,7 @@ class PriorityRequestPlugin:
         async with self._db.execute("""
             SELECT stripe_session_id, twitch_username, god, message,
                    amount_cents, status, created_at, paid_at,
-                   fulfilled_at, played_at, refunded_at
+                   fulfilled_at, played_at, refunded_at, use_aspect
               FROM priority_payments
              ORDER BY created_at DESC LIMIT ?
         """, (limit,)) as c:
@@ -658,6 +689,7 @@ class PriorityRequestPlugin:
                     "status": r[5], "created_at": r[6],
                     "paid_at": r[7], "fulfilled_at": r[8],
                     "played_at": r[9], "refunded_at": r[10],
+                    "use_aspect": bool(r[11]),
                 })
         return out
 

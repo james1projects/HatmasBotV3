@@ -44,8 +44,9 @@ from core.config import (
     OBS_GODREQ_SCENE, OBS_GODREQ_GROUP,
     DATA_DIR
 )
-from core.god_resolver import resolve, resolve_sync
-from core import god_roster
+from core.god_resolver import resolve, resolve_sync, split_aspect
+from core import aspect_roster, god_roster
+from core.aspect_roster import display_god
 
 
 # === KNOWN GODS ===
@@ -173,6 +174,16 @@ class GodRequestPlugin:
                     SMITE2_GODS = god_roster.names()  # legacy importers
                     names = ", ".join(g["name"] for g in added)
                     print(f"[GodReq] New god(s) on the roster: {names}")
+
+                # Aspect roster rides the same cadence (and the same
+                # 24h cache logic inside refresh), so "which gods have
+                # an Aspect" self-updates on launch and stays current
+                # without manual steps. Failure is non-fatal — the
+                # cached/bundled list keeps validating.
+                try:
+                    await asyncio.to_thread(aspect_roster.refresh)
+                except Exception as e:
+                    print(f"[GodReq] aspect roster refresh error: {e}")
 
                 # Fetch art for any recent release still missing it —
                 # covers both gods added just now and earlier download
@@ -398,11 +409,14 @@ class GodRequestPlugin:
             return f"Unknown god: {raw_input}. Did you mean {suggest}?"
         return f"Unknown god: {raw_input}. Check your spelling!"
 
-    def _is_god_in_queue(self, god_name):
-        """Check if a god is already in the queue."""
+    def _is_god_in_queue(self, god_name, use_aspect=False):
+        """Check if a (god, aspect) request is already in the queue.
+        Base god and aspect are distinct requests — Khepri queued
+        doesn't block Khepri (Aspect)."""
         normalized = self._normalize_god_name(god_name)
         for entry in self.queue:
-            if self._normalize_god_name(entry["god"]) == normalized:
+            if (self._normalize_god_name(entry["god"]) == normalized
+                    and bool(entry.get("use_aspect")) == bool(use_aspect)):
                 return True
         return False
 
@@ -429,9 +443,9 @@ class GodRequestPlugin:
             # asking James to add a new source. If you'd rather use a
             # dedicated badge image source later, drop this prefix and
             # add an OBS_SOURCE_GODREQ_PRIORITY_BADGE source instead.
-            display_text = next_god
+            display_text = display_god(next_god, head.get("use_aspect"))
             if head.get("source") == "paid_priority":
-                display_text = f"PRIORITY - {next_god}"
+                display_text = f"PRIORITY - {display_text}"
 
             # Set the text to the (possibly priority-prefixed) god name
             try:
@@ -504,6 +518,11 @@ class GodRequestPlugin:
 
         detected_god = god_info.get("name", "")
         next_god = self.queue[0]["god"]
+        # Screen detection can't tell an Aspect game from a base-kit
+        # game (same portrait), so a detected god completes the head
+        # entry regardless of its use_aspect flag. The aspect suffix
+        # still shows in the fulfillment shoutout below.
+        next_aspect = bool(self.queue[0].get("use_aspect"))
 
         if self._normalize_god_name(detected_god) == self._normalize_god_name(next_god):
             completed = self.queue.pop(0)
@@ -528,28 +547,33 @@ class GodRequestPlugin:
                         conn = await _shared_db.get_db()
                         if conn is not None:
                             await conn.execute(
-                                "DELETE FROM god_pool WHERE god_name = ?",
-                                (next_god,))
+                                "DELETE FROM god_pool "
+                                "WHERE god_name = ? AND use_aspect = ?",
+                                (next_god, 1 if next_aspect else 0))
                             await conn.commit()
-                            print(f"[GodRequest] Removed {next_god} from "
-                                  f"spin pool (played after !spin).")
+                            print(f"[GodRequest] Removed "
+                                  f"{display_god(next_god, next_aspect)} "
+                                  f"from spin pool (played after !spin).")
                 except Exception as e:
                     print(f"[GodRequest] Failed to remove {next_god} "
                           f"from spin pool: {e}")
 
+            played = display_god(next_god, next_aspect)
             # Spin entries carry a blank requester (by design — the
             # queue renderers skip the suffix), so don't announce
             # "requested by ." for them.
             if completed.get("requester"):
-                lead = (f"God request fulfilled! Playing {next_god} as "
+                lead = (f"God request fulfilled! Playing {played} as "
                         f"requested by {completed['requester']}.")
             elif completed.get("source") == "spin":
-                lead = f"Spin fulfilled! Now playing {next_god}."
+                lead = f"Spin fulfilled! Now playing {played}."
             else:
-                lead = f"God request fulfilled! Now playing {next_god}."
+                lead = f"God request fulfilled! Now playing {played}."
             await self.bot.send_chat(
                 lead + " "
-                + (f"Next up: {self.queue[0]['god']}" if self.queue
+                + (f"Next up: "
+                   f"{display_god(self.queue[0]['god'], self.queue[0].get('use_aspect'))}"
+                   if self.queue
                    else "Queue is now empty!")
             )
 
@@ -601,11 +625,25 @@ class GodRequestPlugin:
                 )
             return
 
+        # The word "aspect" anywhere in the request flags the god's
+        # Aspect (alternate kit) — "!godrequest Khepri aspect" is a
+        # distinct request from "!godrequest Khepri".
+        cleaned, use_aspect = split_aspect(args)
+
         # Match the god name (all tiers including local LLM)
-        god_name = await self._match_god_full(args)
+        god_name = await self._match_god_full(cleaned)
         if not god_name:
             await self.bot.send_reply(
-                message, self._unknown_god_reply(args), whisper
+                message, self._unknown_god_reply(cleaned.strip()), whisper
+            )
+            return
+
+        if use_aspect and not aspect_roster.has_aspect(god_name):
+            await self.bot.send_reply(
+                message,
+                f"{god_name} doesn't have an Aspect in SMITE 2 (yet). "
+                f"Request without the word 'aspect'.",
+                whisper
             )
             return
 
@@ -649,6 +687,7 @@ class GodRequestPlugin:
             "requester": message.chatter.name,
             "requested_at": datetime.now().isoformat(),
             "token_spent": True,
+            "use_aspect": use_aspect,
         }
         self.queue.append(entry)
         self._save_data()
@@ -656,7 +695,8 @@ class GodRequestPlugin:
         position = len(self.queue)
         remaining = (balance - GODREQ_TOKEN_COST)
         await self.bot.send_chat(
-            f"{message.chatter.name} requested {god_name}! "
+            f"{message.chatter.name} requested "
+            f"{display_god(god_name, use_aspect)}! "
             f"Position: #{position} in queue | "
             f"Tokens remaining: {remaining}"
         )
@@ -678,7 +718,8 @@ class GodRequestPlugin:
     def queue_add(self, god_name: str, requester: str,
                   source: str = "paid",
                   token_spent: bool = False,
-                  position: str = "end") -> dict:
+                  position: str = "end",
+                  use_aspect: bool = False) -> dict:
         """Append (or prepend) a god to the request queue.
 
         Args:
@@ -695,6 +736,9 @@ class GodRequestPlugin:
                        appends (default). !spin uses "head" so the
                        lobby plays the rolled god next, with paid
                        requests queued behind.
+          use_aspect:  True when the request is for the god's Aspect
+                       (alternate kit). Caller validates against
+                       core.aspect_roster — we don't re-check.
 
         Returns the inserted entry dict. Caller is free to log it.
         """
@@ -704,6 +748,7 @@ class GodRequestPlugin:
             "requested_at": datetime.now().isoformat(),
             "token_spent":  bool(token_spent),
             "source":       source,
+            "use_aspect":   bool(use_aspect),
         }
         if position == "head":
             self.queue.insert(0, entry)
@@ -719,25 +764,36 @@ class GodRequestPlugin:
         self._update_web_state()
         return entry
 
-    def queue_contains(self, god_name: str) -> bool:
-        """True if `god_name` is already pending in the queue.
-        Case-insensitive. Used by !spin to skip already-queued gods."""
-        target = self._normalize_god_name(god_name)
-        return any(self._normalize_god_name(e["god"]) == target
-                   for e in self.queue)
+    def queue_contains(self, god_name: str,
+                       use_aspect: bool = False) -> bool:
+        """True if this (god, aspect) request is already pending in
+        the queue. Case-insensitive. Used by !spin to skip
+        already-queued entries."""
+        return self._is_god_in_queue(god_name, use_aspect)
 
     async def cmd_godreq(self, message, args, whisper=False):
         """!godreq <god> — Mods add a god to the queue (free)."""
         if not args:
             await self.bot.send_reply(
-                message, "Usage: !godreq <god name>", whisper
+                message, "Usage: !godreq <god name> [aspect]", whisper
             )
             return
 
-        god_name = await self._match_god_full(args)
+        cleaned, use_aspect = split_aspect(args)
+
+        god_name = await self._match_god_full(cleaned)
         if not god_name:
             await self.bot.send_reply(
-                message, self._unknown_god_reply(args), whisper
+                message, self._unknown_god_reply(cleaned.strip()), whisper
+            )
+            return
+
+        if use_aspect and not aspect_roster.has_aspect(god_name):
+            await self.bot.send_reply(
+                message,
+                f"{god_name} doesn't have an Aspect in SMITE 2 (yet). "
+                f"Request without the word 'aspect'.",
+                whisper
             )
             return
 
@@ -746,13 +802,15 @@ class GodRequestPlugin:
             "requester": message.chatter.name,
             "requested_at": datetime.now().isoformat(),
             "token_spent": False,
+            "use_aspect": use_aspect,
         }
         self.queue.append(entry)
         self._save_data()
 
         position = len(self.queue)
         await self.bot.send_chat(
-            f"{god_name} added to the god request queue by "
+            f"{display_god(god_name, use_aspect)} added to the god "
+            f"request queue by "
             f"{message.chatter.name}! Position: #{position}"
         )
 
@@ -775,7 +833,8 @@ class GodRequestPlugin:
             # "(requester)" suffix.
             req = entry.get("requester") or ""
             suffix = f" ({req})" if req else ""
-            items.append(f"{i+1}. {entry['god']}{suffix}")
+            god = display_god(entry["god"], entry.get("use_aspect"))
+            items.append(f"{i+1}. {god}{suffix}")
 
         text = " | ".join(items)
         remaining = len(self.queue) - 5
@@ -799,9 +858,12 @@ class GodRequestPlugin:
             "status": "skipped",
         })
 
-        next_text = f"Next up: {self.queue[0]['god']}" if self.queue else "Queue is now empty"
+        next_text = (f"Next up: "
+                     f"{display_god(self.queue[0]['god'], self.queue[0].get('use_aspect'))}"
+                     if self.queue else "Queue is now empty")
         await self.bot.send_chat(
-            f"Skipped {removed['god']} (requested by {removed['requester']}). {next_text}"
+            f"Skipped {display_god(removed['god'], removed.get('use_aspect'))} "
+            f"(requested by {removed['requester']}). {next_text}"
         )
 
         await self._update_obs_display()
@@ -883,7 +945,9 @@ class GodRequestPlugin:
         })
 
         await self.bot.send_chat(
-            f"Removed #{pos} {removed['god']} (requested by {removed['requester']}) "
+            f"Removed #{pos} "
+            f"{display_god(removed['god'], removed.get('use_aspect'))} "
+            f"(requested by {removed['requester']}) "
             f"from the queue. {len(self.queue)} remaining."
         )
 
@@ -905,7 +969,8 @@ class GodRequestPlugin:
             # "(requester)" suffix.
             req = entry.get("requester") or ""
             suffix = f" ({req})" if req else ""
-            items.append(f"{i+1}. {entry['god']}{suffix}")
+            god = display_god(entry["god"], entry.get("use_aspect"))
+            items.append(f"{i+1}. {god}{suffix}")
 
         await self.bot.send_reply(message, "God queue: " + " | ".join(items), whisper)
 

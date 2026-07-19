@@ -109,6 +109,8 @@ class WebServer:
         self.app.router.add_get("/api/suggestions", self.handle_get_suggestions)
         self.app.router.add_get("/api/priority_payments",
                                 self.handle_priority_payments)
+        self.app.router.add_get("/api/god_pool",
+                                self.handle_god_pool_list)
         self.app.router.add_get("/health", self.handle_health)
         self.app.router.add_get("/api/state", self.handle_get_state)
         self.app.router.add_post("/api/state", self.handle_update_state)
@@ -194,6 +196,13 @@ class WebServer:
             self.app.router.add_static("/icons/custom/", CUSTOM_GOD_ICONS_DIR)
         if GOD_ICONS_DIR.exists():
             self.app.router.add_static("/icons/gods/", GOD_ICONS_DIR)
+        # Aspect marker (small orange in-game icon) for the spin reel
+        # + queue overlays. Lives in public/ so the website serves the
+        # same file. NOT in data/god_icons/ — that folder scan defines
+        # the known-god list, and a stray png there would register a
+        # fake god named "Aspect Icon".
+        self.app.router.add_get("/icons/aspect.png",
+                                self.handle_aspect_icon)
 
         # Streaming Space Game (Phase 1 prototype). Served over http so the
         # browser actually loads its art — opening index.html as a file://
@@ -207,6 +216,16 @@ class WebServer:
         _spacegame_assets = SPACEGAME_DIR / "assets"
         if _spacegame_assets.exists():
             self.app.router.add_static("/spacegame/assets/", _spacegame_assets)
+
+    async def handle_aspect_icon(self, request):
+        """Serve public/aspect-icon.png for overlay badges. 404s until
+        James drops the downloaded icon there; the overlay <img>
+        onerror-hides itself so a missing icon degrades gracefully."""
+        path = BASE_DIR / "public" / "aspect-icon.png"
+        if path.exists():
+            return web.FileResponse(
+                path, headers={"Cache-Control": "public, max-age=86400"})
+        raise web.HTTPNotFound()
 
     # === ROOT HANDLER ===
 
@@ -577,6 +596,18 @@ class WebServer:
             payments = []
         return web.json_response({"payments": payments})
 
+    async def handle_god_pool_list(self, request):
+        """Spin-pool entries for the control panel manager card."""
+        pool = self.bot.plugins.get("god_pool") if self.bot else None
+        if pool is None or not hasattr(pool, "list_pool"):
+            return web.json_response({"pool": []})
+        try:
+            entries = await pool.list_pool()
+        except Exception as e:
+            print(f"[WebServer] god pool read error: {e}")
+            entries = []
+        return web.json_response({"pool": entries})
+
     async def handle_get_suggestions(self, request):
         """Return all suggestions for the dashboard."""
         if self.bot and "basic" in self.bot.plugins:
@@ -773,6 +804,34 @@ class WebServer:
             result = await plugin.refund_session(session_id)
             status = 200 if result.get("ok") else 502
             return web.json_response(result, status=status)
+
+        elif action == "set_pool_votes":
+            # Control-panel spin-pool manager: absolute vote override
+            # per (god, aspect) entry; votes 0 removes the entry.
+            pool = self.bot.plugins.get("god_pool")
+            if pool is None or not hasattr(pool, "set_votes"):
+                return web.json_response(
+                    {"error": "god_pool plugin not loaded"}, status=400)
+            god = (data.get("god") or "").strip()
+            if not god:
+                return web.json_response(
+                    {"error": "god required"}, status=400)
+            try:
+                votes = int(data.get("votes"))
+            except (TypeError, ValueError):
+                return web.json_response(
+                    {"error": "votes must be a number"}, status=400)
+            result = await pool.set_votes(
+                god, bool(data.get("use_aspect")), votes)
+            if not result.get("ok"):
+                reason = result.get("reason", "failed")
+                msg = {"unknown_god": f"Unknown god: {god}",
+                       "no_aspect": f"{result.get('god', god)} has no "
+                                    f"Aspect in SMITE 2",
+                       "no_db": "Pool database unavailable"}
+                return web.json_response(
+                    {"error": msg.get(reason, reason)}, status=400)
+            return web.json_response(result)
 
         elif action == "clear_suggestions":
             if "basic" in self.bot.plugins:

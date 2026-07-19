@@ -159,6 +159,31 @@ ROUTES = {
                         "market_open": True},
     "/api/prices": {"prices": {"Ymir": 142.5, "Atlas": 98.0,
                                "Achilles": 100.0}},
+    # Aspect-capable gods (real subset): gates the community page's
+    # "Aspect" checkboxes. Ymir deliberately absent so the hidden
+    # state is exercisable too.
+    "/api/aspects": {"gods": ["Achilles", "Atlas"], "total": 2},
+    # Queue + pool with one aspect entry each so the ASPECT pills and
+    # icon badges render in dev.
+    "/api/community": {
+        "god_queue": [
+            {"position": 1, "god": "Achilles", "requester": "ymir_fan",
+             "requested_at": "2026-07-01T00:00:00", "token_spent": False,
+             "source": "paid_priority", "message": "for the boys",
+             "use_aspect": True},
+            {"position": 2, "god": "Ymir", "requester": "frostfan",
+             "requested_at": "2026-07-01T00:05:00", "token_spent": True,
+             "source": "paid", "message": None, "use_aspect": False},
+        ],
+        "queue_total": 2,
+        "god_pool": [
+            {"god": "Atlas", "use_aspect": True, "added_by": "ymir_fan",
+             "vote_count": 3, "added_at": "2026-07-01 00:00:00"},
+            {"god": "Atlas", "use_aspect": False, "added_by": "frostfan",
+             "vote_count": 1, "added_at": "2026-07-01 00:01:00"},
+        ],
+        "pool_total": 2,
+    },
 }
 
 PAGES = {
@@ -216,6 +241,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # repeats 409 like the real 1/day cap so the error path is
             # exercisable in dev.
             god = body.get("god") or "Ymir"
+            aspect = bool(body.get("aspect"))
             already = getattr(Handler, "_nominated", None)
             if already:
                 self._json({"ok": False,
@@ -223,9 +249,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                      f"today. Try again tomorrow."},
                            status=409)
                 return
-            Handler._nominated = god
-            self._json({"ok": True, "god": god, "votes": 1,
-                        "pool_size": 1})
+            Handler._nominated = god + (" (Aspect)" if aspect else "")
+            self._json({"ok": True, "god": god, "use_aspect": aspect,
+                        "votes": 1, "pool_size": 1})
             return
         self.send_response(404)
         self.end_headers()

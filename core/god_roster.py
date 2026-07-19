@@ -217,16 +217,25 @@ def _fetch_url(url: str, timeout: float = 20.0) -> Optional[bytes]:
     against wiki.smite2.com."""
     try:
         from curl_cffi import requests as cffi_requests
-        resp = cffi_requests.get(url, timeout=timeout, impersonate="chrome")
-        if resp.status_code == 200:
-            return resp.content
-        print(f"[GodRoster] fetch {resp.status_code} from wiki")
+        # "chrome124" first: as of July 2026 Cloudflare challenges the
+        # generic "chrome" fingerprint (403 + challenge page) but lets
+        # the pinned chrome124 profile through. Keep "chrome" as a
+        # second attempt in case a curl_cffi update drops the pinned
+        # profile before we notice.
+        for imp in ("chrome124", "chrome"):
+            try:
+                resp = cffi_requests.get(url, timeout=timeout,
+                                         impersonate=imp)
+            except Exception as e:
+                print(f"[GodRoster] curl_cffi ({imp}) fetch failed: {e}")
+                continue
+            if resp.status_code == 200:
+                return resp.content
+            print(f"[GodRoster] fetch {resp.status_code} from wiki "
+                  f"(impersonate={imp})")
         return None
     except ImportError:
         pass
-    except Exception as e:
-        print(f"[GodRoster] curl_cffi fetch failed: {e}")
-        return None
 
     try:
         proc = subprocess.run(

@@ -34,9 +34,11 @@ try:
 except ImportError:
     aiosqlite = None
 
+from core import aspect_roster
+from core.aspect_roster import display_god
 from core import db as _shared_db
 from core.config import BASE_DIR, ECONOMY_DB_PATH, TWITCH_CHANNEL
-from core.god_resolver import resolve_sync
+from core.god_resolver import resolve_sync, split_aspect
 from core.youtube_parser import load_known_gods
 
 
@@ -118,14 +120,23 @@ class GodPoolPlugin:
 
     async def _init_schema(self, conn):
         """Schema callback registered with core.db. Stores the shared
-        connection on self._db so existing methods keep working."""
+        connection on self._db so existing methods keep working.
+
+        use_aspect (0/1) is part of the pool identity: a base-god
+        nomination and an aspect nomination for the same god are
+        separate pool entries with separate vote counts, so the PK is
+        (god_name, use_aspect). Pre-aspect DBs have a god_name-only PK
+        and are rebuilt in place (SQLite can't ALTER a primary key);
+        existing rows migrate as use_aspect = 0."""
         self._db = conn
         await self._db.executescript("""
             CREATE TABLE IF NOT EXISTS god_pool (
-                god_name     TEXT PRIMARY KEY,
+                god_name     TEXT NOT NULL,
+                use_aspect   INTEGER NOT NULL DEFAULT 0,
                 added_by     TEXT NOT NULL,
                 vote_count   INTEGER NOT NULL DEFAULT 1,
-                added_at     TEXT NOT NULL DEFAULT (datetime('now'))
+                added_at     TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (god_name, use_aspect)
             );
 
             CREATE TABLE IF NOT EXISTS god_pool_votes (
@@ -136,6 +147,42 @@ class GodPoolPlugin:
                 PRIMARY KEY (voter_username, vote_date)
             );
         """)
+
+        # ── migrations for pre-aspect DBs ──
+        async with self._db.execute(
+                "PRAGMA table_info(god_pool)") as cur:
+            pool_cols = {row[1] for row in await cur.fetchall()}
+        if "use_aspect" not in pool_cols:
+            await self._db.executescript("""
+                CREATE TABLE god_pool_new (
+                    god_name     TEXT NOT NULL,
+                    use_aspect   INTEGER NOT NULL DEFAULT 0,
+                    added_by     TEXT NOT NULL,
+                    vote_count   INTEGER NOT NULL DEFAULT 1,
+                    added_at     TEXT NOT NULL DEFAULT (datetime('now')),
+                    PRIMARY KEY (god_name, use_aspect)
+                );
+                INSERT INTO god_pool_new
+                       (god_name, use_aspect, added_by, vote_count,
+                        added_at)
+                SELECT god_name, 0, added_by, vote_count, added_at
+                  FROM god_pool;
+                DROP TABLE god_pool;
+                ALTER TABLE god_pool_new RENAME TO god_pool;
+            """)
+            print("[GodPool] god_pool migrated to (god_name, "
+                  "use_aspect) primary key")
+
+        # god_pool_votes keeps its (voter, date) PK — use_aspect here
+        # is display-only ("you already nominated Khepri (Aspect)").
+        async with self._db.execute(
+                "PRAGMA table_info(god_pool_votes)") as cur:
+            vote_cols = {row[1] for row in await cur.fetchall()}
+        if "use_aspect" not in vote_cols:
+            await self._db.execute(
+                "ALTER TABLE god_pool_votes "
+                "ADD COLUMN use_aspect INTEGER NOT NULL DEFAULT 0")
+
         await self._db.commit()
 
     async def _prune_old_votes(self):
@@ -189,9 +236,17 @@ class GodPoolPlugin:
     # ──────────────────────────────────────────────────────────────────
 
     async def do_nominate(self, username: str, raw_god: str,
-                          is_broadcaster: bool = False) -> dict:
+                          is_broadcaster: bool = False,
+                          use_aspect: bool = False) -> dict:
         """Pure nomination logic. Callable from any context (chat
         command, webserver endpoint) — same pattern as ``do_spin``.
+
+        The word "aspect" anywhere in ``raw_god`` requests the god's
+        Aspect (alternate kit): "Khepri aspect please" nominates
+        Khepri with use_aspect=1. Web callers pass the checkbox state
+        via the ``use_aspect`` param instead; either signal wins.
+        (god, aspect) is the pool identity — Khepri and Khepri
+        (Aspect) are separate entries with separate vote counts.
 
         Chat and web nominations share the daily cap because both key
         god_pool_votes on the lowercase Twitch login.
@@ -199,8 +254,11 @@ class GodPoolPlugin:
         Returns a dict for the caller to phrase feedback from:
             {"ok": False, "reason": "no_db"}
             {"ok": False, "reason": "unknown_god"}
-            {"ok": False, "reason": "already_voted", "god": <today's pick>}
-            {"ok": True, "god": ..., "votes": n, "pool_size": n}
+            {"ok": False, "reason": "no_aspect", "god": ...}
+            {"ok": False, "reason": "already_voted", "god": <today's
+             pick>, "use_aspect": bool}
+            {"ok": True, "god": ..., "use_aspect": bool, "votes": n,
+             "pool_size": n}
         """
         if not self._db:
             return {"ok": False, "reason": "no_db"}
@@ -208,10 +266,19 @@ class GodPoolPlugin:
         if not username:
             return {"ok": False, "reason": "no_user"}
 
-        god = self._resolve_god((raw_god or "").strip())
+        cleaned, aspect_word = split_aspect(raw_god or "")
+        use_aspect = bool(use_aspect or aspect_word)
+
+        god = self._resolve_god(cleaned.strip())
         if not god:
             return {"ok": False, "reason": "unknown_god"}
 
+        # Aspect requests only make sense for gods that have one —
+        # validated against the wiki-refreshed aspect roster.
+        if use_aspect and not aspect_roster.has_aspect(god):
+            return {"ok": False, "reason": "no_aspect", "god": god}
+
+        aspect_i = 1 if use_aspect else 0
         today = date.today().isoformat()
 
         # Already voted today? Broadcaster bypasses this check so
@@ -220,31 +287,33 @@ class GodPoolPlugin:
         # for the broadcaster — see comment there.
         if not is_broadcaster:
             async with self._db.execute(
-                    "SELECT god_name FROM god_pool_votes "
+                    "SELECT god_name, use_aspect FROM god_pool_votes "
                     "WHERE voter_username = ? AND vote_date = ?",
                     (username, today)) as cur:
                 row = await cur.fetchone()
             if row:
                 return {"ok": False, "reason": "already_voted",
-                        "god": row[0]}
+                        "god": row[0], "use_aspect": bool(row[1])}
 
         # Add to pool (or increment vote count if already there).
         # The added_by column captures the FIRST nominator only.
         await self._db.execute("""
-            INSERT INTO god_pool (god_name, added_by, vote_count)
-            VALUES (?, ?, 1)
-            ON CONFLICT(god_name) DO UPDATE SET
+            INSERT INTO god_pool (god_name, use_aspect, added_by,
+                                  vote_count)
+            VALUES (?, ?, ?, 1)
+            ON CONFLICT(god_name, use_aspect) DO UPDATE SET
                 vote_count = vote_count + 1
-        """, (god, username))
+        """, (god, aspect_i, username))
         # Only viewers populate god_pool_votes — that table exists to
         # enforce the 1/day cap, which the broadcaster bypasses. Skipping
         # the insert avoids hitting the (voter_username, vote_date) PK
         # on Hatmaster's second nomination of the day.
         if not is_broadcaster:
             await self._db.execute("""
-                INSERT INTO god_pool_votes (voter_username, vote_date, god_name)
-                VALUES (?, ?, ?)
-            """, (username, today, god))
+                INSERT INTO god_pool_votes (voter_username, vote_date,
+                                            god_name, use_aspect)
+                VALUES (?, ?, ?, ?)
+            """, (username, today, god, aspect_i))
         await self._db.commit()
 
         # Total pool size for the reply.
@@ -253,15 +322,87 @@ class GodPoolPlugin:
             row = await cur.fetchone()
         n_in_pool = row[0] if row else 0
 
-        # Look up vote count for this god.
+        # Look up vote count for this (god, aspect) entry.
         async with self._db.execute(
-                "SELECT vote_count FROM god_pool WHERE god_name = ?",
-                (god,)) as cur:
+                "SELECT vote_count FROM god_pool "
+                "WHERE god_name = ? AND use_aspect = ?",
+                (god, aspect_i)) as cur:
             row = await cur.fetchone()
         votes = row[0] if row else 1
 
-        return {"ok": True, "god": god, "votes": int(votes),
-                "pool_size": int(n_in_pool)}
+        return {"ok": True, "god": god, "use_aspect": use_aspect,
+                "votes": int(votes), "pool_size": int(n_in_pool)}
+
+    async def list_pool(self) -> list:
+        """Every pool entry for the control panel, most-voted first.
+        [{god, use_aspect, added_by, votes, added_at}]"""
+        if not self._db:
+            return []
+        out = []
+        async with self._db.execute("""
+            SELECT god_name, use_aspect, added_by, vote_count, added_at
+              FROM god_pool
+             ORDER BY vote_count DESC, god_name ASC, use_aspect ASC
+        """) as cur:
+            async for r in cur:
+                out.append({"god": r[0], "use_aspect": bool(r[1]),
+                            "added_by": r[2], "votes": int(r[3] or 0),
+                            "added_at": r[4]})
+        return out
+
+    async def set_votes(self, raw_god: str, use_aspect: bool,
+                        votes: int) -> dict:
+        """Control-panel override of a pool entry's vote count.
+
+        Absolute set: votes >= 1 upserts the (god, aspect) entry to
+        exactly that count (new entries get added_by='control_panel');
+        votes <= 0 deletes the entry. The god name goes through the
+        same resolver as chat, so "khepri" works. Like !poolclear,
+        this never touches god_pool_votes — a viewer's daily
+        nomination record stands even if Hatmaster prunes their vote.
+
+        Returns:
+            {"ok": False, "reason": "no_db" | "unknown_god" |
+             "no_aspect"}
+            {"ok": True, "god", "use_aspect", "votes", "removed"}
+        """
+        if not self._db:
+            return {"ok": False, "reason": "no_db"}
+
+        god = self._resolve_god((raw_god or "").strip())
+        if not god:
+            return {"ok": False, "reason": "unknown_god"}
+        if use_aspect and not aspect_roster.has_aspect(god):
+            return {"ok": False, "reason": "no_aspect", "god": god}
+
+        aspect_i = 1 if use_aspect else 0
+        votes = max(0, min(999, int(votes)))
+
+        if votes == 0:
+            cur = await self._db.execute(
+                "DELETE FROM god_pool "
+                "WHERE god_name = ? AND use_aspect = ?",
+                (god, aspect_i))
+            await self._db.commit()
+            removed = cur.rowcount > 0
+            print(f"[GodPool] control panel removed "
+                  f"{display_god(god, use_aspect)} from pool "
+                  f"(existed: {removed})")
+            return {"ok": True, "god": god, "use_aspect": bool(use_aspect),
+                    "votes": 0, "removed": removed}
+
+        await self._db.execute("""
+            INSERT INTO god_pool (god_name, use_aspect, added_by,
+                                  vote_count)
+            VALUES (?, ?, 'control_panel', ?)
+            ON CONFLICT(god_name, use_aspect) DO UPDATE SET
+                vote_count = excluded.vote_count
+        """, (god, aspect_i, votes))
+        await self._db.commit()
+        print(f"[GodPool] control panel set "
+              f"{display_god(god, use_aspect)} votes -> {votes}")
+        return {"ok": True, "god": god, "use_aspect": bool(use_aspect),
+                "votes": votes, "removed": False}
 
     async def cmd_nominate(self, message, args, whisper=False):
         """!nominate <god> — add a god to the pool (1 per viewer per day)."""
@@ -271,7 +412,8 @@ class GodPoolPlugin:
             await self.bot.send_reply(
                 message,
                 "Use !nominate <god> to add to the spin pool. "
-                "One nomination per day.",
+                "One nomination per day. Add the word 'aspect' to "
+                "nominate a god's Aspect.",
                 whisper)
             return
 
@@ -291,23 +433,30 @@ class GodPoolPlugin:
                     f"Unknown god: '{args.strip()[:40]}'. Check spelling or "
                     f"try a partial name.",
                     whisper)
+            elif reason == "no_aspect":
+                await self.bot.send_reply(
+                    message,
+                    f"{result['god']} doesn't have an Aspect in SMITE 2 "
+                    f"(yet). Nominate without the word 'aspect'.",
+                    whisper)
             elif reason == "already_voted":
                 await self.bot.send_reply(
                     message,
-                    f"You already nominated {result['god']} today. "
-                    f"Try again tomorrow.",
+                    f"You already nominated "
+                    f"{display_god(result['god'], result.get('use_aspect'))} "
+                    f"today. Try again tomorrow.",
                     whisper)
             return
 
-        god = result["god"]
+        god = display_god(result["god"], result["use_aspect"])
         votes = result["votes"]
         n_in_pool = result["pool_size"]
         if votes == 1:
             msg = (f"{god} added to the spin pool! "
-                   f"({n_in_pool} god{'s' if n_in_pool != 1 else ''} in pool)")
+                   f"({n_in_pool} entr{'ies' if n_in_pool != 1 else 'y'} in pool)")
         else:
             msg = (f"+1 vote for {god} (now {votes} total). "
-                   f"{n_in_pool} god{'s' if n_in_pool != 1 else ''} in pool.")
+                   f"{n_in_pool} entr{'ies' if n_in_pool != 1 else 'y'} in pool.")
         await self.bot.send_reply(message, msg, whisper)
 
     async def cmd_pool(self, message, args, whisper=False):
@@ -315,8 +464,8 @@ class GodPoolPlugin:
         if not self._db:
             return
         async with self._db.execute("""
-            SELECT god_name, vote_count FROM god_pool
-             ORDER BY vote_count DESC, god_name ASC
+            SELECT god_name, use_aspect, vote_count FROM god_pool
+             ORDER BY vote_count DESC, god_name ASC, use_aspect ASC
         """) as cur:
             rows = await cur.fetchall()
 
@@ -329,13 +478,14 @@ class GodPoolPlugin:
 
         top = rows[:5]
         line = " | ".join(
-            f"{r[0]} ({r[1]})" if r[1] > 1 else r[0]
+            f"{display_god(r[0], r[1])} ({r[2]})" if r[2] > 1
+            else display_god(r[0], r[1])
             for r in top
         )
         suffix = (f" + {len(rows) - 5} more" if len(rows) > 5 else "")
         await self.bot.send_reply(
             message,
-            f"Spin pool ({len(rows)} gods): {line}{suffix}",
+            f"Spin pool ({len(rows)} entries): {line}{suffix}",
             whisper)
 
     async def cmd_spin(self, message, args, whisper=False):
@@ -393,9 +543,10 @@ class GodPoolPlugin:
             print("[GodPool] do_spin: DB not initialized")
             return {"ok": False, "reason": "no_db"}
 
-        # Read the candidate set.
+        # Read the candidate set. Rows are (god_name, use_aspect,
+        # vote_count) — a god and its aspect are separate entries.
         async with self._db.execute("""
-            SELECT god_name, vote_count FROM god_pool
+            SELECT god_name, use_aspect, vote_count FROM god_pool
         """) as cur:
             rows = await cur.fetchall()
 
@@ -405,12 +556,15 @@ class GodPoolPlugin:
                 "Spin pool is empty — !nominate a god first")
             return {"ok": False, "reason": "pool_empty"}
 
-        # Exclude gods already pending in the request queue. Prevents
-        # re-rolling a god that was just spun and is waiting in queue.
+        # Exclude entries already pending in the request queue.
+        # Prevents re-rolling a god that was just spun and is waiting
+        # in queue. Aspect-aware: base Khepri queued doesn't block an
+        # aspect-Khepri spin, and vice versa.
         godreq = (self.bot.plugins.get("godrequest")
                   if self.bot and hasattr(self.bot, "plugins") else None)
         if godreq and hasattr(godreq, "queue_contains"):
-            candidates = [r for r in rows if not godreq.queue_contains(r[0])]
+            candidates = [r for r in rows
+                          if not godreq.queue_contains(r[0], bool(r[1]))]
         else:
             candidates = list(rows)
 
@@ -422,14 +576,16 @@ class GodPoolPlugin:
             return {"ok": False, "reason": "all_queued"}
 
         # Weighted random — gods with more votes are more likely to win.
-        weights = [r[1] for r in candidates]
+        weights = [r[2] for r in candidates]
         chosen = random.choices(candidates, weights=weights, k=1)[0]
         chosen_god = chosen[0]
-        chosen_votes = chosen[1]
+        chosen_aspect = bool(chosen[1])
+        chosen_votes = chosen[2]
 
         # OBS reel animation. Full candidate list so the visual scroll
         # matches what viewers expect to see (not the filtered set).
-        await self._emit_spin_overlay(rows, chosen_god, chosen_votes)
+        await self._emit_spin_overlay(rows, chosen_god, chosen_aspect,
+                                      chosen_votes)
 
         # Queue the pick at the head of the request queue. Source is
         # "spin" so godrequest clears the god_pool row when this play
@@ -444,14 +600,17 @@ class GodPoolPlugin:
         # attribution for debugging.
         if godreq and hasattr(godreq, "queue_add"):
             godreq.queue_add(chosen_god, "",
-                             source="spin", position="head")
+                             source="spin", position="head",
+                             use_aspect=chosen_aspect)
         else:
             # Godrequest plugin missing — fall back to direct pool
             # deletion so the spin still has a visible effect.
             print("[GodPool] godrequest plugin unavailable — falling "
                   "back to direct pool deletion.")
             await self._db.execute(
-                "DELETE FROM god_pool WHERE god_name = ?", (chosen_god,))
+                "DELETE FROM god_pool "
+                "WHERE god_name = ? AND use_aspect = ?",
+                (chosen_god, 1 if chosen_aspect else 0))
             await self._db.commit()
 
         # Play the god-select voice line — delayed so it lands AFTER
@@ -500,16 +659,19 @@ class GodPoolPlugin:
                 except Exception as e:
                     print(f"[GodPool] voice line trigger failed: {e}")
 
-        print(f"[GodPool] Spun: {chosen_god} ({chosen_votes} votes) "
+        print(f"[GodPool] Spun: {display_god(chosen_god, chosen_aspect)} "
+              f"({chosen_votes} votes) "
               f"via {triggered_by} — added to godrequest queue head")
         return {
             "ok": True,
             "chosen_god": chosen_god,
+            "use_aspect": chosen_aspect,
             "votes": int(chosen_votes),
             "pool_size": len(rows),
         }
 
-    async def _emit_spin_overlay(self, rows, chosen_god, chosen_votes):
+    async def _emit_spin_overlay(self, rows, chosen_god, chosen_aspect,
+                                 chosen_votes):
         """Send the spin event to the overlay manager so the OBS
         browser source can run the slot-machine animation."""
         if not self.bot or not getattr(self.bot, "web_server", None):
@@ -520,14 +682,17 @@ class GodPoolPlugin:
 
         # All candidates ordered by vote count (most-voted first) so the
         # reel weighting visually matches the actual pick weighting.
+        # `aspect` marks entries the overlay badges with the aspect icon.
         candidates = sorted(
-            ({"god": r[0], "votes": r[1]} for r in rows),
-            key=lambda c: (-c["votes"], c["god"]),
+            ({"god": r[0], "aspect": bool(r[1]), "votes": r[2]}
+             for r in rows),
+            key=lambda c: (-c["votes"], c["god"], c["aspect"]),
         )
-        total_votes = sum(r[1] for r in rows)
+        total_votes = sum(r[2] for r in rows)
         try:
             await overlay_mgr.emit("god_pool_spin", {
                 "chosen": chosen_god,
+                "chosen_aspect": chosen_aspect,
                 "chosen_votes": chosen_votes,
                 "candidates": candidates,
                 "total_votes": total_votes,
@@ -572,7 +737,7 @@ class GodPoolPlugin:
 
         await self.bot.send_reply(
             message,
-            f"Spin pool cleared ({n} gods removed). "
+            f"Spin pool cleared ({n} entries removed). "
             f"Today's nominations still apply. Viewers can't re-nominate "
             f"until tomorrow.",
             whisper)
