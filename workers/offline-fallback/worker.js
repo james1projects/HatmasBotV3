@@ -5,8 +5,8 @@
  * of the tunnel. Normal traffic passes through untouched. When the
  * origin is unreachable — tunnel down (530/1033: PC asleep or
  * cloudflared stopped) or tunnel up but the bot process dead
- * (502/503/504 from cloudflared) — visitors get a branded "market
- * closed" page instead of Cloudflare's error screen.
+ * (502/503/504 from cloudflared) — visitors get a branded offline
+ * page instead of Cloudflare's error screen.
  *
  * The page is fully self-contained: when the origin is down,
  * /theme.css and /hat.png are unreachable too, so the needed design
@@ -27,7 +27,7 @@ const OFFLINE_PAGE = `<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#202C39">
-<title>Offline: Hatmas Market</title>
+<title>Hatmaster.tv Offline</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@700&family=Bebas+Neue&display=swap');
   :root {
@@ -139,10 +139,9 @@ const OFFLINE_PAGE = `<!DOCTYPE html>
     <div class="err">
       <div class="kicker">Signal Lost</div>
       <div class="code">503</div>
-      <h1>Market closed.</h1>
-      <p>hatmaster.tv is offline right now — the stream rig is asleep
-         or the bot is between sessions. Portfolios, prices, and the
-         god market are safe and pick up where they left off.</p>
+      <h1>Hatmaster.tv Offline</h1>
+      <p>Hat is performing maintenance or has his stream PC off,
+         Hatmaster.tv is only on when his computer is on for now!</p>
       <a class="home-link" href="https://twitch.tv/hatmaster">Watch on Twitch &rarr;</a>
       <a class="home-link" href="/">Retry &rarr;</a>
     </div>

@@ -3,8 +3,8 @@
 When the tunnel is down (PC asleep, cloudflared stopped) or the tunnel
 is up but the bot is dead, visitors currently get Cloudflare's raw
 error screen (error 1033 / 502). This Worker sits on `hatmaster.tv/*`
-at the edge and swaps those failures for a branded "Market closed"
-page — same palette and type system as the 404 page, fully
+at the edge and swaps those failures for a branded offline page
+— same palette and type system as the 404 page, fully
 self-contained (no origin assets), 503 + `Retry-After: 120` so uptime
 monitors still see the outage, `no-store` so it never caches over the
 real site.
@@ -42,7 +42,7 @@ wrangler deploy
 1. With the bot and tunnel running: browse hatmaster.tv — site should
    behave exactly as before (worker passes through).
 2. Stop the bot (`quit` in the console) but leave the cloudflared
-   service running: hatmaster.tv should show the Market Closed page
+   service running: hatmaster.tv should show the offline page
    within seconds. `curl -si https://hatmaster.tv | head -5` should
    show `HTTP/2 503` and `retry-after: 120`.
 3. Also stop the cloudflared service (`sc stop cloudflared`,
