@@ -72,6 +72,9 @@ recordings/
 inbox/
 thumbnails/
 jobs/
+# rendered/ is the intro/outro video-kit's PNG output landing zone
+# (previews, test variants, template audits) — regenerate, don't commit.
+rendered/
 
 # === LOCAL TOOL STATE ===
 # Claude Code's per-machine settings live here and should not travel
