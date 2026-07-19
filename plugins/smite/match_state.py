@@ -254,6 +254,21 @@ class _MatchStateMixin:
         return None
 
     @staticmethod
+    def _same_god_name(a, b) -> bool:
+        """Case / spacing / punctuation-insensitive god-name equality
+        ("Xing Tian" == "XingTian" == "xing-tian"). Used to compare
+        the portrait matcher's name against tracker.gg's, so a
+        formatting difference is never mistaken for tracker.gg
+        CORRECTING the god — a false correction re-runs the image
+        lookup under the unrecognized name and clears the portrait
+        mid-game. _clean_god_name canonicalizes tracker names against
+        the roster already; this guard also covers gods the roster
+        doesn't know yet."""
+        squash = lambda s: "".join(
+            ch for ch in (s or "").lower() if ch.isalnum())
+        return squash(a) == squash(b)
+
+    @staticmethod
     def _stat_val(stats, key):
         """Get numeric value from a tracker.gg stat object."""
         stat = stats.get(key, {})
@@ -349,7 +364,8 @@ class _MatchStateMixin:
 
                     if self._god_from_portrait:
                         # Portrait matcher already set the image — check if tracker.gg agrees
-                        if portrait_god.lower() != god_info["name"].lower():
+                        if not self._same_god_name(portrait_god,
+                                                   god_info["name"]):
                             # Tracker.gg disagrees with portrait — correct it
                             print(f"[Smite] Tracker.gg CORRECTED god: "
                                   f"{portrait_god} → {god_info['name']} "

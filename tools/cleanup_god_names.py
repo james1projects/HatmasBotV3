@@ -1,11 +1,19 @@
 """
 tools/cleanup_god_names.py
 ==========================
-One-shot migration to strip the "Gods." Unreal-class-path prefix from
-god names that leaked through tracker.gg's display-name mapping
-(e.g. "Gods.Atlas" -> "Atlas"). The fix at the ingestion boundary
-lives in plugins/smite/history.py:_clean_god_name; this script catches
-the existing rows that were stored before that helper was wired in.
+One-shot migration to repair god names that leaked through
+tracker.gg's display-name mapping in a raw form:
+
+  * class-path prefix:  "Gods.Atlas" -> "Atlas"       (May 2026)
+  * concatenated name:  "XingTian"   -> "Xing Tian"   (July 2026 —
+    opened a duplicate god_prices stock and cleared the OBS portrait
+    mid-game)
+
+The fix at the ingestion boundary lives in
+plugins/smite/history.py:_clean_god_name (prefix strip + exact-tier
+canonicalization against the god roster); this script reuses that
+exact helper to catch rows stored before it was wired in, so tool
+and boundary can never disagree about what "clean" means.
 
 What it does
 ------------
@@ -55,16 +63,19 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from core.config import ECONOMY_DB_PATH
+from plugins.smite.history import _clean_god_name
 
-
-PREFIX = "Gods."
+# Sentinel rows that are not god names and must never be "cleaned".
+SENTINELS = {"<bootstrap>"}
 
 
 def _clean(name: str) -> str:
-    """Strip the 'Gods.' prefix if present. Idempotent."""
-    if name and name.startswith(PREFIX):
-        return name[len(PREFIX):]
-    return name
+    """Canonical form of a stored god name — the same prefix-strip +
+    roster canonicalization the live ingestion boundary applies.
+    Sentinels and unresolvable names pass through unchanged."""
+    if not name or name in SENTINELS:
+        return name
+    return _clean_god_name(name) or name
 
 
 def _discover_tables_with_god_name(conn: sqlite3.Connection):
@@ -200,14 +211,16 @@ def main():
 
         # Pass 1 — scan. Build a {table: [dirty_name, ...]} map so we
         # can print a complete preview before applying anything.
+        # "Dirty" is decided in Python (not SQL LIKE) because the
+        # canonical check is a roster resolution, not a pattern.
         plan = {}
         total_rows = 0
         for t in tables:
             dirty_names = [
                 r[0] for r in conn.execute(
-                    f"SELECT DISTINCT god_name FROM {t} "
-                    " WHERE god_name LIKE 'Gods.%'"
+                    f"SELECT DISTINCT god_name FROM {t}"
                 ).fetchall()
+                if r[0] and _clean(r[0]) != r[0]
             ]
             if not dirty_names:
                 continue
@@ -219,7 +232,7 @@ def main():
                 total_rows += n
 
         if not plan:
-            print("\n[+] No 'Gods.*' rows found. Nothing to do.")
+            print("\n[+] No non-canonical god names found. Nothing to do.")
             return
 
         print(f"\n[i] Plan ({total_rows} row(s) across {len(plan)} table(s)):")

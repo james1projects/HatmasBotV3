@@ -34,29 +34,65 @@ from core.config import (
 )
 
 
+# Positive-hit cache for _clean_god_name's roster canonicalization.
+# Only successful resolutions are cached — a miss (god not on the
+# roster yet) stays uncached so a mid-session roster refresh can
+# start resolving it without a bot restart.
+_canon_cache: dict = {}
+
+
 def _clean_god_name(raw: Optional[str]) -> Optional[str]:
     """
     Normalize tracker.gg god names at ingestion.
 
     Hi-Rez stores gods internally as Unreal Engine class paths
-    ("Gods.Atlas", "Gods.Sylvanus"). They maintain a display-name
-    mapping that strips the "Gods." prefix on most gods before the
-    API serves them — but the mapping is incomplete, and newer
-    releases (Atlas, and likely future drops) leak the raw class
-    path through. We strip it here at the boundary so every layer
+    ("Gods.Atlas", "Gods.Sylvanus") with concatenated multi-word
+    names ("Gods.XingTian"). They maintain a display-name mapping
+    that cleans these up before the API serves them — but the mapping
+    is incomplete, and gods leak through in two raw forms:
+
+      * the class-path prefix:      "Gods.Atlas"   (Atlas, May 2026)
+      * the concatenated name:      "XingTian"     (Xing Tian, July
+        2026 — this one mid-game "corrected" the portrait to a name
+        with no image file, clearing the OBS portrait, and opened a
+        duplicate "XingTian" stock in the economy)
+
+    We fix both here at the boundary: strip the prefix, then
+    canonicalize against the god roster via the shared resolver.
+    Only an EXACT hit (normalized / space-squashed equality, so
+    "XingTian" -> "Xing Tian") is accepted — partial and fuzzy tiers
+    are disabled so a surprising API value can never mis-map to a
+    different god. Unknown names (e.g. a god released before the
+    roster refresh sees it) pass through unchanged. Every layer
     downstream (DB, web, OBS overlays, the YT comment scanner) sees
     one canonical name per god.
 
-    Idempotent: a clean name (no "Gods." prefix) passes through
-    untouched. Empty/None passes through as None so callers can
-    keep their existing "skip if missing" branches.
+    Idempotent: a canonical name resolves to itself. Empty/None
+    passes through as None so callers can keep their existing
+    "skip if missing" branches.
     """
     if not raw:
         return raw
     name = raw.strip()
     if name.startswith("Gods."):
         name = name[len("Gods."):]
-    return name or None
+    if not name:
+        return None
+
+    cached = _canon_cache.get(name)
+    if cached is not None:
+        return cached
+
+    from core import god_roster
+    from core.god_resolver import TIER_EXACT, resolve_sync
+    try:
+        hit = resolve_sync(name, god_roster.names(), fuzzy=False)
+    except Exception:
+        hit = None
+    if hit and hit[1] == TIER_EXACT:
+        _canon_cache[name] = hit[0]
+        return hit[0]
+    return name
 
 
 class _HistoryMixin:
