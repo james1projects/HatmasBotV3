@@ -26,6 +26,11 @@ Architecture
                          Paint.NET" (avoids ~50 file writes per preview render).
                          Optional body key `pans` ({slot: [x0, y0]}) repositions
                          a god card inside its panel (drag-to-reposition).
+                         Optional body key `text_offsets` ({layer_index:
+                         [dx, dy]}) shifts a text layer from its preset
+                         position (drag-to-move). Returns `texts`: the
+                         on-canvas bbox of every rendered text layer, which
+                         seeds the front-end text-drag overlays.
 - GET /api/card          ?god=<display>&skin=<skin> -> the resolved full card
                          art (Custom God Cards override > base art). Used by
                          the front-end to show a live full-card ghost while
@@ -105,27 +110,35 @@ GOD_DISPLAY_NAME_OVERRIDES: Dict[str, str] = {
 # Mirrors what build_placeholders / the layer set in each preset.json
 # actually consume - sending an unused field is harmless but the UI hides
 # it to keep the form focused.
+# Aspect checkboxes (aspect_*) only appear for slots the preset renders
+# an icon layer for — build_guide has none, so no aspect field there.
 PRESET_FIELDS: Dict[str, List[str]] = {
     "build_guide": ["god", "skin", "item1", "item2", "item3",
                     "text", "result", "flip_god"],
     "1v1":        ["god", "skin", "vs",
                    "text", "subtext", "kda", "result",
-                   "flip_god", "flip_vs"],
+                   "flip_god", "flip_vs",
+                   "aspect_god", "aspect_vs"],
     "1v2":        ["god", "skin", "vs", "vs2",
                    "text", "subtext", "kda", "result", "result2",
-                   "flip_god", "flip_vs", "flip_vs2"],
+                   "flip_god", "flip_vs", "flip_vs2",
+                   "aspect_god", "aspect_vs", "aspect_vs2"],
     "2matches":   ["god", "skin", "vs", "god2", "skin2", "vs2",
                    "text", "subtext", "kda", "result", "result2",
-                   "flip_god", "flip_vs", "flip_god2", "flip_vs2"],
+                   "flip_god", "flip_vs", "flip_god2", "flip_vs2",
+                   "aspect_god", "aspect_vs", "aspect_god2", "aspect_vs2"],
     "2gods":      ["god", "skin", "god2", "skin2",
                    "text", "subtext",
-                   "flip_god", "flip_god2"],
+                   "flip_god", "flip_god2",
+                   "aspect_god", "aspect_god2"],
     "3gods":      ["god", "skin", "god2", "skin2", "god3", "skin3",
                    "text", "subtext",
-                   "flip_god", "flip_god2", "flip_god3"],
+                   "flip_god", "flip_god2", "flip_god3",
+                   "aspect_god", "aspect_god2", "aspect_god3"],
     "single":     ["god", "skin",
                    "text", "subtext", "kda", "result",
-                   "flip_god"],
+                   "flip_god",
+                   "aspect_god"],
 }
 
 # In-memory cache: stem -> (canvas_size, layer_outputs).
@@ -374,6 +387,65 @@ def _apply_pans_and_collect_cards(preset, placeholders, ns, pans):
 
 
 # ============================================================
+# TEXT DRAG-TO-MOVE
+# ============================================================
+
+def _apply_text_offsets(preset, offsets):
+    """Apply drag-to-move offsets to text layers. `offsets` maps the
+    layer's index in preset["layers"] (stringified — JSON object keys)
+    to [dx, dy] canvas px added to the layer's pos before compose.
+    Mutating the preset is safe: load_preset re-reads the JSON every
+    render."""
+    if not offsets:
+        return
+    layers = preset.get("layers", [])
+    for key, off in offsets.items():
+        if not isinstance(off, (list, tuple)) or len(off) != 2:
+            continue
+        try:
+            idx = int(key)
+            dx, dy = int(float(off[0])), int(float(off[1]))
+        except (TypeError, ValueError):
+            continue
+        if not (0 <= idx < len(layers)) or layers[idx].get("type") != "text":
+            continue
+        pos = layers[idx].get("pos") or [0, 0]
+        layers[idx]["pos"] = [int(pos[0]) + dx, int(pos[1]) + dy]
+
+
+def _collect_text_boxes(preset, layer_outputs, offsets):
+    """One entry per rendered, non-empty text layer: the index key the
+    front-end sends offsets under, the layer name, the on-canvas bbox of
+    the rendered pixels (stroke + shadow included — taken straight from
+    the composed layer bitmap), and the offset currently applied. Drives
+    the preview's text drag-to-move overlays."""
+    rendered = [(idx, layer)
+                for idx, layer in enumerate(preset.get("layers", []))
+                if layer.get("type") in bt.LAYER_RENDERERS]
+    boxes = []
+    for (idx, layer), (name, img) in zip(rendered, layer_outputs):
+        if layer.get("type") != "text":
+            continue
+        bbox = img.getbbox()
+        if not bbox:
+            continue  # empty value / skip_if_empty — nothing to drag
+        off = offsets.get(str(idx))
+        if not isinstance(off, (list, tuple)) or len(off) != 2:
+            off = [0, 0]
+        try:
+            off = [int(float(off[0])), int(float(off[1]))]
+        except (TypeError, ValueError):
+            off = [0, 0]
+        boxes.append({
+            "key": str(idx),
+            "name": name,
+            "box": [bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]],
+            "offset": off,
+        })
+    return boxes
+
+
+# ============================================================
 # ROUTE HANDLERS
 # ============================================================
 
@@ -519,6 +591,11 @@ async def api_render(request: web.Request) -> web.Response:
         flip_god2=bool(data.get("flip_god2")),
         flip_god3=bool(data.get("flip_god3")),
         flip_vs2=bool(data.get("flip_vs2")),
+        aspect_god=bool(data.get("aspect_god")),
+        aspect_vs=bool(data.get("aspect_vs")),
+        aspect_god2=bool(data.get("aspect_god2")),
+        aspect_god3=bool(data.get("aspect_god3")),
+        aspect_vs2=bool(data.get("aspect_vs2")),
         no_text=bool(data.get("no_text")),
         no_subtext=bool(data.get("no_subtext")),
         preset=preset_name,
@@ -547,6 +624,10 @@ async def api_render(request: web.Request) -> web.Response:
     ):
         if name and not placeholders[key]:
             warnings.append(f"No icon found for {label}: '{name}'.")
+    if any((ns.aspect_god, ns.aspect_vs, ns.aspect_vs2,
+            ns.aspect_god2, ns.aspect_god3)) \
+            and not bt.ASPECT_ICON_PATH.exists():
+        warnings.append("Aspect badge file missing: public/aspect-icon.png")
 
     # Drag-to-reposition: apply per-slot pan overrides to the card
     # layers and collect the geometry the front-end drag needs.
@@ -554,6 +635,12 @@ async def api_render(request: web.Request) -> web.Response:
     if not isinstance(pans, dict):
         pans = {}
     cards = _apply_pans_and_collect_cards(preset, placeholders, ns, pans)
+
+    # Drag-to-move: shift text layers by their user-dragged offsets.
+    text_offsets = data.get("text_offsets")
+    if not isinstance(text_offsets, dict):
+        text_offsets = {}
+    _apply_text_offsets(preset, text_offsets)
 
     try:
         composite, layer_outputs = bt.compose(preset, placeholders)
@@ -582,6 +669,7 @@ async def api_render(request: web.Request) -> web.Response:
         "stem": stem,
         "warnings": warnings,
         "cards": cards,
+        "texts": _collect_text_boxes(preset, layer_outputs, text_offsets),
         "canvas": list(canvas_size),
     })
 
@@ -908,6 +996,13 @@ INDEX_HTML = """<!doctype html>
     border-radius: 0;
     pointer-events: none;
   }
+  /* Text drag-to-move overlays: sit above the card overlays, blue
+     outline so they read differently from the gold card outline. */
+  .card-drag.text-drag { cursor: move; z-index: 2; }
+  .card-drag.text-drag:hover {
+    outline: 2px dashed rgba(77, 195, 255, 0.7);
+    outline-offset: -2px;
+  }
   .preview-wrap .placeholder {
     color: var(--muted);
     font-style: italic;
@@ -954,6 +1049,9 @@ INDEX_HTML = """<!doctype html>
       <div data-field="flip_god" style="margin-top:8px">
         <label class="radios"><input type="checkbox" id="flip_god"> Flip my god</label>
       </div>
+      <div data-field="aspect_god" style="margin-top:8px">
+        <label class="radios"><input type="checkbox" id="aspect_god"> Aspect (badge under icon)</label>
+      </div>
     </div>
 
     <div class="field-group" data-group="vs">
@@ -964,6 +1062,9 @@ INDEX_HTML = """<!doctype html>
       <div data-field="flip_vs" style="margin-top:8px">
         <label class="radios"><input type="checkbox" id="flip_vs"> Flip vs god</label>
       </div>
+      <div data-field="aspect_vs" style="margin-top:8px">
+        <label class="radios"><input type="checkbox" id="aspect_vs"> Aspect (badge under icon)</label>
+      </div>
     </div>
 
     <div class="field-group" data-group="vs2">
@@ -973,6 +1074,9 @@ INDEX_HTML = """<!doctype html>
       </div>
       <div data-field="flip_vs2" style="margin-top:8px">
         <label class="radios"><input type="checkbox" id="flip_vs2"> Flip vs god 2</label>
+      </div>
+      <div data-field="aspect_vs2" style="margin-top:8px">
+        <label class="radios"><input type="checkbox" id="aspect_vs2"> Aspect (badge under icon)</label>
       </div>
     </div>
 
@@ -988,6 +1092,9 @@ INDEX_HTML = """<!doctype html>
       <div data-field="flip_god2" style="margin-top:8px">
         <label class="radios"><input type="checkbox" id="flip_god2"> Flip my god 2</label>
       </div>
+      <div data-field="aspect_god2" style="margin-top:8px">
+        <label class="radios"><input type="checkbox" id="aspect_god2"> Aspect (badge under icon)</label>
+      </div>
     </div>
 
     <div class="field-group" data-group="god3">
@@ -1001,6 +1108,9 @@ INDEX_HTML = """<!doctype html>
       </div>
       <div data-field="flip_god3" style="margin-top:8px">
         <label class="radios"><input type="checkbox" id="flip_god3"> Flip my god 3</label>
+      </div>
+      <div data-field="aspect_god3" style="margin-top:8px">
+        <label class="radios"><input type="checkbox" id="aspect_god3"> Aspect (badge under icon)</label>
       </div>
     </div>
 
@@ -1104,10 +1214,15 @@ INDEX_HTML = """<!doctype html>
     text: "", subtext: "", kda: "",
     result: "", result2: "",
     flip_god: false, flip_vs: false, flip_god2: false, flip_god3: false, flip_vs2: false,
+    aspect_god: false, aspect_vs: false, aspect_god2: false, aspect_god3: false, aspect_vs2: false,
     preset: presetSel.value,
     // slot -> [x0, y0]: top-left of the visible source window in
     // post-flip source px (drag-to-reposition). Server clamps.
     pans: {},
+    // layer index (string) -> [dx, dy] canvas px added to a text
+    // layer's preset pos (drag-to-move). Survives text edits — moving
+    // the headline then retyping it keeps the new spot.
+    text_offsets: {},
   };
   let lastRender = null; // { png_path, stem }
 
@@ -1324,6 +1439,13 @@ INDEX_HTML = """<!doctype html>
       delete state.pans[f.slice(5)];
     });
   }
+  // ---- Aspect toggles ----------------------------------------------------
+  // Badge under the god icon only — card art (and drag offsets) unaffected.
+  for (const f of ["aspect_god", "aspect_vs", "aspect_god2", "aspect_god3", "aspect_vs2"]) {
+    $("#" + f).addEventListener("change", () => {
+      state[f] = $("#" + f).checked;
+    });
+  }
   // ---- Result radios -----------------------------------------------------
   $$('input[name="result"]').forEach(r => r.addEventListener("change", () => {
     if (r.checked) state.result = r.value;
@@ -1336,6 +1458,7 @@ INDEX_HTML = """<!doctype html>
   function applyPresetVisibility() {
     state.preset = presetSel.value;
     state.pans = {}; // panel layout changed; drag offsets are per-preset
+    state.text_offsets = {}; // layer indexes are per-preset too
     const enabled = PRESET_FIELDS[state.preset] || [];
     $$("[data-field]").forEach(div => {
       const f = div.dataset.field;
@@ -1369,11 +1492,10 @@ INDEX_HTML = """<!doctype html>
     $$(".card-drag", previewBox).forEach(o => o.remove());
   }
 
-  function buildOverlays(cards, canvas) {
+  function buildOverlays(cards, texts, canvas) {
     clearOverlays();
-    if (!cards || !cards.length) return;
     const cw = canvas[0], ch = canvas[1];
-    for (const c of cards) {
+    for (const c of (cards || [])) {
       const ov = document.createElement("div");
       ov.className = "card-drag";
       ov.style.left   = (c.panel[0] / cw * 100) + "%";
@@ -1384,6 +1506,23 @@ INDEX_HTML = """<!doctype html>
       ov.addEventListener("pointerdown", e => startCardDrag(e, ov, c));
       ov.addEventListener("dblclick", () => {
         delete state.pans[c.slot];
+        doRender();
+      });
+      previewBox.appendChild(ov);
+    }
+    // Text overlays go in after (= above) the card overlays, so where
+    // text sits on a card the text drag wins the pointer.
+    for (const t of (texts || [])) {
+      const ov = document.createElement("div");
+      ov.className = "card-drag text-drag";
+      ov.style.left   = (t.box[0] / cw * 100) + "%";
+      ov.style.top    = (t.box[1] / ch * 100) + "%";
+      ov.style.width  = (t.box[2] / cw * 100) + "%";
+      ov.style.height = (t.box[3] / ch * 100) + "%";
+      ov.title = "Drag to move \\"" + t.name + "\\" (double-click to reset)";
+      ov.addEventListener("pointerdown", e => startTextDrag(e, ov, t, canvas));
+      ov.addEventListener("dblclick", () => {
+        delete state.text_offsets[t.key];
         doRender();
       });
       previewBox.appendChild(ov);
@@ -1455,6 +1594,69 @@ INDEX_HTML = """<!doctype html>
     ov.addEventListener("pointercancel", onCancel);
   }
 
+  // Text drag-to-move. Simpler than the card pan: the box itself moves.
+  // The overlay freezes its patch of the current preview as a background
+  // so the text appears to ride along; the old copy stays visible
+  // underneath until the drop re-render catches up (same trade-off as
+  // the card ghost).
+  function startTextDrag(e, ov, t, canvas) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const img = $("#preview");
+    const dispW = img.clientWidth, dispH = img.clientHeight;
+    if (!dispW || !dispH) return;
+    const s = dispW / canvas[0]; // display px per canvas px
+
+    const left0 = ov.offsetLeft, top0 = ov.offsetTop;
+    const maxLeft = Math.max(0, dispW - ov.offsetWidth);
+    const maxTop  = Math.max(0, dispH - ov.offsetHeight);
+    ov.style.background = 'url("' + img.src + '")';
+    ov.style.backgroundSize = dispW + "px " + dispH + "px";
+    ov.style.backgroundPosition = (-left0) + "px " + (-top0) + "px";
+    ov.classList.add("dragging");
+    ov.setPointerCapture(e.pointerId);
+
+    const startX = e.clientX, startY = e.clientY;
+    let left = left0, top = top0;
+
+    function onMove(ev) {
+      left = Math.max(0, Math.min(maxLeft, left0 + (ev.clientX - startX)));
+      top  = Math.max(0, Math.min(maxTop,  top0 + (ev.clientY - startY)));
+      ov.style.left = left + "px";
+      ov.style.top = top + "px";
+    }
+    function detach() {
+      ov.removeEventListener("pointermove", onMove);
+      ov.removeEventListener("pointerup", onUp);
+      ov.removeEventListener("pointercancel", onCancel);
+      ov.classList.remove("dragging");
+    }
+    function restore() {
+      ov.style.left = left0 + "px";
+      ov.style.top = top0 + "px";
+      ov.style.background = "";
+    }
+    function onUp() {
+      detach();
+      if (left !== left0 || top !== top0) {
+        state.text_offsets[t.key] = [
+          Math.round(t.offset[0] + (left - left0) / s),
+          Math.round(t.offset[1] + (top - top0) / s),
+        ];
+        doRender(); // frozen patch stays up until the fresh preview lands
+      } else {
+        restore();
+      }
+    }
+    function onCancel() {
+      detach();
+      restore();
+    }
+    ov.addEventListener("pointermove", onMove);
+    ov.addEventListener("pointerup", onUp);
+    ov.addEventListener("pointercancel", onCancel);
+  }
+
   // ---- Render ------------------------------------------------------------
   let renderSeq = 0;
   async function doRender() {
@@ -1482,13 +1684,16 @@ INDEX_HTML = """<!doctype html>
       img.addEventListener("load", () => {
         if (mySeq !== renderSeq) return; // superseded by a newer render
         removeGhosts();
-        buildOverlays(j.cards || [], j.canvas || [1280, 720]);
+        buildOverlays(j.cards || [], j.texts || [], j.canvas || [1280, 720]);
       }, { once: true });
       img.src = j.png_url + "?t=" + Date.now();
       img.style.display = "";
       if (ph) ph.style.display = "none";
-      const dragHint = (j.cards && j.cards.length)
-        ? "  |  drag a god card in the preview to reposition it (double-click resets)"
+      const hints = [];
+      if (j.cards && j.cards.length) hints.push("drag a god card to reposition it");
+      if (j.texts && j.texts.length) hints.push("drag text to move it");
+      const dragHint = hints.length
+        ? "  |  " + hints.join(", ") + " (double-click resets)"
         : "";
       $("#status").textContent = "Rendered: " + j.png_path + dragHint;
       if (j.warnings && j.warnings.length) {

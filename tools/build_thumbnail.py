@@ -101,6 +101,23 @@ opponent and you want them looking at each other:
     --flip-god3    mirror --god3's card  (3gods)
     --flip-vs2     mirror --vs2's card   (1v2 / 2matches)
 
+Aspect badges
+-------------
+Each god slot has an aspect toggle. When set, the aspect badge
+(public/aspect-icon.png — the same icon the website uses) is stacked
+centered underneath that god's icon layer, sharing its drop shadow:
+
+    --aspect-god     badge under --god's icon
+    --aspect-vs      badge under --vs's icon
+    --aspect-god2    badge under --god2's icon  (2matches / 2gods / 3gods)
+    --aspect-god3    badge under --god3's icon  (3gods)
+    --aspect-vs2     badge under --vs2's icon   (1v2 / 2matches)
+
+build_guide has no god icon layer, so aspect flags are a no-op there.
+Bottom-anchored icons (1v2's vs2, 2matches' bottom row) keep their
+anchor point, so the icon shifts up to make room and the badge fills
+the space below it.
+
 Usage
 -----
     python tools/build_thumbnail.py --god Ymir --vs Loki --text "Pentakill" --result win --kda 12/3/8
@@ -133,6 +150,7 @@ CUSTOM_ICONS_DIR = REPO_ROOT / "Custom God Icons"
 CUSTOM_CARDS_DIR = REPO_ROOT / "Custom God Cards"
 ITEM_ICONS_DIR = REPO_ROOT / "data" / "item_icons"
 CUSTOM_ITEM_ICONS_DIR = REPO_ROOT / "Custom Item Icons"
+ASPECT_ICON_PATH = REPO_ROOT / "public" / "aspect-icon.png"
 OUT_DIR = REPO_ROOT / "thumbnails"
 
 # Per-god crop_source overrides for outlier card compositions. Loaded
@@ -324,6 +342,24 @@ def resolve_god_icon(name):
     # Fallback to the canonical wiki icon library.
     p = GOD_ICONS_DIR / f"{slugify(name)}.png"
     return p if p.exists() else None
+
+
+# Aspect badge, cached once per process. False = tried and failed, so we
+# only warn the first time.
+_ASPECT_ICON_CACHE = None
+
+
+def _load_aspect_icon():
+    """Load public/aspect-icon.png as RGBA. Returns None (warning once)
+    when the file is missing or unreadable."""
+    global _ASPECT_ICON_CACHE
+    if _ASPECT_ICON_CACHE is None:
+        try:
+            _ASPECT_ICON_CACHE = Image.open(ASPECT_ICON_PATH).convert("RGBA")
+        except Exception as exc:
+            print(f"  [warn] aspect badge unavailable at {ASPECT_ICON_PATH}: {exc}")
+            _ASPECT_ICON_CACHE = False
+    return _ASPECT_ICON_CACHE or None
 
 
 def _item_slug(name):
@@ -529,6 +565,14 @@ def build_placeholders(args, preset=None):
         "result": result,
         "result2": result2,
         "kda": args.kda or "",
+        # Aspect flags per god slot — consumed by render_icon (never
+        # referenced as {tokens} in presets). "1" = stack the aspect
+        # badge under that slot's icon.
+        "my_god_aspect":  "1" if getattr(args, "aspect_god", False) else "",
+        "my_god2_aspect": "1" if getattr(args, "aspect_god2", False) else "",
+        "my_god3_aspect": "1" if getattr(args, "aspect_god3", False) else "",
+        "vs_god_aspect":  "1" if getattr(args, "aspect_vs", False) else "",
+        "vs2_god_aspect": "1" if getattr(args, "aspect_vs2", False) else "",
     }
 
 
@@ -1165,11 +1209,27 @@ def _make_shadow(rgba_layer, shadow):
     return sil
 
 
+# Map an icon layer's raw `god` template to the placeholder key carrying
+# that slot's aspect flag (set via --aspect-god / studio checkboxes).
+_GOD_TOKEN_TO_ASPECT_KEY = {
+    "{my_god}":  "my_god_aspect",
+    "{my_god2}": "my_god2_aspect",
+    "{my_god3}": "my_god3_aspect",
+    "{vs_god}":  "vs_god_aspect",
+    "{vs2_god}": "vs2_god_aspect",
+}
+
+
 def render_icon(layer, canvas_size, placeholders):
     img = _new_canvas(canvas_size)
-    god = substitute(layer.get("god", ""), placeholders)
+    raw_god = layer.get("god", "")
+    god = substitute(raw_god, placeholders)
     if not god and layer.get("skip_if_empty", False):
         return img
+
+    aspect_key = _GOD_TOKEN_TO_ASPECT_KEY.get(raw_god) \
+        if isinstance(raw_god, str) else None
+    aspect_on = bool(god and aspect_key and placeholders.get(aspect_key))
 
     icon_path = resolve_god_icon(god) if god else None
 
@@ -1214,21 +1274,38 @@ def render_icon(layer, canvas_size, placeholders):
                 outline=border_color,
             )
 
+    # Aspect badge: stack the aspect icon centered underneath the god
+    # icon. Joins the layer before the shadow pass so it casts the same
+    # drop shadow. Bottom-anchored icons shift up to make room (the
+    # anchor point stays fixed), keeping the badge on-canvas.
+    if aspect_on:
+        badge = _load_aspect_icon()
+        if badge is not None:
+            b_size = max(24, int(round(size * 0.55)))
+            badge = badge.resize((b_size, b_size), Image.LANCZOS)
+            gap = max(4, size // 14)
+            stacked = Image.new("RGBA", (box_size, box_size + gap + b_size),
+                                (0, 0, 0, 0))
+            stacked.paste(layer_img, (0, 0), layer_img)
+            stacked.paste(badge, ((box_size - b_size) // 2, box_size + gap),
+                          badge)
+            layer_img = stacked
+
     # Optional drop shadow
     shadow = layer.get("shadow")
     if shadow:
         sh = _make_shadow(layer_img, shadow)
         if sh:
             ox, oy = shadow.get("offset", [4, 4])
-            shadow_canvas = Image.new("RGBA", (box_size + abs(int(ox)) * 2,
-                                               box_size + abs(int(oy)) * 2),
+            lw, lh = layer_img.size
+            shadow_canvas = Image.new("RGBA", (lw + abs(int(ox)) * 2,
+                                               lh + abs(int(oy)) * 2),
                                       (0, 0, 0, 0))
             shadow_canvas.paste(sh, (int(ox) + abs(int(ox)),
                                      int(oy) + abs(int(oy))), sh)
             shadow_canvas.alpha_composite(layer_img,
                                           (abs(int(ox)), abs(int(oy))))
             layer_img = shadow_canvas
-            box_size = layer_img.size[0]  # square assumption
 
     # Apply anchor offset. By default `pos` is the top-left corner of the
     # icon's bounding box (icon + border + shadow). Setting `anchor` to
@@ -1578,6 +1655,19 @@ def main():
     parser.add_argument("--flip-vs2", dest="flip_vs2", action="store_true",
                         help="Mirror the second opposing god's card horizontally "
                              "(1v2 / 2matches presets — toggles the preset default).")
+    parser.add_argument("--aspect-god", dest="aspect_god", action="store_true",
+                        help="Stack the aspect badge (public/aspect-icon.png) "
+                             "underneath --god's icon.")
+    parser.add_argument("--aspect-vs", dest="aspect_vs", action="store_true",
+                        help="Aspect badge underneath --vs's icon.")
+    parser.add_argument("--aspect-vs2", dest="aspect_vs2", action="store_true",
+                        help="Aspect badge underneath --vs2's icon "
+                             "(1v2 / 2matches presets).")
+    parser.add_argument("--aspect-god2", dest="aspect_god2", action="store_true",
+                        help="Aspect badge underneath --god2's icon "
+                             "(2matches / 2gods / 3gods presets).")
+    parser.add_argument("--aspect-god3", dest="aspect_god3", action="store_true",
+                        help="Aspect badge underneath --god3's icon (3gods preset).")
     parser.add_argument("--preset", default="1v1",
                         help=f"Preset name (default: 1v1). Available: {', '.join(list_presets()) or '(none)'}")
     parser.add_argument("--text", default=None,

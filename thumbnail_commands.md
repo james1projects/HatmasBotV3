@@ -132,6 +132,8 @@ The lookup chain is:
 --no-subtext                 # disable the subtext entirely
 --result win                 # WIN badge; use loss for LOSS, blank for none
 --kda 12/3/8                 # K/D/A badge
+--aspect-god                 # aspect badge under my god's icon
+--aspect-vs                  # same for the vs god (--aspect-vs2 / --aspect-god2 / --aspect-god3 likewise)
 --no-open                    # don't auto-launch Paint.NET on the result
 --no-random-icons            # use the primary <God>.png icon (skip variant pool)
 --seed 42                    # reproducible random icon picks
