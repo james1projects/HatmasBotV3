@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#202C39">
+<title>Events: Hatmaster.TV</title>
+<meta name="description" content="Upcoming tournaments, community nights, and stream specials on the Hatmaster channel. Times shown in your local timezone.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Hatmaster.TV">
+<meta property="og:url" content="https://hatmaster.tv/events">
+<meta property="og:title" content="Events: Hatmaster.TV">
+<meta property="og:description" content="Tournaments, community nights, and stream specials. See what's coming up.">
+<meta property="og:image" content="https://hatmaster.tv/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Events: Hatmaster.TV">
+<meta name="twitter:description" content="Tournaments, community nights, and stream specials. See what's coming up.">
+<meta name="twitter:image" content="https://hatmaster.tv/og-image.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="stylesheet" href="/theme.css">
+<style>
+  .wrap {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 24px 16px 60px;
+  }
+
+  .brand-band {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border);
+    padding: 8px 0 12px;
+    margin-bottom: 16px;
+    font-family: var(--font-sans);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-dim);
+  }
+  .brand-band a.left {
+    color: var(--accent);
+    font-weight: 700;
+  }
+
+  header {
+    text-align: center;
+    padding: 16px 0 24px;
+  }
+  header .kicker {
+    display: block;
+    margin-bottom: 12px;
+  }
+  header h1 {
+    margin: 0 0 8px;
+    font-family: var(--font-display);
+    font-size: 46px;
+    letter-spacing: 0.02em;
+    font-weight: 400;
+    line-height: 0.95;
+    text-transform: uppercase;
+  }
+  header p {
+    margin: 0;
+    color: var(--text-dim);
+    font-size: 14px;
+    line-height: 1.55;
+  }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+  }
+
+  .section-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin: 26px 0 8px;
+  }
+
+  /* ── featured event ── */
+  .featured {
+    border-color: var(--accent);
+    padding: 18px 20px;
+  }
+  .badge-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  .badge {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    border-radius: var(--radius-sm);
+    padding: 3px 8px;
+  }
+  .badge.type      { background: var(--green-bg); color: var(--accent-hi); }
+  .badge.live      { background: rgba(245, 243, 187, 0.12); color: var(--tick-flash); }
+  .badge.cancelled { background: var(--red-bg); color: var(--red); }
+
+  .featured .title {
+    font-family: var(--font-display);
+    font-size: 34px;
+    line-height: 1;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    margin: 0 0 6px;
+  }
+  .featured .when {
+    color: var(--text-dim);
+    font-size: 13px;
+    margin-bottom: 14px;
+  }
+  .featured .when .tz { color: var(--text-fade); }
+
+  .meta-row {
+    display: flex;
+    gap: 28px;
+    flex-wrap: wrap;
+    align-items: baseline;
+    margin-bottom: 12px;
+  }
+  .meta-row .label {
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-fade);
+    margin-bottom: 2px;
+  }
+  .countdown {
+    font-family: var(--font-mono);
+    font-size: 22px;
+    color: var(--tick-flash);
+  }
+  .countdown.live { color: var(--accent-hi); }
+  .prize-val { font-size: 15px; color: var(--accent-hi); }
+  .roster-val { font-family: var(--font-mono); font-size: 15px; }
+  .roster-val .dim { color: var(--text-dim); font-size: 12px; }
+
+  .desc {
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.6;
+    white-space: pre-line;
+    margin: 0 0 12px;
+  }
+
+  details.rules { margin-bottom: 12px; }
+  details.rules summary {
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-dim);
+    user-select: none;
+  }
+  details.rules .rules-text {
+    color: var(--text-dim);
+    font-size: 13px;
+    line-height: 1.6;
+    white-space: pre-line;
+    padding: 8px 0 0 14px;
+  }
+
+  .roster-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  .roster-chips .chip {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-dim);
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 3px 8px;
+  }
+
+  /* ── Challonge bracket embed (tournament events only) ── */
+  .bracket-box {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: var(--bg-2);
+    margin-bottom: 12px;
+  }
+  .bracket-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    font: 600 11px var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--text-dim);
+  }
+  .bracket-head a {
+    color: var(--accent);
+    text-decoration: none;
+    font: 600 11px var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .bracket-head a:hover { color: var(--accent-hi); }
+  .bracket-frame {
+    width: 100%;
+    height: 440px;
+    border: 0;
+    display: block;
+  }
+  @media (max-width: 600px) {
+    .bracket-frame { height: 380px; }
+  }
+
+  a.event-link {
+    display: inline-block;
+    background: var(--green-bg);
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    padding: 8px 16px;
+    font: 600 12px var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    text-decoration: none;
+  }
+  a.event-link:hover { background: var(--panel-hi); }
+
+  /* ── upcoming / past rows ── */
+  .event-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    margin-bottom: 6px;
+  }
+  .event-row .badge { flex-shrink: 0; }
+  .event-row .name { font-size: 14px; min-width: 0; }
+  .event-row .date {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+  .event-row.past { border-style: dashed; }
+  .event-row.past .name { color: var(--text-dim); }
+  .event-row .result { font-size: 13px; color: var(--accent-hi); white-space: nowrap; }
+
+  .empty {
+    color: var(--text-dim);
+    font-size: 14px;
+    text-align: center;
+    padding: 28px 0;
+  }
+  .load-err { color: var(--red); }
+
+  @media (max-width: 600px) {
+    header h1 { font-size: 36px; }
+    .featured .title { font-size: 27px; }
+    .event-row .date { font-size: 11px; }
+  }
+</style>
+</head>
+<body>
+  <a class="skip-link" href="#maincontent">Skip to content</a>
+  <div class="wrap" id="maincontent" role="main" tabindex="-1">
+    <div class="brand-band" role="banner">
+      <a class="left" href="/"><img class="brand-hat" src="/hat.png" alt="">HATMASTER.TV</a>
+      <div class="right-cluster">
+        <a href="/market" class="icon-toggle" style="text-decoration: none;"
+           title="All god prices + the full market">
+          Market
+        </a>
+        <a href="/community" class="icon-toggle" style="text-decoration: none;"
+           title="God request queue + viewer suggestions">
+          Community
+        </a>
+        <div>EVENTS</div>
+      </div>
+    </div>
+
+    <header>
+      <div class="kicker">Events</div>
+      <h1>What's coming up</h1>
+      <p>Tournaments, community nights, and stream specials.
+         All times are shown in your local timezone.</p>
+    </header>
+
+    <div id="featured-wrap"></div>
+
+    <div class="section-label" id="upcoming-label" style="display:none">Up next</div>
+    <div id="upcoming"></div>
+
+    <div class="section-label" id="past-label" style="display:none">Past events</div>
+    <div id="past"></div>
+
+    <div class="empty" id="empty" style="display:none">
+      Nothing on the calendar right now.
+      Follow on <a href="https://twitch.tv/hatmaster" rel="noopener">Twitch</a>
+      to catch the next announcement.
+    </div>
+  </div>
+
+<script src="/auth.js" defer></script>
+<script>
+(() => {
+  "use strict";
+
+  // Server-time offset guards countdowns against wrong local clocks.
+  let clockOffset = 0;
+  const now = () => Date.now() + clockOffset;
+
+  const TYPE_LABELS = {
+    tournament: "Tournament",
+    community: "Community night",
+    special: "Stream special",
+  };
+
+  // Announced events whose start slid this far into the past without
+  // being marked completed fall off to the past list on their own.
+  const STALE_MS = 6 * 3600 * 1000;
+
+  const startMs = (ev) => Date.parse(ev.starts_at || "") || 0;
+
+  function fmtWhen(ev) {
+    const d = new Date(startMs(ev));
+    const opts = { weekday: "short", month: "short", day: "numeric",
+                   hour: "numeric", minute: "2-digit" };
+    let text = d.toLocaleString([], opts);
+    if (ev.ends_at) {
+      const e = new Date(Date.parse(ev.ends_at));
+      const sameDay = d.toDateString() === e.toDateString();
+      text += " – " + e.toLocaleString([], sameDay
+        ? { hour: "numeric", minute: "2-digit" } : opts);
+    }
+    return text;
+  }
+
+  function fmtDateShort(ev) {
+    return new Date(startMs(ev)).toLocaleDateString([],
+      { month: "short", day: "numeric" });
+  }
+
+  function fmtCountdown(ms) {
+    if (ms <= 0) return "Starting soon";
+    const s = Math.floor(ms / 1000);
+    const d = Math.floor(s / 86400);
+    const pad = (n) => String(n).padStart(2, "0");
+    const hms = `${pad(Math.floor(s / 3600) % 24)}:` +
+                `${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`;
+    return d > 0 ? `${d}d ${hms}` : hms;
+  }
+
+  function el(tag, cls, text) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  function typeBadge(ev) {
+    return el("span", "badge type", TYPE_LABELS[ev.type] || ev.type);
+  }
+
+  // Challonge module URL for embedding, or null. Only ever called
+  // for tournament-type events; any non-Challonge host falls back
+  // to the plain link button (never iframe an arbitrary URL).
+  function challongeModuleUrl(link) {
+    if (!link) return null;
+    try {
+      const u = new URL(link);
+      if (u.hostname !== "challonge.com" &&
+          !u.hostname.endsWith(".challonge.com")) return null;
+      let path = u.pathname.replace(/\/+$/, "");
+      if (!path || path === "/") return null;
+      if (!path.endsWith("/module")) path += "/module";
+      return u.origin + path;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function statusBadge(ev) {
+    if (ev.status === "live") return el("span", "badge live", "Live now");
+    if (ev.status === "cancelled") return el("span", "badge cancelled", "Cancelled");
+    return null;
+  }
+
+  let countdownTimer = null;
+
+  function renderFeatured(ev) {
+    const card = el("div", "card featured");
+
+    const badges = el("div", "badge-row");
+    badges.appendChild(typeBadge(ev));
+    const sb = statusBadge(ev);
+    if (sb) badges.appendChild(sb);
+    card.appendChild(badges);
+
+    card.appendChild(el("div", "title", ev.title));
+
+    const when = el("div", "when", fmtWhen(ev) + " ");
+    when.appendChild(el("span", "tz", "· your local time"));
+    card.appendChild(when);
+
+    const meta = el("div", "meta-row");
+    const cd = el("div");
+    cd.appendChild(el("div", "label",
+      ev.status === "live" ? "Status" : "Starts in"));
+    const cdVal = el("div", "countdown" + (ev.status === "live" ? " live" : ""));
+    cd.appendChild(cdVal);
+    meta.appendChild(cd);
+    if (ev.prize) {
+      const pr = el("div");
+      pr.appendChild(el("div", "label", "Prize"));
+      pr.appendChild(el("div", "prize-val", ev.prize));
+      meta.appendChild(pr);
+    }
+    if (ev.roster && ev.roster.length) {
+      const ro = el("div");
+      ro.appendChild(el("div", "label", "Roster"));
+      const rv = el("div", "roster-val", String(ev.roster.length) + " ");
+      rv.appendChild(el("span", "dim", "entered"));
+      ro.appendChild(rv);
+      meta.appendChild(ro);
+    }
+    card.appendChild(meta);
+
+    if (ev.description) card.appendChild(el("p", "desc", ev.description));
+
+    if (ev.rules) {
+      const det = el("details", "rules");
+      det.appendChild(el("summary", "", "Rules"));
+      det.appendChild(el("div", "rules-text", ev.rules));
+      card.appendChild(det);
+    }
+
+    if (ev.roster && ev.roster.length) {
+      const chips = el("div", "roster-chips");
+      for (const name of ev.roster) chips.appendChild(el("span", "chip", name));
+      card.appendChild(chips);
+    }
+
+    const moduleUrl =
+      ev.type === "tournament" ? challongeModuleUrl(ev.link) : null;
+    if (moduleUrl) {
+      const box = el("div", "bracket-box");
+      const head = el("div", "bracket-head");
+      head.appendChild(el("span", "", "Bracket"));
+      const out = el("a", "", "Open on Challonge →");
+      out.href = ev.link;
+      out.rel = "noopener";
+      out.target = "_blank";
+      head.appendChild(out);
+      box.appendChild(head);
+      const frame = document.createElement("iframe");
+      frame.className = "bracket-frame";
+      frame.src = moduleUrl;
+      frame.loading = "lazy";
+      frame.title = "Tournament bracket";
+      frame.setAttribute("allowtransparency", "true");
+      box.appendChild(frame);
+      card.appendChild(box);
+    } else if (ev.link) {
+      const a = el("a", "event-link", "Event page →");
+      a.href = ev.link;
+      a.rel = "noopener";
+      a.target = "_blank";
+      card.appendChild(a);
+    }
+
+    clearInterval(countdownTimer);
+    const tick = () => {
+      if (ev.status === "live") { cdVal.textContent = "Live now"; return; }
+      cdVal.textContent = fmtCountdown(startMs(ev) - now());
+    };
+    tick();
+    countdownTimer = setInterval(tick, 1000);
+    return card;
+  }
+
+  function renderRow(ev, isPast) {
+    const row = el("div", "event-row" + (isPast ? " past" : ""));
+    row.appendChild(typeBadge(ev));
+    const sb = statusBadge(ev);
+    if (sb) row.appendChild(sb);
+    row.appendChild(el("span", "name", ev.title));
+    if (isPast && ev.result) row.appendChild(el("span", "result", ev.result));
+    row.appendChild(el("span", "date",
+      isPast ? new Date(startMs(ev)).toLocaleDateString()
+             : fmtDateShort(ev)));
+    return row;
+  }
+
+  function classify(events) {
+    const upcoming = [], past = [];
+    for (const ev of events) {
+      if (ev.status === "completed") past.push(ev);
+      else if (ev.status === "cancelled") {
+        (startMs(ev) > now() ? upcoming : past).push(ev);
+      } else if (ev.status === "live") upcoming.push(ev);
+      else if (startMs(ev) > now() - STALE_MS) upcoming.push(ev);
+      else past.push(ev);
+    }
+    upcoming.sort((a, b) => startMs(a) - startMs(b));
+    // Live events lead regardless of start time.
+    upcoming.sort((a, b) =>
+      (b.status === "live" ? 1 : 0) - (a.status === "live" ? 1 : 0));
+    past.sort((a, b) => startMs(b) - startMs(a));
+    return { upcoming, past };
+  }
+
+  function render(events) {
+    const { upcoming, past } = classify(events);
+    const featuredWrap = document.getElementById("featured-wrap");
+    const upcomingEl = document.getElementById("upcoming");
+    const pastEl = document.getElementById("past");
+    featuredWrap.textContent = "";
+    upcomingEl.textContent = "";
+    pastEl.textContent = "";
+
+    // Featured: first live event, else the first flagged upcoming,
+    // else the soonest upcoming. Cancelled events never headline.
+    let featured = null;
+    const eligible = upcoming.filter((e) => e.status !== "cancelled");
+    featured = eligible.find((e) => e.status === "live")
+      || eligible.find((e) => e.featured)
+      || eligible[0] || null;
+    if (featured) featuredWrap.appendChild(renderFeatured(featured));
+
+    const rest = upcoming.filter((e) => e !== featured);
+    document.getElementById("upcoming-label").style.display =
+      rest.length ? "" : "none";
+    for (const ev of rest) upcomingEl.appendChild(renderRow(ev, false));
+
+    document.getElementById("past-label").style.display =
+      past.length ? "" : "none";
+    for (const ev of past) pastEl.appendChild(renderRow(ev, true));
+
+    document.getElementById("empty").style.display =
+      (featured || rest.length || past.length) ? "none" : "";
+  }
+
+  async function load() {
+    const empty = document.getElementById("empty");
+    try {
+      const r = await fetch("/api/events", { cache: "no-store" });
+      const data = await r.json();
+      if (!r.ok || !data.ok) throw new Error(data.error || "HTTP " + r.status);
+      if (data.now) {
+        const server = Date.parse(data.now);
+        if (server) clockOffset = server - Date.now();
+      }
+      render(data.events || []);
+    } catch (e) {
+      empty.style.display = "";
+      empty.classList.add("load-err");
+      empty.textContent = "Could not load events — " + e.message;
+    }
+  }
+
+  load();
+  // Refresh every 5 minutes so LIVE flips without a manual reload.
+  setInterval(load, 5 * 60 * 1000);
+})();
+</script>
+</body>
+</html>

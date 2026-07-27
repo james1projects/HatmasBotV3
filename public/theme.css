@@ -242,6 +242,18 @@ a:hover { color: var(--accent-hi); }
   gap: 0;
 }
 
+/* On phones the cluster (auth chip + Market/Community/Events) is
+ * wider than the viewport — let the band wrap instead of forcing
+ * a horizontal scrollbar on the whole page. */
+@media (max-width: 640px) {
+  .brand-band { flex-wrap: wrap; row-gap: 6px; }
+  .brand-band .right-cluster {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    row-gap: 6px;
+  }
+}
+
 /* ─── Twitch stream embed (shared landing + god pages) ───────── */
 .stream-section {
   margin: 16px 0 24px;

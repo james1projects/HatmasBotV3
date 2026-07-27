@@ -30,7 +30,7 @@ events to any WebSocket clients viewing the relevant portfolio.
 import asyncio
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from collections import defaultdict
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
@@ -60,6 +60,7 @@ from core import account_linking as _links
 from core import aspect_roster
 from core.aspect_roster import display_god
 from core import web_session as _ws
+from core import events_store as _events
 from core import config as _config
 
 
@@ -80,6 +81,7 @@ GOD_ICONS_DIR = BASE_DIR / "data" / "god_icons"
 CUSTOM_GOD_ICONS_DIR = BASE_DIR / "Custom God Icons"
 SUGGESTIONS_FILE = BASE_DIR / "data" / "suggestions.json"
 GODREQ_QUEUE_FILE = BASE_DIR / "data" / "godreq_queue.json"
+EVENTS_FILE = BASE_DIR / "data" / "events.json"
 
 
 @web.middleware
@@ -298,6 +300,25 @@ class PublicWebServer:
                                  self._handle_api_mod_custom_post)
         self.app.router.add_delete("/api/mod/custom-commands/{name}",
                                    self._handle_api_mod_custom_delete)
+
+        # ── events tab + hidden events admin ──
+        # /events + /api/events are public (drafts stripped). The
+        # admin surface is gated to the BROADCASTER's Twitch login
+        # only — stricter than /mod on purpose (even mods 404), so
+        # its existence is never revealed to anyone else.
+        self.app.router.add_get("/events", self._handle_events_page)
+        self.app.router.add_get(
+            "/Events",
+            lambda r: web.HTTPMovedPermanently("/events"))
+        self.app.router.add_get("/api/events", self._handle_api_events)
+        self.app.router.add_get("/admin/events",
+                                self._handle_events_admin_page)
+        self.app.router.add_get("/api/admin/events",
+                                self._handle_api_admin_events_get)
+        self.app.router.add_post("/api/admin/events",
+                                 self._handle_api_admin_events_post)
+        self.app.router.add_delete("/api/admin/events/{event_id}",
+                                   self._handle_api_admin_events_delete)
 
         self.app.router.add_get("/auth/login", self._handle_auth_login)
         self.app.router.add_get("/auth/twitch/callback",
@@ -1976,6 +1997,158 @@ class PublicWebServer:
             return web.json_response({"ok": False, "error": result},
                                      status=400, headers=self._NO_STORE)
         self._mod_audit(login, name, "custom:deleted", "", "")
+        return web.json_response({"ok": True, "action": "deleted"},
+                                 headers=self._NO_STORE)
+
+    # ──────────────────────────────────────────────────────────────
+    #   EVENTS TAB (+ hidden broadcaster-only events admin)
+    # ──────────────────────────────────────────────────────────────
+
+    def _broadcaster_identity(self, request: web.Request) -> Optional[dict]:
+        """Session identity IF the logged-in user IS the broadcaster,
+        else None. Deliberately stricter than _mod_identity: the
+        events admin is invisible even to mods. YouTube sessions have
+        an empty login, so they can never match."""
+        ident = self._session_identity(request)
+        if ident is None:
+            return None
+        channel = (getattr(_config, "TWITCH_CHANNEL", "") or "").lower()
+        if not channel or channel == "your_channel":
+            return None
+        login = (ident.get("login") or "").lower()
+        return ident if login == channel else None
+
+    def _events_audit(self, login: str, action: str, event_id: str,
+                      detail: str = ""):
+        line = (f"{datetime.now().isoformat(timespec='seconds')} | {login} | "
+                f"{action} | {event_id} | {detail}\n")
+        print(f"[EventsAdmin] {line.strip()}")
+        try:
+            with open(DATA_DIR / "events_audit.log", "a",
+                      encoding="utf-8") as f:
+                f.write(line)
+        except Exception as e:
+            print(f"[EventsAdmin] audit write failed: {e}")
+
+    async def _handle_events_page(self, request: web.Request):
+        path = PUBLIC_DIR / "events.html"
+        if not path.exists():
+            return web.Response(text="Events page missing.", status=500)
+        return web.FileResponse(path, headers={"Cache-Control": "no-cache"})
+
+    async def _handle_api_events(self, request: web.Request):
+        """GET /api/events — public event list, drafts stripped.
+        `now` rides along so the page can correct countdowns on
+        clients with a wrong clock."""
+        try:
+            events = _events.load_events(EVENTS_FILE)
+        except ValueError as e:
+            print(f"[Events] unreadable events file: {e}")
+            return web.json_response(
+                {"ok": False, "error": "Events are temporarily unavailable."},
+                status=503)
+        return web.json_response({
+            "ok": True,
+            "events": _events.public_events(events),
+            "now": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }, headers={"Cache-Control": "no-cache"})
+
+    async def _handle_events_admin_page(self, request: web.Request):
+        if self._broadcaster_identity(request) is None:
+            raise web.HTTPNotFound()  # styled by the 404 middleware
+        path = PUBLIC_DIR / "events_admin.html"
+        if not path.exists():
+            return web.Response(text="Events admin page missing.", status=500)
+        return web.FileResponse(path, headers={"Cache-Control": "no-store"})
+
+    def _events_admin_guards(self, request):
+        """(ident, err) — guard order mirrors _mod_guards:
+        session+broadcaster -> origin -> rate limit."""
+        ident = self._broadcaster_identity(request)
+        if ident is None:
+            raise web.HTTPNotFound()
+        if not self._origin_ok(request):
+            return None, web.json_response(
+                {"ok": False, "error": "Bad origin."},
+                status=403, headers=self._NO_STORE)
+        if not self._ip_rate_ok(request):
+            return None, web.json_response(
+                {"ok": False, "error": "Too many requests."},
+                status=429, headers=self._NO_STORE)
+        return ident, None
+
+    async def _handle_api_admin_events_get(self, request: web.Request):
+        ident = self._broadcaster_identity(request)
+        if ident is None:
+            raise web.HTTPNotFound()
+        try:
+            events = _events.load_events(EVENTS_FILE)
+        except ValueError as e:
+            return web.json_response({"ok": False, "error": str(e)},
+                                     status=500, headers=self._NO_STORE)
+        events.sort(key=lambda e: e.get("starts_at") or "")
+        return web.json_response(
+            {"ok": True, "user": ident.get("login"), "events": events},
+            headers=self._NO_STORE)
+
+    async def _handle_api_admin_events_post(self, request: web.Request):
+        """POST /api/admin/events — create (no id in body) or update
+        (id present). The whole event is sent every time; the store
+        validates and normalizes."""
+        ident, err = self._events_admin_guards(request)
+        if err is not None:
+            return err
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return web.json_response({"ok": False, "error": "Bad JSON."},
+                                     status=400, headers=self._NO_STORE)
+        try:
+            events = _events.load_events(EVENTS_FILE)
+        except ValueError as e:
+            # Refuse to write over a hand-mangled file: a save after a
+            # tolerant load would wipe the whole calendar.
+            return web.json_response({"ok": False, "error": str(e)},
+                                     status=500, headers=self._NO_STORE)
+        event, verr = _events.validate_event(body, events)
+        if verr:
+            return web.json_response({"ok": False, "error": verr},
+                                     status=400, headers=self._NO_STORE)
+        action = "updated" if (body.get("id") or "") else "created"
+        _events.upsert_event(events, event)
+        try:
+            _events.save_events(EVENTS_FILE, events)
+        except OSError as e:
+            return web.json_response(
+                {"ok": False, "error": f"Write failed: {e}"},
+                status=500, headers=self._NO_STORE)
+        self._events_audit(
+            ident.get("login") or "?", action, event["id"],
+            f"{event['status']} {event['starts_at']} {event['title'][:40]}")
+        return web.json_response(
+            {"ok": True, "action": action, "event": event},
+            headers=self._NO_STORE)
+
+    async def _handle_api_admin_events_delete(self, request: web.Request):
+        ident, err = self._events_admin_guards(request)
+        if err is not None:
+            return err
+        event_id = str(request.match_info.get("event_id") or "").strip()
+        try:
+            events = _events.load_events(EVENTS_FILE)
+        except ValueError as e:
+            return web.json_response({"ok": False, "error": str(e)},
+                                     status=500, headers=self._NO_STORE)
+        if not _events.delete_event(events, event_id):
+            return web.json_response({"ok": False, "error": "Unknown event id."},
+                                     status=400, headers=self._NO_STORE)
+        try:
+            _events.save_events(EVENTS_FILE, events)
+        except OSError as e:
+            return web.json_response(
+                {"ok": False, "error": f"Write failed: {e}"},
+                status=500, headers=self._NO_STORE)
+        self._events_audit(ident.get("login") or "?", "deleted", event_id)
         return web.json_response({"ok": True, "action": "deleted"},
                                  headers=self._NO_STORE)
 
