@@ -108,7 +108,7 @@ class FindItPlugin:
         if not Path(python).exists():
             raise RuntimeError(
                 f"FindIt worker python not found at {python} — create the "
-                f".venv-findit environment (see HATMASBOT.md FindIt section)")
+                f".venv-findit environment (see docs/HATMASBOT.md FindIt section)")
         WORKER_DIR.mkdir(parents=True, exist_ok=True)
         try:
             # CREATE_NEW_PROCESS_GROUP isolates the worker from the bot's

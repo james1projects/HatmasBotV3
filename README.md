@@ -2,7 +2,7 @@
 
 A Twitch chat bot, stream-automation suite, and companion website for Hatmaster's Smite 2 stream. Built by Hatmaster & Claude, April–June 2026.
 
-> `HatmasBot.md` is the full technical reference and single source of truth. This README is the quick tour.
+> `docs/HATMASBOT.md` is the full technical reference and single source of truth. This README is the quick tour.
 
 ## Features
 
@@ -26,7 +26,7 @@ A Twitch chat bot, stream-automation suite, and companion website for Hatmaster'
 - **Public Website** — `hatmaster.tv`: a home page with the live Twitch embed + YouTube/TikTok/Bluesky tabs, the Hatmas Market at `/market` (god prices, portfolios, trading with Twitch login), and the community/god-request page.
 - **Auto-Shoutout on Raid**, **OBS Control**, and a browser **Control Panel** for your second monitor.
 
-Offline tooling also lives in `tools/`: a VOD highlight pipeline, end-of-stream recording sorter, YouTube live-badge thumbnail swap, and a matchup thumbnail builder. See `HatmasBot.md` for those.
+Offline tooling also lives in `tools/`: a VOD highlight pipeline, end-of-stream recording sorter, YouTube live-badge thumbnail swap, and a matchup thumbnail builder. See `docs/HATMASBOT.md` for those.
 
 ## Setup
 
@@ -163,4 +163,4 @@ data/                  — Runtime data (gitignored)
 
 Create a file in `plugins/`, implement a class with `setup(bot)` / `on_ready()` / `cleanup()`, register commands with `bot.register_command()`, and add it to `main.py`. Overlays connect through `core/overlay_manager.py` with rules in `core/overlay_rules.json`.
 
-For full technical details, see `HatmasBot.md`.
+For full technical details, see `docs/HATMASBOT.md`.
