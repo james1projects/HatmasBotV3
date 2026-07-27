@@ -487,6 +487,23 @@ async def main():
             except (asyncio.CancelledError, Exception):
                 pass
 
+        # If the BOT task is the one that finished (and we didn't ask
+        # it to), that's a failure even when it didn't raise:
+        # bot.start() should only return on requested shutdown.
+        # asyncio.wait() does NOT re-raise task exceptions, so without
+        # this check a dead EventSub connection would fall through to
+        # "return 0" — and tools/supervisor.py treats exit code 0 as a
+        # clean console quit and never restarts us. Retrieve the
+        # result so the failure reaches the except-block below
+        # (record_crash + exit code 1 + supervisor restart).
+        if bot_task in done and not _shutdown_event.is_set():
+            exc = bot_task.exception()
+            if exc is not None:
+                raise exc
+            raise RuntimeError(
+                "bot.start() returned unexpectedly (connection lost?)"
+            )
+
     except Exception as e:
         print(f"\n[HatmasBot] Error: {e}")
         import traceback
