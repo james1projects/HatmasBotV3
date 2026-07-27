@@ -1170,14 +1170,14 @@ class VodDetector:
         repo_root = Path(__file__).resolve().parent.parent
         overlay_dir = self.opts.god_overlay_icons_dir
         if overlay_dir is None:
-            overlay_dir = repo_root / "Custom God Icons"
+            overlay_dir = repo_root / "assets" / "Custom God Icons"
         elif str(overlay_dir) == "":
             overlay_dir = None  # explicit opt-out
 
         # Same resolution rules for the reference-icons directory.
         reference_dir = self.opts.god_reference_icons_dir
         if reference_dir is None:
-            reference_dir = repo_root / "Portrait_Source"
+            reference_dir = repo_root / "assets" / "Portrait_Source"
         elif str(reference_dir) == "":
             reference_dir = None  # explicit opt-out
 

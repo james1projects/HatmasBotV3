@@ -52,8 +52,8 @@ from core import god_roster
 
 OUTPUT_DIR = Path(__file__).parent / "data" / "god_icons"
 S1_OUTPUT_DIR = Path(__file__).parent / "data" / "god_icons_s1"
-WIKI_HTML = Path(__file__).parent / "Gods - SMITE 2 Wiki.html"
-WIKI_FILES_DIR = Path(__file__).parent / "Gods - SMITE 2 Wiki_files"
+WIKI_HTML = Path(__file__).parent / "assets" / "smite2_wiki" / "Gods - SMITE 2 Wiki.html"
+WIKI_FILES_DIR = Path(__file__).parent / "assets" / "smite2_wiki" / "Gods - SMITE 2 Wiki_files"
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "

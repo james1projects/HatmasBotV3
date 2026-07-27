@@ -63,8 +63,8 @@ from core.kda_reader import KdaReader
 
 
 DEFAULT_DATA_DIR = _REPO_ROOT / "data"
-DEFAULT_OVERLAY_ICONS_DIR = _REPO_ROOT / "Custom God Icons"
-DEFAULT_REFERENCE_ICONS_DIR = _REPO_ROOT / "Portrait_Source"
+DEFAULT_OVERLAY_ICONS_DIR = _REPO_ROOT / "assets" / "Custom God Icons"
+DEFAULT_REFERENCE_ICONS_DIR = _REPO_ROOT / "assets" / "Portrait_Source"
 DEFAULT_TESSERACT_WIN = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 

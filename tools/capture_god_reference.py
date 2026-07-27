@@ -64,7 +64,7 @@ DEFAULT_DATA_DIR = _REPO_ROOT / "data"
 # Reference captures live in their own folder so they never mix with
 # the user's decorative ``Custom God Icons/`` art.  The matcher loads
 # from this folder on every scan via VodDetectorOptions.
-DEFAULT_REFERENCE_ICONS_DIR = _REPO_ROOT / "Portrait_Source"
+DEFAULT_REFERENCE_ICONS_DIR = _REPO_ROOT / "assets" / "Portrait_Source"
 
 
 def _probe_duration(video: Path, ffprobe: str) -> Optional[float]:

@@ -88,10 +88,10 @@ PRESETS_DIR = REPO_ROOT / "thumbnail_presets"
 THUMBNAILS_DIR = REPO_ROOT / "thumbnails"
 GOD_CARDS_DIR = REPO_ROOT / "data" / "god_cards"
 GOD_ICONS_DIR = REPO_ROOT / "data" / "god_icons"
-CUSTOM_ICONS_DIR = REPO_ROOT / "Custom God Icons"
-CUSTOM_CARDS_DIR = REPO_ROOT / "Custom God Cards"
+CUSTOM_ICONS_DIR = REPO_ROOT / "assets" / "Custom God Icons"
+CUSTOM_CARDS_DIR = REPO_ROOT / "assets" / "Custom God Cards"
 ITEM_ICONS_DIR = REPO_ROOT / "data" / "item_icons"
-CUSTOM_ITEM_ICONS_DIR = REPO_ROOT / "Custom Item Icons"
+CUSTOM_ITEM_ICONS_DIR = REPO_ROOT / "assets" / "Custom Item Icons"
 ITEM_MANIFEST = ITEM_ICONS_DIR / "_manifest.json"
 
 DEFAULT_PORT = 8071

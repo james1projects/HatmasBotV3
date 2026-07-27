@@ -65,8 +65,8 @@ from tools.process_recordings import next_index
 DEFAULT_SOURCE = _REPO_ROOT / "recordings" / "unknown"
 DEFAULT_TARGET_ROOT = _REPO_ROOT / "recordings"
 DEFAULT_DATA_DIR = _REPO_ROOT / "data"
-DEFAULT_OVERLAY_ICONS_DIR = _REPO_ROOT / "Custom God Icons"
-DEFAULT_REFERENCE_ICONS_DIR = _REPO_ROOT / "Portrait_Source"
+DEFAULT_OVERLAY_ICONS_DIR = _REPO_ROOT / "assets" / "Custom God Icons"
+DEFAULT_REFERENCE_ICONS_DIR = _REPO_ROOT / "assets" / "Portrait_Source"
 DEFAULT_PREVIEWS_DIR = _REPO_ROOT / "data" / "sort_previews"
 
 

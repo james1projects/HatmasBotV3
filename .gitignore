@@ -10,7 +10,6 @@ data/*.json
 # === Temp files not necessary for committing ===
 CURRENT_TASK.md
 Future_Features.txt
-Gods - SMITE 2 Wiki.html
 
 # === Perf / debug logs (left over from one-off testing) ===
 scan*.log
@@ -46,13 +45,16 @@ Thumbs.db
 desktop.ini
 
 # === DIRECTORIES TO IGNORE ===
-Custom God Icons/
-Custom God Cards/
-Portrait_Source/
-unpacked_doc/
+# Local art/reference libraries — live under assets/ since the
+# 2026-07 restructure, too large / personal to commit.
+assets/Custom God Icons/
+assets/Custom God Cards/
+assets/Custom Item Icons/
+assets/Custom_Icons_Inbox/
+assets/Portrait_Source/
+assets/smite2_wiki/
 docs/vendor/Table Reference — TwitchIO 3.2.1 documentation_files/
 data/*
-Gods - SMITE 2 Wiki_files/
 
 # === EXCEPTIONS to data/ ignore ===
 # Test fixtures are regression-test infrastructure, NOT runtime data —
@@ -61,6 +63,12 @@ Gods - SMITE 2 Wiki_files/
 # fresh clone.  Re-include the whole subtree.
 !data/test_fixtures/
 !data/test_fixtures/**
+# Digit templates are hand-curated OCR source data the kill detector
+# depends on (enrolled via explicit --enroll-templates, audited by
+# tools/audit_digit_templates.py). Without this exception a fresh
+# clone gets ZERO templates and the detector silently degrades.
+!data/digit_templates/
+!data/digit_templates/**
 
 # === LARGE / SCRATCH DIRECTORIES (never commit) ===
 # recordings/ regularly grows past 100 GB; inbox/ holds in-progress

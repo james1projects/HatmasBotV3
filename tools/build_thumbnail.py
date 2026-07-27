@@ -146,10 +146,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 PRESETS_DIR = REPO_ROOT / "thumbnail_presets"
 GOD_CARDS_DIR = REPO_ROOT / "data" / "god_cards"
 GOD_ICONS_DIR = REPO_ROOT / "data" / "god_icons"
-CUSTOM_ICONS_DIR = REPO_ROOT / "Custom God Icons"
-CUSTOM_CARDS_DIR = REPO_ROOT / "Custom God Cards"
+CUSTOM_ICONS_DIR = REPO_ROOT / "assets" / "Custom God Icons"
+CUSTOM_CARDS_DIR = REPO_ROOT / "assets" / "Custom God Cards"
 ITEM_ICONS_DIR = REPO_ROOT / "data" / "item_icons"
-CUSTOM_ITEM_ICONS_DIR = REPO_ROOT / "Custom Item Icons"
+CUSTOM_ITEM_ICONS_DIR = REPO_ROOT / "assets" / "Custom Item Icons"
 ASPECT_ICON_PATH = REPO_ROOT / "public" / "aspect-icon.png"
 OUT_DIR = REPO_ROOT / "thumbnails"
 

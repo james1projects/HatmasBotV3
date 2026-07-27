@@ -44,7 +44,7 @@ class _GodNamesMixin:
         # BASE_DIR points at the repo root, so "Custom God Icons" sits
         # right next to plugins/ regardless of how this file is nested
         # inside plugins/economy/.
-        icons_dir = BASE_DIR / "Custom God Icons"
+        icons_dir = BASE_DIR / "assets" / "Custom God Icons"
         if icons_dir.exists():
             for f in icons_dir.iterdir():
                 if f.suffix == ".png" and not f.stem.startswith("."):

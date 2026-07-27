@@ -641,9 +641,9 @@ class KillDeathDetector:
             from core.god_matcher import GodMatcher
             from pathlib import Path
             repo_root = Path(__file__).resolve().parent.parent
-            custom_dir = repo_root / "Custom God Icons"
+            custom_dir = repo_root / "assets" / "Custom God Icons"
             overlay_dir = str(custom_dir) if custom_dir.is_dir() else None
-            reference_dir = repo_root / "Portrait_Source"
+            reference_dir = repo_root / "assets" / "Portrait_Source"
             reference_dir_str = (
                 str(reference_dir) if reference_dir.is_dir() else None
             )
@@ -1922,7 +1922,7 @@ class KillDeathDetector:
             return {"ok": False, "error": f"crop failed: {e}"}
 
         repo_root = Path(__file__).resolve().parent.parent
-        ref_dir = repo_root / "Portrait_Source"
+        ref_dir = repo_root / "assets" / "Portrait_Source"
         ref_dir.mkdir(parents=True, exist_ok=True)
         # Operator picked overwrite semantics — one flat file per god.
         # Any subfolder Portrait_Source/<God>/*.png references stay in

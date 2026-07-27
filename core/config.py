@@ -12,7 +12,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).parent.parent
 DATA_DIR = BASE_DIR / "data"
 OVERLAY_DIR = BASE_DIR / "overlays"
-CUSTOM_GOD_ICONS_DIR = BASE_DIR / "Custom God Icons"
+CUSTOM_GOD_ICONS_DIR = BASE_DIR / "assets" / "Custom God Icons"
 GOD_ICONS_DIR = DATA_DIR / "god_icons"
 DATA_DIR.mkdir(exist_ok=True)
 

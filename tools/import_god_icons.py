@@ -87,8 +87,8 @@ except Exception as _exc:
     traceback.print_exc()
     sys.exit(2)
 
-DEFAULT_INBOX = REPO_ROOT / "Custom_Icons_Inbox"
-DEFAULT_OUTPUT = REPO_ROOT / "Custom God Icons"
+DEFAULT_INBOX = REPO_ROOT / "assets" / "Custom_Icons_Inbox"
+DEFAULT_OUTPUT = REPO_ROOT / "assets" / "Custom God Icons"
 PROCESSED_SUBFOLDER = "_processed"
 
 SUPPORTED_EXTENSIONS = {
