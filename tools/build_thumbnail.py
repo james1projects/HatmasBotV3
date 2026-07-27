@@ -600,6 +600,34 @@ _FLIP_FLAG_TO_CARD_TOKEN = {
 }
 
 
+def apply_style_overrides(preset, args):
+    """
+    Optional per-render style tweaks, shared by the CLI and the studio:
+
+      text_size          (--text-size N) — set the font size of every
+                         text layer whose value references {text}. In
+                         build_guide that's the big headline (preset
+                         default 168).
+      item_border_color  (--item-border-color C) — recolor every layer
+                         marked "role": "item_border" in the preset:
+                         build_guide's three item-tile borders (preset
+                         default gold #ffd24d). Any CSS color / hex.
+
+    Mutates `preset` in place; a no-op when the args are unset/empty.
+    """
+    text_size = getattr(args, "text_size", None)
+    border_color = getattr(args, "item_border_color", "") or ""
+    if not text_size and not border_color:
+        return preset
+    for layer in preset.get("layers", []):
+        if text_size and layer.get("type") == "text" \
+                and "{text}" in str(layer.get("value", "")):
+            layer["size"] = max(12, min(500, int(text_size)))
+        if border_color and layer.get("role") == "item_border":
+            layer["color"] = border_color
+    return preset
+
+
 def apply_flip_overrides(preset, args):
     """
     Walk the preset's layers and toggle `flip_h` on image layers whose
@@ -1668,6 +1696,15 @@ def main():
                              "(2matches / 2gods / 3gods presets).")
     parser.add_argument("--aspect-god3", dest="aspect_god3", action="store_true",
                         help="Aspect badge underneath --god3's icon (3gods preset).")
+    parser.add_argument("--text-size", dest="text_size", type=int, default=None,
+                        help="Font size for the {text} headline layer(s), "
+                             "overriding the preset default (build_guide "
+                             "defaults to 168).")
+    parser.add_argument("--item-border-color", dest="item_border_color",
+                        default="",
+                        help="Border color for the item tiles (layers marked "
+                             "role=item_border — build_guide's three items). "
+                             "Hex or CSS color name; preset default is gold.")
     parser.add_argument("--preset", default="1v1",
                         help=f"Preset name (default: 1v1). Available: {', '.join(list_presets()) or '(none)'}")
     parser.add_argument("--text", default=None,
@@ -1716,6 +1753,7 @@ def main():
 
     preset = load_preset(args.preset)
     apply_flip_overrides(preset, args)
+    apply_style_overrides(preset, args)
     placeholders = build_placeholders(args, preset=preset)
 
     if not placeholders["my_god_card"]:

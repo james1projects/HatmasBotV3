@@ -26,6 +26,10 @@ Architecture
                          Paint.NET" (avoids ~50 file writes per preview render).
                          Optional body key `pans` ({slot: [x0, y0]}) repositions
                          a god card inside its panel (drag-to-reposition).
+                         Optional body key `zooms` ({slot: factor}) scales the
+                         card art inside its panel (per-card size slider;
+                         1.0 = the preset's own cover fit, <1 zooms out to
+                         show more of the art, >1 zooms in).
                          Optional body key `text_offsets` ({layer_index:
                          [dx, dy]}) shifts a text layer from its preset
                          position (drag-to-move). Returns `texts`: the
@@ -114,7 +118,8 @@ GOD_DISPLAY_NAME_OVERRIDES: Dict[str, str] = {
 # an icon layer for — build_guide has none, so no aspect field there.
 PRESET_FIELDS: Dict[str, List[str]] = {
     "build_guide": ["god", "skin", "item1", "item2", "item3",
-                    "text", "result", "flip_god"],
+                    "text", "text_size", "item_border_color",
+                    "result", "flip_god"],
     "1v1":        ["god", "skin", "vs",
                    "text", "subtext", "kda", "result",
                    "flip_god", "flip_vs",
@@ -319,10 +324,11 @@ _CARD_SLOTS = [
 ]
 
 
-def _apply_pans_and_collect_cards(preset, placeholders, ns, pans):
+def _apply_pans_and_collect_cards(preset, placeholders, ns, pans, zooms):
     """
     For every image layer whose src is a god-card placeholder:
-    apply the user's drag offset (pans[slot] = [x0, y0], the top-left
+    apply the user's card-size factor (zooms[slot], 1.0 = the preset's
+    own cover fit) and drag offset (pans[slot] = [x0, y0], the top-left
     of the visible source window in post-flip source px) by setting the
     layer's source_window_px override, and collect the geometry the
     front-end needs to run the drag interaction (panel rect on canvas,
@@ -360,14 +366,39 @@ def _apply_pans_and_collect_cards(preset, placeholders, ns, pans):
             continue  # contain/stretch fit — nothing to pan
         x0, y0, win_w, win_h = win
         sw, sh = src_size
+        # Card-size slider: zoom > 1 magnifies (smaller source window),
+        # zoom < 1 shrinks the card content (bigger window shows more of
+        # the art). The window resizes around its own center, aspect
+        # preserved, clamped so it never leaves the source image — so
+        # zooming out bottoms out once the whole card is visible.
+        zoom = 1.0
+        zv = zooms.get(slot)
+        if zv is not None:
+            try:
+                zoom = max(0.25, min(4.0, float(zv)))
+            except (TypeError, ValueError):
+                zoom = 1.0
+        if zoom != 1.0:
+            nw, nh = win_w / zoom, win_h / zoom
+            over = max(nw / sw, nh / sh)
+            if over > 1.0:
+                nw, nh = nw / over, nh / over
+            x0 += (win_w - nw) / 2.0
+            y0 += (win_h - nh) / 2.0
+            win_w, win_h = nw, nh
+            x0 = max(0.0, min(x0, sw - win_w))
+            y0 = max(0.0, min(y0, sh - win_h))
         pan = pans.get(slot)
+        panned = False
         if isinstance(pan, (list, tuple)) and len(pan) == 2:
             try:
                 x0 = max(0.0, min(float(pan[0]), sw - win_w))
                 y0 = max(0.0, min(float(pan[1]), sh - win_h))
-                layer["source_window_px"] = [x0, y0, x0 + win_w, y0 + win_h]
+                panned = True
             except (TypeError, ValueError):
                 pass
+        if panned or zoom != 1.0:
+            layer["source_window_px"] = [x0, y0, x0 + win_w, y0 + win_h]
         x, y, w, h = bt._resolve_pos_size(layer, canvas_size)
         dx, dy = bt._resolve_anchor(layer.get("anchor"), w, h)
         skin_val = (getattr(ns, skin_field, "") or "") if skin_field else ""
@@ -382,6 +413,7 @@ def _apply_pans_and_collect_cards(preset, placeholders, ns, pans):
             "win_size": [win_w, win_h],
             "src_size": [sw, sh],
             "card_url": card_url,
+            "zoom": zoom,
         }
     return list(by_slot.values())
 
@@ -533,6 +565,15 @@ async def serve_render(request: web.Request) -> web.Response:
     return _no_store(p)
 
 
+def _parse_text_size(value: Any) -> Optional[int]:
+    """Headline size from the form: int px, or None (= preset default)
+    for empty/garbage input. apply_style_overrides clamps the range."""
+    try:
+        return int(str(value).strip()) or None
+    except (TypeError, ValueError):
+        return None
+
+
 def _normalize_optional(value: Any) -> Optional[str]:
     """Empty string -> None so build_placeholders falls back to its default
     (which for text is "my god's name", for subtext is "vs god's name").
@@ -596,12 +637,15 @@ async def api_render(request: web.Request) -> web.Response:
         aspect_god2=bool(data.get("aspect_god2")),
         aspect_god3=bool(data.get("aspect_god3")),
         aspect_vs2=bool(data.get("aspect_vs2")),
+        text_size=_parse_text_size(data.get("text_size")),
+        item_border_color=(data.get("item_border_color") or "").strip(),
         no_text=bool(data.get("no_text")),
         no_subtext=bool(data.get("no_subtext")),
         preset=preset_name,
     )
 
     bt.apply_flip_overrides(preset, ns)
+    bt.apply_style_overrides(preset, ns)
     placeholders = bt.build_placeholders(ns, preset=preset)
 
     # Surface the same "no card found" warnings the CLI prints.
@@ -629,12 +673,16 @@ async def api_render(request: web.Request) -> web.Response:
             and not bt.ASPECT_ICON_PATH.exists():
         warnings.append("Aspect badge file missing: public/aspect-icon.png")
 
-    # Drag-to-reposition: apply per-slot pan overrides to the card
-    # layers and collect the geometry the front-end drag needs.
+    # Drag-to-reposition + card-size slider: apply per-slot pan/zoom
+    # overrides to the card layers and collect the geometry the
+    # front-end drag needs.
     pans = data.get("pans")
     if not isinstance(pans, dict):
         pans = {}
-    cards = _apply_pans_and_collect_cards(preset, placeholders, ns, pans)
+    zooms = data.get("zooms")
+    if not isinstance(zooms, dict):
+        zooms = {}
+    cards = _apply_pans_and_collect_cards(preset, placeholders, ns, pans, zooms)
 
     # Drag-to-move: shift text layers by their user-dragged offsets.
     text_offsets = data.get("text_offsets")
@@ -797,7 +845,7 @@ INDEX_HTML = """<!doctype html>
     font-weight: normal;
   }
   label .inline-clear:hover { color: var(--text); border-color: var(--border-strong); }
-  input[type=text], select {
+  input[type=text], input[type=number], select {
     width: 100%;
     padding: 8px 10px;
     background: var(--panel-2);
@@ -807,7 +855,7 @@ INDEX_HTML = """<!doctype html>
     font-size: 14px;
     font-family: inherit;
   }
-  input[type=text]:focus, select:focus {
+  input[type=text]:focus, input[type=number]:focus, select:focus {
     outline: none;
     border-color: var(--accent);
   }
@@ -984,6 +1032,30 @@ INDEX_HTML = """<!doctype html>
     outline-offset: -2px;
   }
   .card-drag.dragging { cursor: grabbing; }
+  /* Card-size slider: lives at the bottom of each card overlay, shown
+     on hover. `.zooming` keeps it visible while the thumb is being
+     dragged even if the pointer strays off the panel. */
+  .card-drag .zoom-ctl {
+    position: absolute;
+    left: 12px; right: 12px; bottom: 8px;
+    display: none;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 10px;
+    background: rgba(10, 13, 18, 0.78);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: default;
+  }
+  .card-drag:hover .zoom-ctl,
+  .card-drag.zooming .zoom-ctl { display: flex; }
+  .card-drag .zoom-ctl input[type="range"] { flex: 1; min-width: 0; }
+  .card-drag .zoom-ctl span {
+    font-size: 11px;
+    color: var(--muted);
+    min-width: 34px;
+    text-align: right;
+  }
   .card-drag .ghost {
     position: absolute;
     inset: 0;
@@ -1127,12 +1199,29 @@ INDEX_HTML = """<!doctype html>
         <label>Item 3 <button class="inline-clear" data-clear="item3" type="button">clear</button></label>
         <div class="icondrop" data-name="item3" data-kind="item"></div>
       </div>
+      <div data-field="item_border_color">
+        <label>Item Border Color</label>
+        <select id="item_border_color">
+          <option value="">Gold (default)</option>
+          <option value="#ffffff">White</option>
+          <option value="#000000">Black</option>
+          <option value="#4dc3ff">Ice Blue</option>
+          <option value="#ff4d6d">Red</option>
+          <option value="#39ff8c">Green</option>
+          <option value="#b44dff">Purple</option>
+          <option value="#ff9d4d">Orange</option>
+        </select>
+      </div>
     </div>
 
     <div class="field-group">
       <div data-field="text">
         <label>Headline</label>
         <input type="text" id="text" placeholder="(defaults to my god's name)">
+      </div>
+      <div data-field="text_size">
+        <label>Headline Size (px)</label>
+        <input type="number" id="text_size" min="12" max="500" placeholder="(preset default, build_guide: 168)">
       </div>
       <div data-field="subtext">
         <label>Subtext</label>
@@ -1212,6 +1301,7 @@ INDEX_HTML = """<!doctype html>
     item1: "", item2: "", item3: "",
     skin: "", skin2: "", skin3: "",
     text: "", subtext: "", kda: "",
+    text_size: "", item_border_color: "",
     result: "", result2: "",
     flip_god: false, flip_vs: false, flip_god2: false, flip_god3: false, flip_vs2: false,
     aspect_god: false, aspect_vs: false, aspect_god2: false, aspect_god3: false, aspect_vs2: false,
@@ -1219,6 +1309,9 @@ INDEX_HTML = """<!doctype html>
     // slot -> [x0, y0]: top-left of the visible source window in
     // post-flip source px (drag-to-reposition). Server clamps.
     pans: {},
+    // slot -> card-size factor (per-card slider). 1.0 = the preset's
+    // own cover fit and is never stored; server clamps to 0.25-4.
+    zooms: {},
     // layer index (string) -> [dx, dy] canvas px added to a text
     // layer's preset pos (drag-to-move). Survives text edits — moving
     // the headline then retyping it keeps the new spot.
@@ -1424,13 +1517,17 @@ INDEX_HTML = """<!doctype html>
   });
 
   // ---- Text inputs -------------------------------------------------------
-  for (const f of ["skin", "skin2", "skin3", "text", "subtext", "kda"]) {
+  for (const f of ["skin", "skin2", "skin3", "text", "subtext", "kda", "text_size"]) {
     $("#" + f).addEventListener("input", () => {
       state[f] = $("#" + f).value;
       // skin -> god, skin2 -> god2, skin3 -> god3: new art, stale offset
       if (f.startsWith("skin")) delete state.pans["god" + f.slice(4)];
     });
   }
+  // ---- Item border color -------------------------------------------------
+  $("#item_border_color").addEventListener("change", () => {
+    state.item_border_color = $("#item_border_color").value;
+  });
   // ---- Flip toggles ------------------------------------------------------
   for (const f of ["flip_god", "flip_vs", "flip_god2", "flip_god3", "flip_vs2"]) {
     $("#" + f).addEventListener("change", () => {
@@ -1458,6 +1555,7 @@ INDEX_HTML = """<!doctype html>
   function applyPresetVisibility() {
     state.preset = presetSel.value;
     state.pans = {}; // panel layout changed; drag offsets are per-preset
+    state.zooms = {}; // card-size factors are per-preset too
     state.text_offsets = {}; // layer indexes are per-preset too
     const enabled = PRESET_FIELDS[state.preset] || [];
     $$("[data-field]").forEach(div => {
@@ -1469,6 +1567,11 @@ INDEX_HTML = """<!doctype html>
       const anyVisible = $$("[data-field]", g).some(d => !d.classList.contains("hidden"));
       g.classList.toggle("hidden", !anyVisible);
     });
+    // build_guide sets auto_headline false (the god-name layer already
+    // shows the name) — reflect that in the placeholder.
+    $("#text").placeholder = state.preset === "build_guide"
+      ? "(empty by default on this preset)"
+      : "(defaults to my god's name)";
   }
   presetSel.addEventListener("change", applyPresetVisibility);
   applyPresetVisibility();
@@ -1502,12 +1605,62 @@ INDEX_HTML = """<!doctype html>
       ov.style.top    = (c.panel[1] / ch * 100) + "%";
       ov.style.width  = (c.panel[2] / cw * 100) + "%";
       ov.style.height = (c.panel[3] / ch * 100) + "%";
-      ov.title = "Drag to reposition " + c.slot + " (double-click to reset)";
+      ov.title = "Drag to reposition " + c.slot
+        + "; slider = card size (double-click resets both)";
       ov.addEventListener("pointerdown", e => startCardDrag(e, ov, c));
       ov.addEventListener("dblclick", () => {
         delete state.pans[c.slot];
+        delete state.zooms[c.slot];
         doRender();
       });
+      // Card-size slider. Log scale so 100% sits dead center and each
+      // end is 3x out/in; values snap to 100% near the middle. The
+      // committed factor rides state.zooms and re-renders server-side.
+      const zwrap = document.createElement("div");
+      zwrap.className = "zoom-ctl";
+      const zr = document.createElement("input");
+      zr.type = "range";
+      zr.min = "-100"; zr.max = "100"; zr.step = "1";
+      const zcur = state.zooms[c.slot] || 1;
+      zr.value = String(Math.round(Math.log(zcur) / Math.log(3) * 100));
+      const zlab = document.createElement("span");
+      const sliderZoom = () => {
+        const v = parseInt(zr.value, 10) || 0;
+        return Math.abs(v) <= 3 ? 1 : Math.pow(3, v / 100);
+      };
+      const showZoom = () => {
+        zlab.textContent = Math.round(sliderZoom() * 100) + "%";
+      };
+      showZoom();
+      zwrap.appendChild(zr);
+      zwrap.appendChild(zlab);
+      // Don't let slider interaction start a card drag, and don't let
+      // double-clicking the thumb trigger the overlay's reset.
+      zwrap.addEventListener("pointerdown", e => {
+        e.stopPropagation();
+        ov.classList.add("zooming");
+      });
+      zwrap.addEventListener("pointerup", () => ov.classList.remove("zooming"));
+      zwrap.addEventListener("dblclick", e => e.stopPropagation());
+      zr.addEventListener("input", showZoom);
+      zr.addEventListener("change", () => {
+        ov.classList.remove("zooming");
+        const z = sliderZoom();
+        const oldZ = c.zoom || 1;
+        if (z === 1) delete state.zooms[c.slot];
+        else state.zooms[c.slot] = z;
+        if (state.pans[c.slot] && z !== oldZ) {
+          // Resize the window around the panned view's center, not its
+          // top-left, so the subject stays put while the card scales.
+          const ratio = oldZ / z;
+          state.pans[c.slot] = [
+            state.pans[c.slot][0] + c.win_size[0] * (1 - ratio) / 2,
+            state.pans[c.slot][1] + c.win_size[1] * (1 - ratio) / 2,
+          ];
+        }
+        doRender();
+      });
+      ov.appendChild(zwrap);
       previewBox.appendChild(ov);
     }
     // Text overlays go in after (= above) the card overlays, so where
@@ -1690,7 +1843,7 @@ INDEX_HTML = """<!doctype html>
       img.style.display = "";
       if (ph) ph.style.display = "none";
       const hints = [];
-      if (j.cards && j.cards.length) hints.push("drag a god card to reposition it");
+      if (j.cards && j.cards.length) hints.push("drag a god card to reposition it, slider to resize");
       if (j.texts && j.texts.length) hints.push("drag text to move it");
       const dragHint = hints.length
         ? "  |  " + hints.join(", ") + " (double-click resets)"

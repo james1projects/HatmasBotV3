@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "name": "build_guide",
-  "description": "Build / guide thumbnail. God card fills the canvas top-anchored with the top 38% of the source kept (zooms in on the face for typical portrait-style cards); 3 item icons sit in a row across the bottom with gold borders. Per-god crop overrides live in data/god_card_crops.json for outliers like Ymir whose card has the face in an unusual location.",
+  "description": "Build / guide thumbnail. God card fills the canvas top-anchored with the top 38% of the source kept (zooms in on the face for typical portrait-style cards); 3 item tiles (268px, colorable borders via role \"item_border\" + --item-border-color / the studio dropdown) sit centered in a row across the bottom. Headline defaults big (168px, override via --text-size / the studio field) and does NOT auto-fill with the god name (auto_headline false \u2014 the god-name layer already shows it). Per-god crop overrides live in data/god_card_crops.json for outliers like Ymir whose card has the face in an unusual location.",
   "size": [
     1280,
     720
@@ -38,11 +38,11 @@
       "name": "Bottom darkening band (gives items contrast)",
       "pos": [
         0,
-        460
+        380
       ],
       "size": [
         1280,
-        260
+        340
       ],
       "direction": "vertical",
       "stops": [
@@ -125,7 +125,7 @@
       ],
       "anchor": "topleft",
       "font": "Big Noodle Titling",
-      "size": 56,
+      "size": 168,
       "fill": "#ffffff",
       "stroke": {
         "color": "#000000",
@@ -140,7 +140,7 @@
         "blur": 6,
         "opacity": 0.85
       },
-      "max_width": 800,
+      "max_width": 1220,
       "skip_if_empty": true
     },
     {
@@ -174,51 +174,54 @@
       "type": "solid",
       "name": "Item 1 gold border backer",
       "pos": [
-        424,
-        524
+        226,
+        432
       ],
       "size": [
-        144,
-        144
+        268,
+        268
       ],
-      "color": "#ffd24d"
+      "color": "#ffd24d",
+      "role": "item_border"
     },
     {
       "type": "solid",
       "name": "Item 2 gold border backer",
       "pos": [
-        568,
-        524
+        506,
+        432
       ],
       "size": [
-        144,
-        144
+        268,
+        268
       ],
-      "color": "#ffd24d"
+      "color": "#ffd24d",
+      "role": "item_border"
     },
     {
       "type": "solid",
       "name": "Item 3 gold border backer",
       "pos": [
-        712,
-        524
+        786,
+        432
       ],
       "size": [
-        144,
-        144
+        268,
+        268
       ],
-      "color": "#ffd24d"
+      "color": "#ffd24d",
+      "role": "item_border"
     },
     {
       "type": "solid",
       "name": "Item 1 dark inset",
       "pos": [
-        430,
-        530
+        236,
+        442
       ],
       "size": [
-        132,
-        132
+        248,
+        248
       ],
       "color": "#0a0e14"
     },
@@ -226,12 +229,12 @@
       "type": "solid",
       "name": "Item 2 dark inset",
       "pos": [
-        574,
-        530
+        516,
+        442
       ],
       "size": [
-        132,
-        132
+        248,
+        248
       ],
       "color": "#0a0e14"
     },
@@ -239,12 +242,12 @@
       "type": "solid",
       "name": "Item 3 dark inset",
       "pos": [
-        718,
-        530
+        796,
+        442
       ],
       "size": [
-        132,
-        132
+        248,
+        248
       ],
       "color": "#0a0e14"
     },
@@ -253,12 +256,12 @@
       "name": "Item 1 icon",
       "src": "{item1_icon}",
       "pos": [
-        434,
-        534
+        242,
+        448
       ],
       "size": [
-        124,
-        124
+        236,
+        236
       ],
       "fit": "cover",
       "anchor": "topleft",
@@ -269,12 +272,12 @@
       "name": "Item 2 icon",
       "src": "{item2_icon}",
       "pos": [
-        578,
-        534
+        522,
+        448
       ],
       "size": [
-        124,
-        124
+        236,
+        236
       ],
       "fit": "cover",
       "anchor": "topleft",
@@ -285,16 +288,17 @@
       "name": "Item 3 icon",
       "src": "{item3_icon}",
       "pos": [
-        722,
-        534
+        802,
+        448
       ],
       "size": [
-        124,
-        124
+        236,
+        236
       ],
       "fit": "cover",
       "anchor": "topleft",
       "fallback_text": "{item3}"
     }
-  ]
+  ],
+  "auto_headline": false
 }

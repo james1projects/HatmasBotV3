@@ -134,6 +134,8 @@ The lookup chain is:
 --kda 12/3/8                 # K/D/A badge
 --aspect-god                 # aspect badge under my god's icon
 --aspect-vs                  # same for the vs god (--aspect-vs2 / --aspect-god2 / --aspect-god3 likewise)
+--text-size 200              # headline font size override (build_guide preset default: 168)
+--item-border-color "#4dc3ff"  # item tile border color, hex or CSS name (build_guide; default gold)
 --no-open                    # don't auto-launch Paint.NET on the result
 --no-random-icons            # use the primary <God>.png icon (skip variant pool)
 --seed 42                    # reproducible random icon picks
