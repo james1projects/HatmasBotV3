@@ -1806,7 +1806,18 @@ class WebServer:
         self.runner = web.AppRunner(self.app)
         await self.runner.setup()
         site = web.TCPSite(self.runner, WEB_HOST, WEB_PORT)
-        await site.start()
+        try:
+            await site.start()
+        except OSError as e:
+            if e.errno in (10048, 98):  # WinError 10048 / EADDRINUSE
+                await self.runner.cleanup()
+                raise SystemExit(
+                    f"\n[WebServer] Port {WEB_PORT} is already in use — another copy of "
+                    f"the bot is probably still running.\n"
+                    f"  Find it:  netstat -ano | findstr :{WEB_PORT}\n"
+                    f"  Kill it:  taskkill /PID <pid> /F\n"
+                ) from None
+            raise
         print(f"[WebServer] Running at http://{WEB_HOST}:{WEB_PORT}")
         print(f"[WebServer] Control panel:    http://{WEB_HOST}:{WEB_PORT}/")
         print(f"[WebServer] Now Playing:      http://{WEB_HOST}:{WEB_PORT}/overlay/nowplaying")
