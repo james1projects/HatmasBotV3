@@ -13,10 +13,10 @@ without waiting for the daily-cap reset, so it must stay predictable:
   - god_pool_votes (daily-cap records) never touched
 
 No network. Run:
-    python tools/test_god_pool_manage.py
+    python tests/test_god_pool_manage.py
 
 Exit 0 if every test passes, 1 otherwise. Same conventions as
-tools/test_aspects.py.
+tests/test_aspects.py.
 """
 
 import asyncio

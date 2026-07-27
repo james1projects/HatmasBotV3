@@ -10,10 +10,10 @@ data/test_fixtures/kda/atlas_4_0_0_live_1080p.json for the canonical
 example.
 
 Run:
-    python tools/test_kda_fixture.py                 # all fixtures
-    python tools/test_kda_fixture.py atlas           # filter by substring
-    python tools/test_kda_fixture.py --verbose       # dump per-digit margins
-    python tools/test_kda_fixture.py --save-binary   # write the binarised
+    python tests/test_kda_fixture.py                 # all fixtures
+    python tests/test_kda_fixture.py atlas           # filter by substring
+    python tests/test_kda_fixture.py --verbose       # dump per-digit margins
+    python tests/test_kda_fixture.py --save-binary   # write the binarised
                                                        8x crop next to each
                                                        fixture for eyeballing
 

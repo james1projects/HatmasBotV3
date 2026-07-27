@@ -13,7 +13,7 @@ Design notes:
   * Stdlib only (hmac, hashlib, base64, json, secrets, time). No
     aiohttp imports — the webserver owns cookie/HTTP concerns, this
     module owns crypto + encoding, so it unit-tests in isolation
-    (tools/test_web_session.py).
+    (tests/test_web_session.py).
   * No server-side session store. Rotating WEB_SESSION_SECRET in
     config_local.py invalidates every outstanding session — that is
     the global "log everyone out" lever.

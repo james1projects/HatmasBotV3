@@ -17,10 +17,10 @@ exact and total:
     so the portrait-vs-tracker comparison never false-fires
 
 No network — the roster loads from cache/bundled data. Run:
-    python tools/test_clean_god_name.py
+    python tests/test_clean_god_name.py
 
 Exit 0 if every test passes, 1 otherwise. Same conventions as
-tools/test_aspects.py.
+tests/test_aspects.py.
 """
 
 import sys

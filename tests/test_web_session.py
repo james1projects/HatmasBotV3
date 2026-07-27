@@ -8,7 +8,7 @@ mac, truncation, wrong secret, expiry, missing exp, garbage input,
 and login normalization.
 
 Run:
-    python tools/test_web_session.py
+    python tests/test_web_session.py
 
 Exit 0 on full pass. Same conventions as test_priority_request.py.
 No network, no files, no bot imports.

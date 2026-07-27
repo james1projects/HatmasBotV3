@@ -18,7 +18,7 @@ these lock down the load/merge/fallback behavior:
     (including the Mulan -> Hua Mulan rename)
 
 Run:
-    python tools/test_god_roster.py
+    python tests/test_god_roster.py
 
 Exit 0 if every test passes, 1 otherwise. No network — the live
 fetch is monkeypatched.

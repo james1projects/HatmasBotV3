@@ -13,11 +13,11 @@ aspect request is understood and accepted:
   - display_god rendering
 
 No network — the wiki fetch is stubbed. Run:
-    python tools/test_aspects.py            # whole suite
-    python tools/test_aspects.py refresh    # name filter
+    python tests/test_aspects.py            # whole suite
+    python tests/test_aspects.py refresh    # name filter
 
 Exit 0 if every test passes, 1 otherwise. Same conventions as
-tools/test_god_roster.py.
+tests/test_god_roster.py.
 """
 
 import sys

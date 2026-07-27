@@ -9,8 +9,8 @@ guard, plus /api/me and /auth/logout. The session tokens are real
 calls are faked.
 
 Run:
-    python tools/test_web_trade.py            # whole suite
-    python tools/test_web_trade.py cooldown   # name filter
+    python tests/test_web_trade.py            # whole suite
+    python tests/test_web_trade.py cooldown   # name filter
 
 Exit 0 on full pass. Same conventions as test_priority_request.py.
 No network, no files, no real config required — module globals are

@@ -30,7 +30,7 @@ Ownership proof is the caller's job (core/public_webserver.py's
 
 Everything here runs on the shared economy.db connection (core/db.py).
 No config, no network — unit-tests in isolation against in-memory
-aiosqlite (tools/test_account_linking.py).
+aiosqlite (tests/test_account_linking.py).
 """
 
 from __future__ import annotations

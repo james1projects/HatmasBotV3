@@ -17,11 +17,11 @@ Covers the failure modes that matter when real money is involved:
   - plain-text chat announcements (Tone rule: no emojis)
 
 Run:
-    python tools/test_priority_request.py            # whole suite
-    python tools/test_priority_request.py refund     # name filter
+    python tests/test_priority_request.py            # whole suite
+    python tests/test_priority_request.py refund     # name filter
 
 Exit 0 if every test passes, 1 otherwise. Same conventions as
-tools/test_kda_fixture.py. No network, no real Stripe calls, no
+tests/test_kda_fixture.py. No network, no real Stripe calls, no
 files touched — safe to wire into a Stream Deck button or run
 before any deploy that touches priority_request.py.
 """
