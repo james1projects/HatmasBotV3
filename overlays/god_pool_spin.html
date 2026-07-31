@@ -551,14 +551,18 @@
                               .replace(/\s+/g, '-')
                               .replace(/'/g, '');
   }
+  // Bump when icon art changes on disk: the query string makes the
+  // URL unique, so OBS/browsers skip any previously cached copy
+  // (fixes stale icons lingering in the OBS browser-source cache).
+  const ICON_VERSION = 2;
   function customIconPath(name) {
     // Webserver mounts these at /icons/custom/{Name}.png and
     // /icons/gods/{slug}.png. Some god names contain apostrophes or
     // spaces so we URL-encode the raw filename.
-    return '/icons/custom/' + encodeURIComponent(name) + '.png';
+    return '/icons/custom/' + encodeURIComponent(name) + '.png?v=' + ICON_VERSION;
   }
   function fallbackIconPath(name) {
-    return '/icons/gods/' + slugify(name) + '.png';
+    return '/icons/gods/' + slugify(name) + '.png?v=' + ICON_VERSION;
   }
 
   let busy = false;

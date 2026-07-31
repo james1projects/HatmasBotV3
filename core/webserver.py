@@ -38,9 +38,27 @@ TTS_AUDIO_DIR.mkdir(exist_ok=True)
 
 
 class WebServer:
+    @staticmethod
+    @web.middleware
+    async def _no_stale_cache_middleware(request, handler):
+        """Force revalidation on overlay pages and god icons.
+
+        OBS's embedded browser caches subresources heuristically when
+        no Cache-Control header is present (freshness = 10% of the
+        file's age), so an updated icon or overlay HTML could keep
+        serving stale bytes for days. no-cache still allows 304s, so
+        unchanged files stay cheap — but edits show up on next reload.
+        """
+        response = await handler(request)
+        path = request.path
+        if path.startswith(("/icons/", "/overlays/", "/overlay/")):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
     def __init__(self, bot=None):
         self.bot = bot
-        self.app = web.Application()
+        self.app = web.Application(
+            middlewares=[WebServer._no_stale_cache_middleware])
         self.runner = None
         # Attached by main.py after construction; read by GET /health.
         self.token_manager = None
