@@ -89,6 +89,16 @@ SCREENSHOT_INTERVAL = 0.8  # Seconds between screenshot grabs
 # trigger a match-end reset.
 NON_GAMEPLAY_FRAMES = 3
 
+# God re-verification — after a god is identified, keep matching the
+# portrait each frame.  A DIFFERENT god must win this many consecutive
+# frames (~5s at SCREENSHOT_INTERVAL) before we correct the identity;
+# corrections are then rate-limited by the cooldown so a flickering
+# borderline crop can't ping-pong the OBS portrait.  The initial
+# acquisition only needs _GOD_CONFIRM_REQUIRED frames — replacing an
+# established identity demands stronger evidence than acquiring one.
+GOD_REVERIFY_CONFIRM_FRAMES = 6
+GOD_REVERIFY_COOLDOWN = 60.0  # Seconds between accepted corrections
+
 # Multi-kill timing: kills within this window count as multi-kills.
 # Smite 2 multi-kill windows: ~10s for double, extends per kill.
 MULTIKILL_WINDOW = 10.0  # Seconds
@@ -260,6 +270,7 @@ class KillDeathDetector:
         #   death        async fn(count: int)                         (fired via create_task)
         #   assist       async fn(count: int)                         (fired via create_task)
         #   god_id       async fn(god_name: str)                      (awaited inline)
+        #   god_corrected async fn(god_name: str)                     (awaited inline)
         #   gameplay_end async fn()                                   (awaited inline)
         self._kill_listeners = []
         self._multikill_listeners = []
@@ -288,6 +299,15 @@ class KillDeathDetector:
         self._god_confirm_name = None
         self._god_confirm_count = 0
         self._GOD_CONFIRM_REQUIRED = 3
+
+        # Post-identification re-verification — a challenger god must
+        # win GOD_REVERIFY_CONFIRM_FRAMES consecutive frames to replace
+        # the established identity.  Fires _god_corrected_listeners
+        # WITHOUT resetting match stats (same match, wrong name).
+        self._god_corrected_listeners = []
+        self._reverify_challenger = None
+        self._reverify_count = 0
+        self._last_god_correction_time = 0.0
 
         # Startup validation — multiple consistent reads before accepting.
         self._startup_reads = []
@@ -384,6 +404,14 @@ class KillDeathDetector:
         fn(god_name). Awaited inline — keep it short or schedule your own
         background work."""
         self._god_identified_listeners.append(fn)
+
+    def add_god_corrected_listener(self, fn):
+        """Register an async callback for post-identification corrections:
+        the re-verification pass concluded the locked-in god was wrong
+        (e.g. a lobby misfire that survived into gameplay).  fn(god_name)
+        with the NEW god.  Awaited inline.  Match stats are NOT reset —
+        it's the same match under a corrected name."""
+        self._god_corrected_listeners.append(fn)
 
     def add_gameplay_ended_listener(self, fn):
         """Register an async callback fired when N consecutive non-gameplay
@@ -824,6 +852,8 @@ class KillDeathDetector:
         self._god_identified = False
         self._god_confirm_name = None
         self._god_confirm_count = 0
+        self._reverify_challenger = None
+        self._reverify_count = 0
         self._reader.discard_last_read()
         self._startup_reads = []
         self._startup_validated = False
@@ -1061,16 +1091,41 @@ class KillDeathDetector:
                             self._god_identified = False
                             self._god_confirm_name = None
                             self._god_confirm_count = 0
+                            self._reverify_challenger = None
+                            self._reverify_count = 0
                     await asyncio.sleep(SCREENSHOT_INTERVAL)
                     continue
                 self._non_gameplay_count = 0
 
                 # --- GOD PORTRAIT IDENTIFICATION ---
+                # Tracks whether this frame already ran a KDA parse (the
+                # gate below) so the tracking section doesn't read twice
+                # on the frame where identification completes.
+                frame_kda = None
+                frame_kda_read = False
                 if (
                     not self._god_identified
                     and self._god_matcher
                     and self._god_matcher.is_loaded
                 ):
+                    # KDA-bar gate: the gameplay-screen variance check
+                    # passes on ANY visually busy bottom-center — god
+                    # select, loading, shop — which is how lobby art got
+                    # matched as a god (the Hercules-in-lobby bug).  Only
+                    # actual gameplay renders a parseable K/D/A bar, so
+                    # require one before the matcher may run.  Skipping
+                    # here leaves the confirm streak untouched: an
+                    # unparseable frame is no evidence either way.
+                    frame_kda = self._reader.read_kda(img)
+                    frame_kda_read = True
+                    if frame_kda is None:
+                        if self._debug:
+                            _log(
+                                "[KillDetector] God ID gated — no "
+                                "parseable KDA bar (lobby/menu?)"
+                            )
+                        await asyncio.sleep(SCREENSHOT_INTERVAL)
+                        continue
                     try:
                         god_name, confidence = self._god_matcher.identify(img)
                         if god_name:
@@ -1172,8 +1227,78 @@ class KillDeathDetector:
 
                 now = time.time()
 
+                # --- GOD RE-VERIFICATION ---
+                # The identity latch used to be absolute: a wrong lock-in
+                # could only be fixed by tracker.gg minutes later.  Keep
+                # matching the portrait while identified; a DIFFERENT god
+                # winning GOD_REVERIFY_CONFIRM_FRAMES consecutive frames
+                # replaces the identity (no stat reset — same match,
+                # corrected name).  Skipped while dead: the portrait
+                # desaturates and matches nothing reliably.  A win for
+                # the CURRENT god kills any challenger streak — unless it
+                # came from an "overlay" fingerprint, i.e. the bot's own
+                # custom art composited over the portrait region echoing
+                # back at us.  That self-match is neutral: it neither
+                # confirms nor challenges (and it's why a wrong god whose
+                # custom art occludes the portrait can only be fixed by
+                # tracker.gg — we can't see beneath our own image).
+                if (
+                    self._god_matcher
+                    and self._god_matcher.is_loaded
+                    and not self._is_dead
+                ):
+                    try:
+                        rv_name, rv_conf = self._god_matcher.identify(img)
+                    except Exception:
+                        rv_name, rv_conf = None, 0.0
+                    if rv_name is None:
+                        self._reverify_challenger = None
+                        self._reverify_count = 0
+                    elif rv_name == self._god_confirm_name:
+                        if self._god_matcher.last_winner_source != "overlay":
+                            self._reverify_challenger = None
+                            self._reverify_count = 0
+                    elif rv_name == self._reverify_challenger:
+                        self._reverify_count += 1
+                        if (self._reverify_count
+                                >= GOD_REVERIFY_CONFIRM_FRAMES
+                                and now - self._last_god_correction_time
+                                >= GOD_REVERIFY_COOLDOWN):
+                            old_god = self._god_confirm_name
+                            self._god_confirm_name = rv_name
+                            self._last_match_god = rv_name
+                            self._reverify_challenger = None
+                            self._reverify_count = 0
+                            self._last_god_correction_time = now
+                            _log(
+                                f"[KillDetector] God re-verify CORRECTION: "
+                                f"{old_god} -> {rv_name} "
+                                f"(conf {rv_conf:.3f})"
+                            )
+                            self._log_debug_event(
+                                "state",
+                                f"god corrected: {old_god} -> {rv_name} "
+                                f"(conf {rv_conf:.3f})",
+                            )
+                            await self._await_listeners(
+                                self._god_corrected_listeners, rv_name
+                            )
+                        elif self._debug:
+                            _log(
+                                f"[KillDetector] Re-verify challenger: "
+                                f"{rv_name} ({rv_conf:.3f}) — "
+                                f"{self._reverify_count}/"
+                                f"{GOD_REVERIFY_CONFIRM_FRAMES}"
+                            )
+                    else:
+                        self._reverify_challenger = rv_name
+                        self._reverify_count = 1
+
                 # --- KDA NUMBER TRACKING ---
-                kda = self._reader.read_kda(img)
+                # Reuse this frame's gate read if one happened (the frame
+                # where identification just completed); else read now.
+                kda = (frame_kda if frame_kda_read
+                       else self._reader.read_kda(img))
                 if kda is not None:
                     self._kda_read_failures = 0
                     self._recorder.heartbeat(kda=kda)

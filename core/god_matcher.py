@@ -62,6 +62,34 @@ MARGIN_GAP = 0.20              # Required gap between #1 and #2
 # Number of histogram bins per channel for comparison.
 HIST_BINS = 16
 
+# --- Structural veto ---------------------------------------------------
+# Histogram correlation compares color DISTRIBUTIONS only — an 80x80
+# crop of god-select lobby UI that happens to be warm bronze/gold can
+# out-correlate every real god and win through the margin rule, because
+# nothing above checks that the crop LOOKS like that god's portrait.
+# After the histogram ranking picks a winner, we confirm it with a
+# grayscale normalized cross-correlation (NCC) against the same god's
+# icon templates (max across that god's fingerprints, same circular /
+# alpha masking as the histograms).  Structure-free junk that merely
+# shares a palette scores near 0; a genuine portrait of the same art
+# scores high (reference captures ≈1.0, CDN art vs live crop lower but
+# clearly separated — see tools/eval_struct_veto.py for the measured
+# distributions this threshold came from).
+#
+# Measured Aug 2026 (tools/eval_struct_veto.py over killdetect_debug /
+# captured_frames / detector_snapshots / Portrait_Source):
+#   hist-accepted NON-portraits (readfail shop/lobby frames — incl. a
+#     live Hercules-at-0.51 false accept, and black frames that match
+#     Hachiman at 0.816):                     NCC -1.0 .. +0.219
+#   genuine portraits:                        NCC +0.285 .. +0.910
+#     (floor is Atlas, whose animated in-game portrait diverges most
+#      from the CDN art; clean gods sit 0.6-0.9; enrolled
+#      Portrait_Source references ≈ 1.0)
+# 0.25 splits the measured gap.  If a god ever gets vetoed wrongly
+# (debug log shows "struct veto"), capturing a reference via the
+# /detector page lifts that god's NCC to ~1.0 permanently.
+STRUCT_MIN_NCC = 0.25
+
 
 class GodMatcher:
     """
@@ -133,7 +161,38 @@ class GodMatcher:
         # ``identify_top_n_with_sources()`` so the debug page can show
         # which library produced the winning score.
         self._icon_sources: dict = {}
+        # Parallel storage for the structural veto: per fingerprint a
+        # (pixel_indices, zero-mean unit-norm grayscale vector) pair
+        # covering the same masked pixel set as that fingerprint's
+        # histogram (circle ∧ alpha).  Indices line up 1:1 with
+        # ``_icon_hists``.  See ``_identify_struct_score``.
+        self._icon_templates: dict = {}
+        # Debug breadcrumb: (god_name, hist_score, ncc, vetoed) for the
+        # last identify() call that reached the struct check, else None.
+        # The kill detector's debug log reads this to explain rejections.
+        self.last_struct_check: Optional[tuple[str, float, float, bool]] = None
+        # Source library ("base" | "overlay" | "reference") of the
+        # fingerprint that produced the winner's score on the last
+        # identify() call.  The kill detector's re-verification pass
+        # uses this to tell a genuine portrait confirmation from the
+        # bot's own OBS overlay art echoing back through the capture
+        # ("overlay" self-match = neutral evidence, not confirmation).
+        self.last_winner_source: Optional[str] = None
         self._loaded = False
+
+    def _add_fingerprint(self, god_name, img_bgr, alpha_mask, source):
+        """Append one fingerprint (histogram + structural template +
+        source tag) for ``god_name``.  Single funnel for all three load
+        paths so the parallel storages can never drift out of sync.
+        ``img_bgr``/``alpha_mask`` are the MATCH_SIZE outputs of
+        :meth:`_split_bgr_alpha`."""
+        self._icon_hists.setdefault(god_name, []).append(
+            self._compute_hist(img_bgr, alpha_mask=alpha_mask)
+        )
+        self._icon_sources.setdefault(god_name, []).append(source)
+        self._icon_templates.setdefault(god_name, []).append(
+            self._compute_struct_template(img_bgr, alpha_mask=alpha_mask)
+        )
 
     def load_icons(self):
         """Load all reference icons and precompute their histograms.
@@ -153,6 +212,7 @@ class GodMatcher:
         """
         self._icon_hists.clear()
         self._icon_sources.clear()
+        self._icon_templates.clear()
 
         if not self._icons_dir.exists():
             print(f"[GodMatcher] Icons directory not found: {self._icons_dir}")
@@ -274,12 +334,7 @@ class GodMatcher:
                     if img_raw is None:
                         continue
                     img, alpha_mask = self._split_bgr_alpha(img_raw)
-                    self._icon_hists.setdefault(god_name, []).append(
-                        self._compute_hist(img, alpha_mask=alpha_mask)
-                    )
-                    self._icon_sources.setdefault(god_name, []).append(
-                        "reference"
-                    )
+                    self._add_fingerprint(god_name, img, alpha_mask, "reference")
                     loaded += 1
                 except Exception as e:
                     print(f"[GodMatcher] Error loading {path.name}: {e}")
@@ -338,10 +393,7 @@ class GodMatcher:
                 if img_raw is None:
                     continue
                 img, alpha_mask = self._split_bgr_alpha(img_raw)
-                self._icon_hists.setdefault(god_name, []).append(
-                    self._compute_hist(img, alpha_mask=alpha_mask)
-                )
-                self._icon_sources.setdefault(god_name, []).append(source)
+                self._add_fingerprint(god_name, img, alpha_mask, source)
                 loaded += 1
             except Exception as e:
                 print(f"[GodMatcher] Error loading {path.name}: {e}")
@@ -398,34 +450,57 @@ class GodMatcher:
         # still rank distinct gods against each other for margin.
         best_name = None
         best_score = -1.0
+        best_source = None
         second_score = -1.0
 
         for god_name, hist_list in self._icon_hists.items():
+            sources = self._icon_sources.get(
+                god_name, ["base"] * len(hist_list)
+            )
             god_score = -1.0
-            for icon_hist in hist_list:
+            god_source = "base"
+            for icon_hist, src in zip(hist_list, sources):
                 s = cv2.compareHist(
                     portrait_hist, icon_hist, cv2.HISTCMP_CORREL,
                 )
                 if s > god_score:
                     god_score = s
+                    god_source = src
             if god_score > best_score:
                 second_score = best_score
                 best_score = god_score
                 best_name = god_name
+                best_source = god_source
             elif god_score > second_score:
                 second_score = god_score
 
-        # Accept if above absolute threshold
-        if best_score >= MIN_CONFIDENCE:
-            return best_name, best_score
+        # Accept if above absolute threshold, or above the margin floor
+        # with a large enough gap to the runner-up (handles gods with
+        # lower histogram correlation like Ymir's ice palette).
+        self.last_struct_check = None
+        self.last_winner_source = best_source
+        accepted = (
+            best_score >= MIN_CONFIDENCE
+            or (best_score >= MIN_CONFIDENCE_MARGIN
+                and (best_score - second_score) >= MARGIN_GAP)
+        )
+        if not accepted or best_name is None:
+            return None, best_score
 
-        # Accept if above margin floor AND gap to runner-up is large enough
-        # (handles gods with lower histogram correlation like Ymir's ice palette)
-        if (best_score >= MIN_CONFIDENCE_MARGIN
-                and (best_score - second_score) >= MARGIN_GAP):
-            return best_name, best_score
-
-        return None, best_score
+        # Structural veto — the histogram only proved the crop shares
+        # the winner's palette; NCC against the winner's own templates
+        # proves it shares the winner's SHAPE.  Junk crops (lobby UI)
+        # pass the first and fail the second.  See STRUCT_MIN_NCC.
+        gray_flat = (
+            cv2.cvtColor(portrait_cv, cv2.COLOR_BGR2GRAY)
+            .astype(np.float32).ravel()
+        )
+        ncc = self._struct_score(best_name, gray_flat)
+        vetoed = ncc < STRUCT_MIN_NCC
+        self.last_struct_check = (best_name, best_score, ncc, vetoed)
+        if vetoed:
+            return None, best_score
+        return best_name, best_score
 
     def identify_top_n(
         self,
@@ -650,6 +725,55 @@ class GodMatcher:
         )
         cv2.normalize(hist, hist)
         return hist.flatten()
+
+    @classmethod
+    def _compute_struct_template(cls, img_bgr, alpha_mask=None):
+        """Precompute the structural-veto template for one fingerprint:
+        ``(pixel_indices, zero-mean unit-norm grayscale vector)`` over
+        the same masked pixel set as the histogram (circle ∧ alpha).
+
+        Storing the normalized vector per template means the identify-
+        time NCC is a single dot product against the crop's pixels at
+        those indices.  Returns None for degenerate (flat) images —
+        ``_struct_score`` skips those.
+        """
+        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        h, w = gray.shape[:2]
+        mask = cls._get_circular_mask(h, w)
+        if alpha_mask is not None:
+            mask = cv2.bitwise_and(mask, alpha_mask)
+        idx = np.flatnonzero(mask.ravel())
+        if idx.size == 0:
+            return None
+        vals = gray.ravel()[idx]
+        vals = vals - vals.mean()
+        norm = float(np.linalg.norm(vals))
+        if norm < 1e-6:
+            return None
+        return (idx, vals / norm)
+
+    def _struct_score(self, god_name, portrait_gray_flat):
+        """Max grayscale NCC between the portrait crop and ``god_name``'s
+        fingerprint templates.  ``portrait_gray_flat`` is the MATCH_SIZE
+        crop as a flattened float32 grayscale array.  Each template
+        carries its own pixel-index set (alpha-aware), so the crop is
+        re-masked and re-normalized per template for a symmetric
+        comparison.  Returns -1.0 if the god has no usable templates.
+        """
+        best = -1.0
+        for tpl in self._icon_templates.get(god_name, []):
+            if tpl is None:
+                continue
+            idx, tvec = tpl
+            c = portrait_gray_flat[idx]
+            c = c - c.mean()
+            n = float(np.linalg.norm(c))
+            if n < 1e-6:
+                continue
+            s = float(np.dot(c / n, tvec))
+            if s > best:
+                best = s
+        return best
 
     @staticmethod
     def _slug_to_name(slug):

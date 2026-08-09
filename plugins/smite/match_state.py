@@ -152,6 +152,54 @@ class _MatchStateMixin:
         # Update overlay state
         self._update_overlay_state()
 
+    async def correct_god_from_portrait(self, god_name):
+        """
+        Called by the kill detector's re-verification pass when the god
+        it locked onto turns out to be wrong (a misfire that survived
+        into gameplay).  Unlike ``set_god_from_portrait`` this bypasses
+        the ``_god_from_portrait`` latch — that latch exists to stop
+        REPEAT identifications, not corrections.
+
+        Tracker.gg stays authoritative: once the poll loop has confirmed
+        a god (``_poll_state == "FOUND"``), vision corrections are
+        ignored — tracker data came from the actual match record, and a
+        portrait re-read must not fight it.
+        """
+        if self._poll_state == "FOUND":
+            print(
+                f"[Smite] Ignoring portrait correction to {god_name} — "
+                f"tracker.gg already confirmed the god"
+            )
+            return
+
+        current = self.current_god.get("name", "") if self.current_god else ""
+        if self._same_god_name(current, god_name):
+            return
+
+        print(
+            f"[Smite] Portrait re-verify CORRECTED god: "
+            f"{current or '(none)'} → {god_name}"
+        )
+
+        god_slug = god_name.lower().replace(" ", "-").replace("'", "")
+        god_info = {
+            "name": god_name,
+            "slug": god_slug,
+            "imageUrl": f"{SMITE2_GOD_IMAGE_BASE}/{god_slug}.jpg",
+            "team": "unknown",
+            "stats": {"kills": 0, "deaths": 0, "assists": 0,
+                      "gold": 0, "gpm": 0, "damage": 0},
+        }
+        self.current_god = god_info
+        self._god_from_portrait = True
+
+        # Mirror the tracker.gg correction path: re-fire god detected
+        # callbacks so voicelines / godrequest react to the real god.
+        await self._fire_event(self._on_god_detected_callbacks, god_info)
+        await self._set_god_image(god_name, team=None)
+        await self._update_stream_title(god_name)
+        self._update_overlay_state()
+
     # === LIVE-DATA EXTRACTION ===
 
     def _find_my_segment(self, live_data):

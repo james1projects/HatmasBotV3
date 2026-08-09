@@ -157,6 +157,15 @@ async def main():
 
         kd.add_god_identified_listener(_on_god_identified)
 
+        # Hook god re-verification corrections — if the portrait lock-in
+        # was wrong (lobby misfire), the kill detector notices in-game
+        # and fixes the portrait without waiting minutes for tracker.gg.
+        async def _on_god_corrected(god_name):
+            await smite_plugin.correct_god_from_portrait(god_name)
+            vl.set_current_god(god_name)
+
+        kd.add_god_corrected_listener(_on_god_corrected)
+
         # Hook kill detector gameplay-end detection — clears god portrait
         # immediately instead of waiting for tracker.gg API to catch up.
         async def _kd_gameplay_ended():
