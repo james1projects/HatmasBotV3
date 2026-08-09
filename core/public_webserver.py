@@ -81,6 +81,7 @@ GOD_ICONS_DIR = BASE_DIR / "data" / "god_icons"
 CUSTOM_GOD_ICONS_DIR = BASE_DIR / "assets" / "Custom God Icons"
 SUGGESTIONS_FILE = BASE_DIR / "data" / "suggestions.json"
 GODREQ_QUEUE_FILE = BASE_DIR / "data" / "godreq_queue.json"
+GODREQ_HISTORY_FILE = BASE_DIR / "data" / "godreq_history.json"
 EVENTS_FILE = BASE_DIR / "data" / "events.json"
 
 
@@ -191,6 +192,9 @@ class PublicWebServer:
         self._twitch_ws_clients: Dict[str, Set[web.WebSocketResponse]] = {}
         # Per-god WebSocket client sets, keyed on canonical god name.
         self._god_ws_clients: Dict[str, Set[web.WebSocketResponse]] = {}
+        # Unkeyed broadcast bucket for the public /live page — every
+        # client gets every live-match event (no per-viewer filtering).
+        self._live_ws: Set[web.WebSocketResponse] = set()
         self._send_lock = asyncio.Lock()
 
         self._setup_routes()
@@ -341,6 +345,21 @@ class PublicWebServer:
                                 self._handle_api_me_settings)
         self.app.router.add_post("/api/me/visibility",
                                  self._handle_api_me_visibility)
+        # ── viewer profile (/me) + public live-match page (/live) ──
+        # /me resolves the viewer from the SESSION, never from the URL
+        # (unlike /twitch/{username}, which stays public). /live is the
+        # spectator surface: current god, KDA, cosmetic price series.
+        # Both 404 while their feature toggle is off — same
+        # invisibility contract as FindIt.
+        self.app.router.add_get("/me", self._handle_me_page)
+        self.app.router.add_get("/api/me/profile",
+                                self._handle_api_me_profile)
+        self.app.router.add_get("/live", self._handle_live_page)
+        self.app.router.add_get(
+            "/Live",
+            lambda r: web.HTTPMovedPermanently("/live"))
+        self.app.router.add_get("/api/live", self._handle_api_live)
+        self.app.router.add_get("/ws/live", self._handle_live_ws)
         self.app.router.add_post("/api/trade", self._handle_api_trade)
         # Logged-in god nomination into the spin pool — same rules and
         # tables as chat's !nominate (shared 1/day cap per Twitch login).
@@ -2217,6 +2236,15 @@ class PublicWebServer:
                     and getattr(eco, "_db", None) is not None
                     and getattr(eco, "_connected", False))
 
+    def _feature_on(self, name: str) -> bool:
+        """Dashboard feature toggle, resolved through whichever bot
+        reference is available (self.bot, or the economy plugin's in
+        tests). No bot at all = enabled, mirroring _trading_allowed."""
+        bot = self.bot or getattr(self.economy, "bot", None)
+        if bot is not None and hasattr(bot, "is_feature_enabled"):
+            return bool(bot.is_feature_enabled(name))
+        return True
+
     async def _handle_auth_login(self, request: web.Request):
         """GET /auth/login — redirect to Twitch authorize with a
         state nonce bound to a short-lived cookie."""
@@ -2550,6 +2578,412 @@ class PublicWebServer:
             "trading_enabled": self._trading_allowed(),
             "market_open": self._market_open(),
         }, headers=self._NO_STORE)
+
+    # ── /me profile + /live match page ─────────────────────────────
+
+    async def _handle_me_page(self, request: web.Request):
+        """GET /me — the logged-in viewer's own profile page. The page
+        resolves the viewer client-side via /api/me/profile; visitors
+        without a session get the page's login-prompt state."""
+        if not self._feature_on("web_profile"):
+            raise web.HTTPNotFound()
+        return web.FileResponse(PUBLIC_DIR / "profile.html",
+                                headers={"Cache-Control": "no-cache"})
+
+    async def _handle_live_page(self, request: web.Request):
+        """GET /live — public live-match spectator page."""
+        if not self._feature_on("web_live"):
+            raise web.HTTPNotFound()
+        return web.FileResponse(PUBLIC_DIR / "live.html",
+                                headers={"Cache-Control": "no-cache"})
+
+    @staticmethod
+    def _read_json_file(path: Path, default):
+        """Best-effort small-file JSON read (godreq queue/history).
+        Same tolerance as _handle_api_community's queue read."""
+        try:
+            if path.exists():
+                return json.loads(path.read_text(encoding="utf-8"))
+        except Exception as e:
+            print(f"[PublicWebServer] json read failed ({path.name}): {e}")
+        return default
+
+    async def _handle_api_me_profile(self, request: web.Request):
+        """GET /api/me/profile — everything the /me page renders, for
+        the SESSION viewer only. Aggregates holdings, trade history,
+        god requests, pool votes, and priority payments. Read-only;
+        every sub-source is independently fault-tolerant so one
+        missing table never blanks the whole profile."""
+        if not self._feature_on("web_profile"):
+            raise web.HTTPNotFound()
+        ident = self._session_identity(request)
+        if ident is None:
+            return web.json_response({"error": "not_logged_in"},
+                                     status=401, headers=self._NO_STORE)
+        if self._db is None:
+            return web.json_response({"error": "db_unavailable"},
+                                     status=503, headers=self._NO_STORE)
+
+        try:
+            limit = min(200, max(1, int(request.query.get("limit", "50"))))
+        except ValueError:
+            limit = 50
+
+        prov = _ws.provider(ident)
+        if prov == "yt":
+            return await self._me_profile_youtube(ident, limit)
+
+        login = (ident.get("login") or "").lower()
+        if not login:
+            return web.json_response({"error": "no_login"},
+                                     status=403, headers=self._NO_STORE)
+
+        # Holdings — same join as the public portfolio page.
+        holdings: List[Dict[str, Any]] = []
+        try:
+            async with self._db.execute("""
+                SELECT h.god_name, h.shares, h.avg_cost, p.price
+                  FROM portfolios h
+                  LEFT JOIN god_prices p ON p.god_name = h.god_name
+                 WHERE LOWER(h.username) = ? AND h.shares > 0.001
+                 ORDER BY h.god_name
+            """, (login,)) as cur:
+                async for r in cur:
+                    god, shares, avg_cost, price = r
+                    price = (float(price) if price is not None
+                             else float(ECONOMY_STARTING_PRICE))
+                    value = shares * price
+                    cost_basis = shares * avg_cost
+                    pl = value - cost_basis
+                    holdings.append({
+                        "god": god,
+                        "shares": round(float(shares), 4),
+                        "avg_cost": round(float(avg_cost), 2),
+                        "price": round(price, 2),
+                        "value": round(value, 2),
+                        "pl": round(pl, 2),
+                        "pl_pct": round(pl / cost_basis * 100.0, 2)
+                                  if cost_basis > 0 else 0.0,
+                    })
+        except Exception as e:
+            print(f"[PublicWebServer] profile holdings failed: {e}")
+
+        # Full transaction history (paginated by ?limit=, cap 200).
+        transactions: List[Dict[str, Any]] = []
+        try:
+            async with self._db.execute("""
+                SELECT god_name, type, shares, price, total, channel,
+                       timestamp
+                  FROM transactions
+                 WHERE LOWER(username) = ?
+                 ORDER BY timestamp DESC LIMIT ?
+            """, (login, limit)) as cur:
+                async for r in cur:
+                    transactions.append({
+                        "god": r[0], "type": r[1],
+                        "shares": round(float(r[2] or 0), 4),
+                        "price": round(float(r[3] or 0), 2),
+                        "total": round(float(r[4] or 0), 2),
+                        "channel": r[5] or "chat",
+                        "timestamp": r[6],
+                    })
+        except Exception as e:
+            print(f"[PublicWebServer] profile transactions failed: {e}")
+
+        # Lifetime aggregates by transaction type.
+        stats = {"trades": 0, "buys": 0, "sells": 0,
+                 "dividends_earned": 0.0, "free_shares": 0}
+        try:
+            async with self._db.execute("""
+                SELECT type, COUNT(*), COALESCE(SUM(total), 0)
+                  FROM transactions
+                 WHERE LOWER(username) = ? GROUP BY type
+            """, (login,)) as cur:
+                async for ttype, count, total in cur:
+                    if ttype == "buy":
+                        stats["buys"] = count
+                    elif ttype == "sell":
+                        stats["sells"] = count
+                    elif ttype == "dividend":
+                        stats["dividends_earned"] = round(float(total), 2)
+                    elif ttype == "free_share":
+                        stats["free_shares"] = count
+            stats["trades"] = stats["buys"] + stats["sells"]
+        except Exception as e:
+            print(f"[PublicWebServer] profile stats failed: {e}")
+
+        total_value = sum(h["value"] for h in holdings)
+        total_cost = sum(h["shares"] * h["avg_cost"] for h in holdings)
+
+        rank, total_traders = None, None
+        try:
+            rank, total_traders = await self._portfolio_rank(
+                "twitch", login)
+        except Exception as e:
+            print(f"[PublicWebServer] profile rank failed: {e}")
+
+        # Hats balance — live MixItUp read; null when it's down.
+        balance = None
+        eco = self.economy
+        if eco is not None and getattr(eco, "_connected", False):
+            try:
+                balance = await eco._get_balance(login)
+            except Exception as e:
+                print(f"[PublicWebServer] profile balance failed: {e}")
+
+        # God requests: resolved history + still-queued entries.
+        god_requests: List[Dict[str, Any]] = []
+        raw_history = self._read_json_file(GODREQ_HISTORY_FILE, [])
+        if isinstance(raw_history, list):
+            for item in reversed(raw_history):
+                if not isinstance(item, dict):
+                    continue
+                if (item.get("requester") or "").lower() != login:
+                    continue
+                god_requests.append({
+                    "god": item.get("god"),
+                    "status": item.get("status"),
+                    "source": item.get("source"),
+                    "use_aspect": bool(item.get("use_aspect")),
+                    "requested_at": item.get("requested_at"),
+                    "completed_at": item.get("completed_at"),
+                })
+                if len(god_requests) >= 25:
+                    break
+        pending_requests: List[Dict[str, Any]] = []
+        raw_queue = self._read_json_file(GODREQ_QUEUE_FILE, [])
+        if isinstance(raw_queue, list):
+            for idx, item in enumerate(raw_queue):
+                if not isinstance(item, dict):
+                    continue
+                if (item.get("requester") or "").lower() != login:
+                    continue
+                pending_requests.append({
+                    "position": idx + 1,
+                    "god": item.get("god"),
+                    "source": item.get("source"),
+                    "use_aspect": bool(item.get("use_aspect")),
+                })
+
+        # Spin-pool votes (1/day) — table owned by god_pool plugin.
+        pool_votes: List[Dict[str, Any]] = []
+        try:
+            async with self._db.execute("""
+                SELECT god_name, vote_date
+                  FROM god_pool_votes
+                 WHERE LOWER(voter_username) = ?
+                 ORDER BY vote_date DESC LIMIT 30
+            """, (login,)) as cur:
+                async for god, date in cur:
+                    pool_votes.append({"god": god, "date": date})
+        except Exception:
+            pass  # plugin never ran — table absent
+
+        # $5 priority requests — table owned by priority_request.
+        priority_payments: List[Dict[str, Any]] = []
+        try:
+            async with self._db.execute("""
+                SELECT god, amount_cents, currency, status,
+                       created_at, played_at
+                  FROM priority_payments
+                 WHERE LOWER(twitch_username) = ?
+                 ORDER BY created_at DESC LIMIT 20
+            """, (login,)) as cur:
+                async for r in cur:
+                    priority_payments.append({
+                        "god": r[0], "amount_cents": r[1],
+                        "currency": r[2], "status": r[3],
+                        "created_at": r[4], "played_at": r[5],
+                    })
+        except Exception:
+            pass
+
+        return web.json_response({
+            "platform": "twitch",
+            "login": login,
+            "name": ident.get("name"),
+            "img": ident.get("img"),
+            "balance": balance,
+            "market_open": self._market_open(),
+            "holdings": holdings,
+            "total_value": round(total_value, 2),
+            "total_cost": round(total_cost, 2),
+            "total_pl": round(total_value - total_cost, 2),
+            "rank": rank,
+            "total_traders": total_traders,
+            "transactions": transactions,
+            "stats": stats,
+            "god_requests": god_requests,
+            "god_requests_pending": pending_requests,
+            "pool_votes": pool_votes,
+            "priority_payments": priority_payments,
+        }, headers=self._NO_STORE)
+
+    async def _me_profile_youtube(self, ident: dict, limit: int):
+        """YouTube-session profile: holdings + share grants keyed on
+        the channel id. No hats, no requests — those are Twitch-login
+        surfaces (yt sessions carry an empty login by design)."""
+        channel_id = ident.get("uid") or ""
+        holdings: List[Dict[str, Any]] = []
+        try:
+            async with self._db.execute("""
+                SELECT h.god_name, h.shares, h.avg_cost, p.price
+                  FROM youtube_holdings h
+                  LEFT JOIN god_prices p ON p.god_name = h.god_name
+                 WHERE h.yt_channel_id = ? AND h.shares > 0.001
+                 ORDER BY h.god_name
+            """, (channel_id,)) as cur:
+                async for r in cur:
+                    god, shares, avg_cost, price = r
+                    price = (float(price) if price is not None
+                             else float(ECONOMY_STARTING_PRICE))
+                    value = shares * price
+                    cost_basis = shares * (avg_cost or 0)
+                    holdings.append({
+                        "god": god,
+                        "shares": round(float(shares), 4),
+                        "avg_cost": round(float(avg_cost or 0), 2),
+                        "price": round(price, 2),
+                        "value": round(value, 2),
+                        "pl": round(value - cost_basis, 2),
+                        "pl_pct": round((value - cost_basis)
+                                        / cost_basis * 100.0, 2)
+                                  if cost_basis > 0 else 0.0,
+                    })
+        except Exception as e:
+            print(f"[PublicWebServer] yt profile holdings failed: {e}")
+
+        transactions: List[Dict[str, Any]] = []
+        try:
+            async with self._db.execute("""
+                SELECT god_name, type, shares, price, timestamp
+                  FROM youtube_transactions
+                 WHERE yt_channel_id = ?
+                 ORDER BY timestamp DESC LIMIT ?
+            """, (channel_id, limit)) as cur:
+                async for r in cur:
+                    transactions.append({
+                        "god": r[0], "type": r[1],
+                        "shares": round(float(r[2] or 0), 4),
+                        "price": round(float(r[3] or 0), 2),
+                        "total": 0.0, "channel": "youtube",
+                        "timestamp": r[4],
+                    })
+        except Exception as e:
+            print(f"[PublicWebServer] yt profile transactions failed: {e}")
+
+        linked_to = None
+        try:
+            await self._ensure_links_schema()
+            linked_to = await _links.get_link(self._db, channel_id)
+        except Exception:
+            pass
+
+        total_value = sum(h["value"] for h in holdings)
+        total_cost = sum(h["shares"] * h["avg_cost"] for h in holdings)
+        rank, total_traders = None, None
+        try:
+            rank, total_traders = await self._portfolio_rank(
+                "youtube", channel_id)
+        except Exception:
+            pass
+        return web.json_response({
+            "platform": "youtube",
+            "login": None,
+            "name": ident.get("name"),
+            "img": ident.get("img"),
+            "yt_linked_to": linked_to,
+            "balance": None,
+            "market_open": False,
+            "holdings": holdings,
+            "total_value": round(total_value, 2),
+            "total_cost": round(total_cost, 2),
+            "total_pl": round(total_value - total_cost, 2),
+            "rank": rank,
+            "total_traders": total_traders,
+            "transactions": transactions,
+            "stats": {"trades": 0, "buys": 0, "sells": 0,
+                      "dividends_earned": 0.0,
+                      "free_shares": len(transactions)},
+            "god_requests": [],
+            "god_requests_pending": [],
+            "pool_votes": [],
+            "priority_payments": [],
+        }, headers=self._NO_STORE)
+
+    async def _handle_api_live(self, request: web.Request):
+        """GET /api/live — first-paint snapshot for the /live page.
+        Everything after this arrives over /ws/live. All reads are
+        in-process attribute reads (same event loop as the plugins),
+        so this never blocks and never touches the network."""
+        if not self._feature_on("web_live"):
+            raise web.HTTPNotFound()
+
+        stream: Dict[str, Any] = {"is_live": False}
+        if self.stream_status is not None:
+            try:
+                stream = self.stream_status.get_status() or stream
+            except Exception as e:
+                print(f"[PublicWebServer] stream status read failed: {e}")
+
+        eco = self.economy
+        smite = None
+        if self.bot is not None:
+            smite = getattr(self.bot, "plugins", {}).get("smite")
+
+        match_god = getattr(eco, "_match_god", None) if eco else None
+        kda = list(getattr(eco, "_match_kda", None) or [0, 0, 0])
+        series = list(getattr(eco, "_match_price_series", None) or [])
+        start_price = getattr(eco, "_match_start_price", None) if eco else None
+        prices = getattr(eco, "_prices", None) or {}
+
+        started_at = getattr(smite, "match_start_time", None) if smite else None
+        duration_s = int(time.time() - started_at) if started_at else None
+        current_price = prices.get(match_god) if match_god else None
+        if series:
+            current_price = series[-1]
+
+        match = {
+            "active": bool(match_god),
+            "god": match_god,
+            "kda": {"k": kda[0] if len(kda) > 0 else 0,
+                    "d": kda[1] if len(kda) > 1 else 0,
+                    "a": kda[2] if len(kda) > 2 else 0},
+            "duration_s": duration_s,
+            "start_price": start_price,
+            "price": current_price,
+            "series": series,
+        }
+
+        record = {"wins": getattr(smite, "_session_wins", 0) if smite else 0,
+                  "losses": getattr(smite, "_session_losses", 0)
+                            if smite else 0}
+
+        recent: List[Dict[str, Any]] = []
+        if self._db is not None:
+            try:
+                async with self._db.execute("""
+                    SELECT god_name, outcome, kills, deaths, assists,
+                           price_change, COALESCE(played_at, processed_at)
+                      FROM processed_matches
+                     ORDER BY processed_at DESC LIMIT 8
+                """) as cur:
+                    async for r in cur:
+                        recent.append({
+                            "god": r[0], "outcome": r[1],
+                            "kills": r[2], "deaths": r[3], "assists": r[4],
+                            "price_change": round(float(r[5] or 0), 2),
+                            "played_at": r[6],
+                        })
+            except Exception as e:
+                print(f"[PublicWebServer] recent matches read failed: {e}")
+
+        return web.json_response({
+            "stream": stream,
+            "match": match,
+            "record": record,
+            "recent_matches": recent,
+        })
 
     async def _handle_api_me_balance(self, request: web.Request):
         """GET /api/me/balance — current hat balance from MixItUp."""
@@ -3378,12 +3812,58 @@ class PublicWebServer:
                 self._god_ws_clients.pop(canonical, None)
         return ws
 
+    async def _handle_live_ws(self, request: web.Request
+                              ) -> web.WebSocketResponse:
+        """WebSocket for the public /live page. Unkeyed broadcast —
+        every client receives every event in _LIVE_EVENTS."""
+        if not self._feature_on("web_live"):
+            raise web.HTTPNotFound()
+        ws = web.WebSocketResponse(heartbeat=30)
+        await ws.prepare(request)
+        self._live_ws.add(ws)
+        try:
+            async for msg in ws:
+                if msg.type == aiohttp.WSMsgType.ERROR:
+                    break
+                if msg.type == aiohttp.WSMsgType.TEXT and msg.data == "ping":
+                    await ws.send_str("pong")
+        finally:
+            self._live_ws.discard(ws)
+        return ws
+
+    # Events forwarded verbatim to /ws/live clients. Wider than the
+    # portfolio/god filter: the live page needs match lifecycle and the
+    # stream on/offline flips, not just price ticks.
+    _LIVE_EVENTS = frozenset((
+        "god_stock_update", "god_stock_update_kd", "dividend_paid",
+        "economy_god_detected", "economy_visual_end", "match_end_economy",
+        "trade_executed", "stream_live", "stream_offline",
+    ))
+
     async def _on_overlay_event(self, event_name: str, data: Any) -> None:
         """
         Fired by OverlayManager.add_event_listener for EVERY event.
         We forward god_stock_update and dividend_paid to any portfolio
         page that holds the affected god.
         """
+        # Live page first: unkeyed broadcast, no DB dependency, and a
+        # wider event set than the portfolio/god buckets below.
+        if self._live_ws and event_name in self._LIVE_EVENTS:
+            try:
+                live_msg = json.dumps({
+                    "event": event_name,
+                    "data": data if isinstance(data, dict) else {},
+                })
+            except (TypeError, ValueError):
+                live_msg = None
+            if live_msg is not None:
+                async with self._send_lock:
+                    for ws in list(self._live_ws):
+                        try:
+                            await ws.send_str(live_msg)
+                        except Exception:
+                            self._live_ws.discard(ws)
+
         # economy.py emits 'god_stock_update_kd' for kill/death ticks and
         # 'god_stock_update' for assist ticks — listen to both. Plus the
         # dividend event for the bonus-share compounding.

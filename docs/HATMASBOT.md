@@ -1511,6 +1511,8 @@ It backs up the DB first and asks for explicit confirmation.
 - `public/market.html` — the Hatmas Market at `hatmaster.tv/market`: god grid + ticker tape + portfolio search + top traders + recent activity + icon toggle. `/Market` 301-redirects to `/market`.
 - `public/portfolio.html` — per-viewer portfolio (handles both `/yt/` and `/twitch/` routes).
 - `public/god.html` — god detail with stock-style price chart, holder tabs (All/Twitch/YouTube), recent matches, formula breakdown.
+- `public/profile.html` — `/me` (Aug 2026): the logged-in viewer's own profile, resolved from the SESSION (never the URL). Hats balance, holdings + P&L, full trade/dividend history with chat/web channel, god request history + queue positions, spin-pool votes, $5 priority payments. Logged-out visitors get a login prompt. Backed by `GET /api/me/profile`; gated by the `web_profile` feature toggle (off = 404, FindIt invisibility contract). Tests: `tests/test_web_profile_live.py`.
+- `public/live.html` — `/live` (Aug 2026): public live-match spectator page. Stream status, current god + KDA + duration, cosmetic price chart from `match_series`, today's W-L, recent settled matches, live trade feed. First paint from `GET /api/live` (in-process reads of economy/smite/stream_status state), then `/ws/live` — an unkeyed broadcast bucket fed by `_on_overlay_event` with a wider `_LIVE_EVENTS` filter (price ticks + match lifecycle + stream_live/stream_offline + trade_executed). Lifecycle events make the page re-pull the snapshot rather than hand-parse payloads. Gated by `web_live`.
 - All three pages support `?preview=1` to force-show the Twitch embed using sample data.
 - All three pages have an `[ICONS: CUSTOM]` ↔ `[ICONS: OFFICIAL]` toggle in the brand band.
 

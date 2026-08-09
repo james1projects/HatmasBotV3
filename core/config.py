@@ -491,6 +491,8 @@ DEFAULT_FEATURES = {
     "economy": True,
     "youtube_rewards": True,
     "web_trading": True,   # dashboard kill-switch; WEB_TRADING_ENABLED still gates
+    "web_profile": True,   # off = hatmaster.tv/me 404s (invisibility contract)
+    "web_live": True,      # off = hatmaster.tv/live 404s + /ws/live refuses
     "streamloots": True,   # gates event dispatch; connection stays up
     "factorio": True,      # gates card handling + chat announcements
     "spacegame": False,    # off = commands silent + hidden from /mod, game page 404s

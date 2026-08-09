@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#202C39">
+<title>Live — Hatmaster.tv</title>
+<meta name="description" content="Live match view: current god, KDA, and market ticks while Hatmaster streams.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Hatmas Market">
+<meta property="og:url" content="https://hatmaster.tv/live">
+<meta property="og:title" content="Live — Hatmaster.tv">
+<meta property="og:description" content="Live match view: current god, KDA, and market ticks while Hatmaster streams.">
+<meta property="og:image" content="https://hatmaster.tv/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="stylesheet" href="/theme.css">
+<style>
+  .wrap { max-width: 760px; margin: 0 auto; padding: 16px 14px 80px; }
+
+  .brand-band {
+    display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 1px solid var(--border);
+    padding: 8px 0 12px; margin-bottom: 16px;
+    font-family: var(--font-sans); font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim);
+  }
+  .brand-band a.left { color: var(--accent); font-weight: 700; }
+  .brand-band .status .dot {
+    display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--text-fade); margin-right: 6px; vertical-align: middle;
+  }
+  .brand-band .status .dot.connected { background: var(--green); }
+  .brand-band .status .dot.disconnected { background: var(--red); }
+
+  .stream-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .live-pill {
+    font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+    letter-spacing: 0.1em; padding: 4px 10px; border-radius: var(--radius-sm);
+    background: var(--red-bg); color: var(--red);
+  }
+  .live-pill.off { background: var(--bg-2); color: var(--text-dim); }
+  .stream-title { font-size: 14px; color: var(--text-dim); flex: 1; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .viewers { font-family: var(--font-mono); font-size: 12px; color: var(--text-dim); }
+
+  .match-card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px; margin-bottom: 14px;
+    display: none;
+  }
+  .match-top { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
+  .god-icon {
+    width: 56px; height: 56px; border-radius: var(--radius);
+    border: 1px solid var(--border-hi); object-fit: cover; background: var(--bg-2);
+  }
+  .god-name {
+    font-family: var(--font-display); font-size: 34px; font-weight: 400;
+    letter-spacing: 0.02em; line-height: 1;
+  }
+  .god-name a { color: var(--text); text-decoration: none; }
+  .match-meta { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); }
+  .price-pill {
+    margin-left: auto; text-align: right; font-family: var(--font-mono);
+  }
+  .price-pill .p { font-size: 24px; }
+  .price-pill .c { font-size: 12px; }
+  .price-pill .c.pos { color: var(--green); }
+  .price-pill .c.neg { color: var(--red); }
+  .flash { animation: flash 0.6s; }
+  @keyframes flash { 0% { color: var(--tick-flash); } 100% { color: inherit; } }
+
+  .kda-row {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+    margin-bottom: 12px;
+  }
+  .kda-cell {
+    background: var(--bg-2); border-radius: var(--radius); padding: 8px 0;
+    text-align: center;
+  }
+  .kda-cell .n { font-family: var(--font-mono); font-size: 28px; }
+  .kda-cell .l {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--text-dim);
+  }
+  #chart { width: 100%; height: 140px; display: block; }
+
+  .offline-card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 26px 16px; margin-bottom: 14px;
+    text-align: center; color: var(--text-dim); font-size: 14px;
+    display: none;
+  }
+  .offline-card a { color: var(--accent); }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 12px 14px; margin-bottom: 14px;
+  }
+  .section-title {
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 10px;
+  }
+  .record { font-family: var(--font-mono); font-size: 13px; }
+  .record .w { color: var(--green); }
+  .record .l { color: var(--red); }
+
+  .row {
+    display: flex; align-items: baseline; gap: 10px;
+    padding: 7px 0; border-top: 1px solid var(--border); font-size: 13px;
+  }
+  .row:first-of-type { border-top: none; }
+  .row .god { font-weight: 600; min-width: 110px; }
+  .row .mono { font-family: var(--font-mono); font-size: 12px; }
+  .row .grow { flex: 1; }
+  .row .dim { color: var(--text-dim); }
+  .outcome {
+    font-family: var(--font-mono); font-size: 10px; text-transform: uppercase;
+    border-radius: var(--radius-sm); padding: 2px 6px; min-width: 40px;
+    text-align: center;
+  }
+  .outcome.win { background: var(--green-bg); color: var(--green); }
+  .outcome.loss { background: var(--red-bg); color: var(--red); }
+  .pos { color: var(--green); }
+  .neg { color: var(--red); }
+  .empty { color: var(--text-fade); font-size: 13px; padding: 6px 0; }
+  #feed .row { animation: fadein 0.4s; }
+  @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+</style>
+</head>
+<body>
+  <a class="skip-link" href="#maincontent">Skip to content</a>
+  <div class="wrap" id="maincontent" role="main" tabindex="-1">
+    <div class="brand-band" role="banner">
+      <a class="left" href="/"><img class="brand-hat" src="/hat.png" alt="">HATMASTER.TV</a>
+      <div class="right-cluster">
+        <span class="status"><span class="dot" id="ws-dot"></span><span id="ws-label">connecting</span></span>
+        <a href="/market" class="icon-toggle" style="text-decoration: none;"
+           title="All god prices + the full market">Market</a>
+        <a href="/me" class="icon-toggle" style="text-decoration: none;"
+           title="Your profile">Profile</a>
+      </div>
+    </div>
+
+    <div class="stream-head">
+      <span class="live-pill off" id="live-pill">OFFLINE</span>
+      <span class="stream-title" id="stream-title"></span>
+      <span class="viewers" id="viewers"></span>
+    </div>
+
+    <div class="match-card" id="match-card">
+      <div class="match-top">
+        <img class="god-icon" id="god-icon" src="/hat.png" alt="">
+        <div>
+          <div class="god-name"><a id="god-link" href="#"><span id="god-name"></span></a></div>
+          <div class="match-meta" id="match-meta"></div>
+        </div>
+        <div class="price-pill">
+          <div class="p" id="price">--</div>
+          <div class="c" id="price-change"></div>
+        </div>
+      </div>
+      <div class="kda-row">
+        <div class="kda-cell"><div class="n" id="k">0</div><div class="l">Kills</div></div>
+        <div class="kda-cell"><div class="n" id="d">0</div><div class="l">Deaths</div></div>
+        <div class="kda-cell"><div class="n" id="a">0</div><div class="l">Assists</div></div>
+      </div>
+      <canvas id="chart" width="720" height="140"></canvas>
+    </div>
+
+    <div class="offline-card" id="offline-card">
+      Not in a match right now.
+      <span id="offline-extra"></span>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Today's record</div>
+      <div class="record" id="record">--</div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Recent matches</div>
+      <div id="recent"></div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">Live trade feed</div>
+      <div id="feed"><div class="empty">Trades appear here as they happen.</div></div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const fmt = (n) => Number(n).toLocaleString(undefined,
+    {maximumFractionDigits: 0});
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"]/g,
+      (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+  }
+  function slug(name) {
+    return String(name).toLowerCase().replace(/\s+/g, "-").replace(/'/g, "");
+  }
+  function flash(el) {
+    el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
+  }
+
+  let series = [];
+  let startPrice = null;
+  let matchStartedAt = null;   // epoch seconds
+  let durationTimer = null;
+
+  function drawChart() {
+    const cv = $("chart"), ctx = cv.getContext("2d");
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    if (series.length < 2) return;
+    const lo = Math.min(...series), hi = Math.max(...series);
+    const pad = 8, span = (hi - lo) || 1;
+    const x = (i) => pad + (cv.width - 2 * pad) * i / (series.length - 1);
+    const y = (v) => cv.height - pad - (cv.height - 2 * pad) * (v - lo) / span;
+    if (startPrice != null && startPrice >= lo && startPrice <= hi) {
+      ctx.strokeStyle = "rgba(159,180,187,0.25)";
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(pad, y(startPrice)); ctx.lineTo(cv.width - pad, y(startPrice));
+      ctx.stroke(); ctx.setLineDash([]);
+    }
+    const up = series[series.length - 1] >= series[0];
+    ctx.strokeStyle = up ? "#DFA06E" : "#FF6B73";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    series.forEach((v, i) => i ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v)));
+    ctx.stroke();
+  }
+
+  function setKda(k, d, a) {
+    const cur = {k: $("k"), d: $("d"), a: $("a")};
+    if (String(k) !== cur.k.textContent) flash(cur.k);
+    if (String(d) !== cur.d.textContent) flash(cur.d);
+    if (String(a) !== cur.a.textContent) flash(cur.a);
+    cur.k.textContent = k; cur.d.textContent = d; cur.a.textContent = a;
+  }
+
+  function setPrice(price) {
+    if (price == null) return;
+    $("price").textContent = fmt(price);
+    flash($("price"));
+    if (startPrice) {
+      const pct = (price - startPrice) / startPrice * 100;
+      const el = $("price-change");
+      el.textContent = (pct >= 0 ? "+" : "") + pct.toFixed(1) + "%";
+      el.className = "c " + (pct >= 0 ? "pos" : "neg");
+    }
+  }
+
+  function tickDuration() {
+    if (!matchStartedAt) { $("match-meta").textContent = ""; return; }
+    const s = Math.max(0, Math.floor(Date.now() / 1000 - matchStartedAt));
+    $("match-meta").textContent =
+      Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0") + " in match";
+  }
+
+  function renderMatch(m) {
+    if (!m || !m.active || !m.god) {
+      $("match-card").style.display = "none";
+      $("offline-card").style.display = "block";
+      matchStartedAt = null;
+      return;
+    }
+    $("offline-card").style.display = "none";
+    $("match-card").style.display = "block";
+    $("god-name").textContent = m.god;
+    $("god-link").href = "/god/" + encodeURIComponent(m.god);
+    const icon = $("god-icon");
+    icon.src = "/custom-god-icon/" + encodeURIComponent(slug(m.god));
+    icon.onerror = () => {
+      icon.onerror = null;
+      icon.src = "/god-icon/" + encodeURIComponent(slug(m.god));
+    };
+    setKda(m.kda.k, m.kda.d, m.kda.a);
+    series = (m.series || []).slice();
+    startPrice = m.start_price;
+    setPrice(m.price != null ? m.price : startPrice);
+    matchStartedAt = m.duration_s != null
+      ? Date.now() / 1000 - m.duration_s : null;
+    tickDuration();
+    drawChart();
+  }
+
+  function renderSnapshot(snap) {
+    const s = snap.stream || {};
+    const pill = $("live-pill");
+    pill.textContent = s.is_live ? "LIVE" : "OFFLINE";
+    pill.className = "live-pill" + (s.is_live ? "" : " off");
+    $("stream-title").textContent = s.title || "";
+    $("viewers").textContent =
+      s.is_live && s.viewer_count != null ? fmt(s.viewer_count) + " watching" : "";
+    if (!s.is_live) {
+      $("offline-extra").innerHTML =
+        ' Catch the VODs on <a href="https://youtube.com/@Hatmaster2">YouTube</a>' +
+        ' or browse the <a href="/market">market</a>.';
+    } else {
+      $("offline-extra").textContent = "";
+    }
+
+    renderMatch(snap.match);
+
+    const r = snap.record || {};
+    $("record").innerHTML =
+      '<span class="w">' + (r.wins || 0) + "W</span> — " +
+      '<span class="l">' + (r.losses || 0) + "L</span>";
+
+    const box = $("recent");
+    box.innerHTML = "";
+    const rm = snap.recent_matches || [];
+    if (!rm.length) {
+      box.innerHTML = '<div class="empty">No matches settled yet.</div>';
+    }
+    for (const m of rm) {
+      const div = document.createElement("div");
+      div.className = "row";
+      const pc = m.price_change || 0;
+      div.innerHTML =
+        '<span class="outcome ' + esc(m.outcome) + '">' + esc(m.outcome) +
+        "</span>" +
+        '<span class="god">' + esc(m.god) + "</span>" +
+        '<span class="mono dim">' + m.kills + "/" + m.deaths + "/" +
+        m.assists + "</span>" +
+        '<span class="grow"></span>' +
+        '<span class="mono ' + (pc >= 0 ? "pos" : "neg") + '">' +
+        (pc >= 0 ? "+" : "") + pc + "</span>";
+      box.appendChild(div);
+    }
+  }
+
+  function feedEntry(html) {
+    const feed = $("feed");
+    const first = feed.firstElementChild;
+    if (first && first.classList.contains("empty")) first.remove();
+    const div = document.createElement("div");
+    div.className = "row";
+    div.innerHTML = html;
+    feed.prepend(div);
+    while (feed.children.length > 20) feed.lastElementChild.remove();
+  }
+
+  function refresh() {
+    return fetch("/api/live").then((r) => r.json()).then(renderSnapshot)
+      .catch(() => {});
+  }
+
+  function handleEvent(name, data) {
+    if (name === "god_stock_update" || name === "god_stock_update_kd") {
+      if ($("match-card").style.display === "none") { refresh(); return; }
+      if (data.kda) setKda(data.kda.k, data.kda.d, data.kda.a);
+      if (data.price != null) {
+        series.push(data.price);
+        if (series.length > 200) series.shift();
+        setPrice(data.price);
+        drawChart();
+      }
+    } else if (name === "trade_executed") {
+      feedEntry(
+        '<span class="type-pill mono ' + esc(data.type) + '" style="font-size:10px;text-transform:uppercase;">' +
+        esc(data.type) + "</span>" +
+        '<span class="god">' + esc(data.username) + "</span>" +
+        '<span class="mono dim">' + esc(data.god) + " · " +
+        fmt(data.shares || 0) + " sh</span>" +
+        '<span class="grow"></span>' +
+        '<span class="mono">' + fmt(data.total || 0) + "</span>");
+    } else if (name === "dividend_paid") {
+      feedEntry(
+        '<span class="mono" style="color:var(--accent);font-size:10px;">DIVIDEND</span>' +
+        '<span class="god">' + esc(data.god_name || data.god) + "</span>" +
+        '<span class="grow"></span>' +
+        '<span class="mono">' + fmt(data.total_hats || 0) + " hats</span>");
+    } else {
+      // match lifecycle / stream flips — re-pull the snapshot rather
+      // than hand-parsing every payload shape
+      refresh();
+    }
+  }
+
+  let ws = null, retryMs = 1000;
+  function connect() {
+    const proto = location.protocol === "https:" ? "wss://" : "ws://";
+    ws = new WebSocket(proto + location.host + "/ws/live");
+    ws.onopen = () => {
+      retryMs = 1000;
+      $("ws-dot").className = "dot connected";
+      $("ws-label").textContent = "live";
+    };
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.event) handleEvent(msg.event, msg.data || {});
+      } catch (_) {}
+    };
+    ws.onclose = () => {
+      $("ws-dot").className = "dot disconnected";
+      $("ws-label").textContent = "reconnecting";
+      setTimeout(connect, retryMs);
+      retryMs = Math.min(30000, retryMs * 1.6);
+    };
+    ws.onerror = () => { try { ws.close(); } catch (_) {} };
+  }
+
+  refresh().then(connect);
+  setInterval(tickDuration, 1000);
+  setInterval(refresh, 60000);   // safety net if a lifecycle event is missed
+})();
+</script>
+<script src="/auth.js"></script>
+</body>
+</html>

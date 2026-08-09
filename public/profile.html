@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#202C39">
+<meta name="robots" content="noindex">
+<title>Your profile — Hatmas Market</title>
+<meta name="description" content="Your holdings, trades, and god requests on hatmaster.tv.">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="stylesheet" href="/theme.css">
+<style>
+  .wrap { max-width: 760px; margin: 0 auto; padding: 16px 14px 80px; }
+
+  .brand-band {
+    display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 1px solid var(--border);
+    padding: 8px 0 12px; margin-bottom: 16px;
+    font-family: var(--font-sans); font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim);
+  }
+  .brand-band a.left { color: var(--accent); font-weight: 700; }
+
+  header { margin-bottom: 14px; }
+  header .kicker { display: block; margin-bottom: 10px; }
+  .id-row { display: flex; align-items: center; gap: 12px; }
+  .id-row img {
+    width: 44px; height: 44px; border-radius: 50%;
+    border: 1px solid var(--border);
+  }
+  h1.name {
+    font-family: var(--font-display); font-size: 34px; font-weight: 400;
+    letter-spacing: 0.02em; margin: 0; color: var(--text);
+  }
+  .plat-pill {
+    font-family: var(--font-mono); font-size: 10px; color: var(--text-dim);
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 2px 6px; text-transform: uppercase;
+  }
+
+  .stat-strip {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 8px; margin-bottom: 16px;
+  }
+  .stat {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 10px 12px;
+  }
+  .stat .lbl {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text-dim); margin-bottom: 4px;
+  }
+  .stat .val { font-family: var(--font-mono); font-size: 20px; }
+  .stat .val.pos { color: var(--green); }
+  .stat .val.neg { color: var(--red); }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 12px 14px; margin-bottom: 14px;
+  }
+  .section-title {
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 10px;
+  }
+
+  .row {
+    display: flex; align-items: baseline; gap: 10px;
+    padding: 7px 0; border-top: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .row:first-of-type { border-top: none; }
+  .row .god { font-weight: 600; min-width: 110px; }
+  .row .mono { font-family: var(--font-mono); font-size: 12px; }
+  .row .grow { flex: 1; }
+  .row .dim { color: var(--text-dim); }
+  .row .pos { color: var(--green); }
+  .row .neg { color: var(--red); }
+
+  .type-pill {
+    font-family: var(--font-mono); font-size: 10px; text-transform: uppercase;
+    border-radius: var(--radius-sm); padding: 2px 6px; min-width: 52px;
+    text-align: center;
+  }
+  .type-pill.buy { background: var(--green-bg); color: var(--green); }
+  .type-pill.sell { background: var(--red-bg); color: var(--red); }
+  .type-pill.dividend, .type-pill.free_share {
+    background: var(--bg-2); color: var(--text-dim);
+  }
+  .status-pill {
+    font-family: var(--font-mono); font-size: 10px; text-transform: uppercase;
+    border-radius: var(--radius-sm); padding: 2px 6px;
+  }
+  .status-pill.played { background: var(--green-bg); color: var(--green); }
+  .status-pill.skipped, .status-pill.removed,
+  .status-pill.refunded { background: var(--red-bg); color: var(--red); }
+  .status-pill.pending, .status-pill.paid, .status-pill.fulfilled {
+    background: var(--bg-2); color: var(--text-dim);
+  }
+
+  .empty { color: var(--text-fade); font-size: 13px; padding: 6px 0; }
+
+  #login-state { text-align: center; padding: 60px 0; display: none; }
+  #login-state p { color: var(--text-dim); margin-bottom: 18px; }
+  .login-btn {
+    display: inline-block; background: var(--accent); color: var(--bg);
+    font-weight: 700; font-size: 14px; padding: 10px 22px;
+    border-radius: var(--radius); text-decoration: none;
+  }
+  .login-btn:hover { background: var(--accent-hi); }
+  #content { display: none; }
+  #loading { color: var(--text-fade); padding: 40px 0; text-align: center; }
+</style>
+</head>
+<body>
+  <a class="skip-link" href="#maincontent">Skip to content</a>
+  <div class="wrap" id="maincontent" role="main" tabindex="-1">
+    <div class="brand-band" role="banner">
+      <a class="left" href="/"><img class="brand-hat" src="/hat.png" alt="">HATMASTER.TV</a>
+      <div class="right-cluster">
+        <a href="/market" class="icon-toggle" style="text-decoration: none;"
+           title="All god prices + the full market">Market</a>
+        <a href="/live" class="icon-toggle" style="text-decoration: none;"
+           title="Live match view">Live</a>
+      </div>
+    </div>
+
+    <div id="loading">Loading your profile…</div>
+
+    <div id="login-state">
+      <p>Log in with Twitch to see your holdings, trades, and god requests.</p>
+      <a class="login-btn" href="/auth/login">Log in with Twitch</a>
+    </div>
+
+    <div id="content">
+      <header>
+        <span class="kicker">Your profile</span>
+        <div class="id-row">
+          <img id="avatar" src="/hat.png" alt="">
+          <h1 class="name" id="display-name"></h1>
+          <span class="plat-pill" id="plat-pill"></span>
+        </div>
+      </header>
+
+      <div class="stat-strip">
+        <div class="stat"><div class="lbl">Hats balance</div>
+          <div class="val" id="s-balance">--</div></div>
+        <div class="stat"><div class="lbl">Portfolio value</div>
+          <div class="val" id="s-value">--</div></div>
+        <div class="stat"><div class="lbl">Total P&amp;L</div>
+          <div class="val" id="s-pl">--</div></div>
+        <div class="stat"><div class="lbl">Rank</div>
+          <div class="val" id="s-rank">--</div></div>
+      </div>
+
+      <div class="card" id="holdings-card">
+        <div class="section-title">Holdings</div>
+        <div id="holdings"></div>
+      </div>
+
+      <div class="card" id="tx-card">
+        <div class="section-title">Activity
+          <span class="mono" id="tx-stats"
+                style="float:right; font-size:10px; color:var(--text-fade); text-transform:none;"></span>
+        </div>
+        <div id="transactions"></div>
+      </div>
+
+      <div class="card" id="req-card">
+        <div class="section-title">God requests</div>
+        <div id="requests"></div>
+      </div>
+
+      <div class="card" id="votes-card">
+        <div class="section-title">Spin-pool votes</div>
+        <div id="votes"></div>
+      </div>
+
+      <div class="card" id="pay-card">
+        <div class="section-title">Priority requests</div>
+        <div id="payments"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const fmt = (n) => Number(n).toLocaleString(undefined,
+    {maximumFractionDigits: 0});
+  const fmtShares = (n) => Number(n).toLocaleString(undefined,
+    {maximumFractionDigits: 2});
+  const when = (ts) => {
+    if (!ts) return "";
+    const d = new Date(ts);
+    return isNaN(d) ? "" : d.toLocaleDateString(undefined,
+      {month: "short", day: "numeric"});
+  };
+
+  function rowEl(html) {
+    const div = document.createElement("div");
+    div.className = "row";
+    div.innerHTML = html;
+    return div;
+  }
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"]/g,
+      (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+  }
+  function fillOrEmpty(el, items, render, emptyText) {
+    el.innerHTML = "";
+    if (!items || !items.length) {
+      el.innerHTML = '<div class="empty">' + emptyText + "</div>";
+      return;
+    }
+    for (const it of items) el.appendChild(render(it));
+  }
+
+  function render(p) {
+    $("loading").style.display = "none";
+    $("content").style.display = "block";
+
+    $("display-name").textContent = p.name || p.login || "you";
+    if (p.img) $("avatar").src = p.img;
+    $("plat-pill").textContent = p.platform === "youtube"
+      ? (p.yt_linked_to ? "youtube → " + p.yt_linked_to : "youtube")
+      : "twitch";
+
+    $("s-balance").textContent = p.balance == null ? "--" : fmt(p.balance);
+    $("s-value").textContent = fmt(p.total_value);
+    const pl = $("s-pl");
+    pl.textContent = (p.total_pl >= 0 ? "+" : "") + fmt(p.total_pl);
+    pl.classList.add(p.total_pl >= 0 ? "pos" : "neg");
+    $("s-rank").textContent = p.rank
+      ? "#" + p.rank + " / " + p.total_traders : "--";
+
+    fillOrEmpty($("holdings"), p.holdings, (h) => rowEl(
+      '<span class="god"><a href="/god/' + encodeURIComponent(h.god) +
+      '" style="color:inherit">' + esc(h.god) + "</a></span>" +
+      '<span class="mono">' + fmtShares(h.shares) + " sh</span>" +
+      '<span class="mono dim">@ ' + fmt(h.price) + "</span>" +
+      '<span class="grow"></span>' +
+      '<span class="mono">' + fmt(h.value) + "</span>" +
+      '<span class="mono ' + (h.pl >= 0 ? "pos" : "neg") + '">' +
+      (h.pl >= 0 ? "+" : "") + fmt(h.pl) + " (" + h.pl_pct + "%)</span>"
+    ), "No shares yet — buy your first god on the market page.");
+
+    const st = p.stats || {};
+    $("tx-stats").textContent = (st.trades || 0) + " trades · " +
+      fmt(st.dividends_earned || 0) + " hats in dividends" +
+      (st.free_shares ? " · " + st.free_shares + " free shares" : "");
+    fillOrEmpty($("transactions"), p.transactions, (t) => rowEl(
+      '<span class="type-pill ' + esc(t.type) + '">' +
+      esc(t.type.replace("_", " ")) + "</span>" +
+      '<span class="god">' + esc(t.god) + "</span>" +
+      '<span class="mono dim">' + fmtShares(t.shares) + " sh @ " +
+      fmt(t.price) + "</span>" +
+      '<span class="grow"></span>' +
+      '<span class="mono">' + fmt(t.total) + "</span>" +
+      '<span class="mono dim">' + when(t.timestamp) + "</span>"
+    ), "No activity yet.");
+
+    const reqs = (p.god_requests_pending || []).map((r) => rowEl(
+      '<span class="status-pill pending">queue #' + r.position + "</span>" +
+      '<span class="god">' + esc(r.god) + "</span>" +
+      (r.use_aspect
+        ? '<span class="mono dim">aspect</span>' : "") +
+      '<span class="grow"></span>' +
+      '<span class="mono dim">' + esc(r.source || "") + "</span>"
+    )).concat((p.god_requests || []).map((r) => rowEl(
+      '<span class="status-pill ' + esc(r.status) + '">' +
+      esc(r.status) + "</span>" +
+      '<span class="god">' + esc(r.god) + "</span>" +
+      (r.use_aspect
+        ? '<span class="mono dim">aspect</span>' : "") +
+      '<span class="grow"></span>' +
+      '<span class="mono dim">' + when(r.completed_at || r.requested_at) +
+      "</span>"
+    )));
+    const reqBox = $("requests");
+    reqBox.innerHTML = "";
+    if (!reqs.length) {
+      reqBox.innerHTML =
+        '<div class="empty">No god requests yet — spend a God Token in chat with !godrequest.</div>';
+    } else {
+      for (const el of reqs) reqBox.appendChild(el);
+    }
+
+    fillOrEmpty($("votes"), p.pool_votes, (v) => rowEl(
+      '<span class="god">' + esc(v.god) + "</span>" +
+      '<span class="grow"></span>' +
+      '<span class="mono dim">' + esc(v.date) + "</span>"
+    ), "No spin-pool votes yet — nominate a god on the community page.");
+
+    fillOrEmpty($("payments"), p.priority_payments, (x) => rowEl(
+      '<span class="status-pill ' + esc(x.status) + '">' +
+      esc(x.status) + "</span>" +
+      '<span class="god">' + esc(x.god) + "</span>" +
+      '<span class="mono dim">' +
+      (x.amount_cents != null
+        ? "$" + (x.amount_cents / 100).toFixed(2) : "") + "</span>" +
+      '<span class="grow"></span>' +
+      '<span class="mono dim">' + when(x.played_at || x.created_at) +
+      "</span>"
+    ), "No priority requests yet.");
+  }
+
+  fetch("/api/me/profile")
+    .then((res) => {
+      if (res.status === 401) {
+        $("loading").style.display = "none";
+        $("login-state").style.display = "block";
+        return null;
+      }
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return res.json();
+    })
+    .then((p) => { if (p) render(p); })
+    .catch(() => {
+      $("loading").textContent =
+        "Could not load your profile — try refreshing.";
+    });
+})();
+</script>
+<script src="/auth.js"></script>
+</body>
+</html>
