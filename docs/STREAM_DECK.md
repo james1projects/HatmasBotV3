@@ -27,7 +27,7 @@ Rows are stream phases, colored by the icon's top bar:
 
 | Key | Button | Action type | Path / setting | Icon |
 |-----|--------|-------------|----------------|------|
-| 1,1 | CHECK READY | System: Open | `C:\Projects\HatmasBot\streamdeck\check_stream.bat` | `check_ready.png` |
+| 1,1 | CHECK READY | System: Open | `C:\Projects\HatmasBot\streamdeck\readiness_ui.bat` | `check_ready.png` |
 | 1,2 | BOT RESTART | System: Open | `C:\Projects\HatmasBot\streamdeck\restart_bot.bat` | `bot_restart.png` |
 | 1,3 | DASHBOARD | System: Website | `http://localhost:8069/` | `dashboard.png` |
 | 1,4 | OBS + MIXITUP | Multi Action | copy from the Plus "Streaming" profile (Advanced Launcher x2) | `launch_stack.png` |
@@ -44,6 +44,13 @@ Rows are stream phases, colored by the icon's top bar:
 
 BOT STOP sits alone in the far corner on purpose — it should never be
 pressed by muscle memory.
+
+CHECK READY opens the readiness panel (tools/readiness_ui.py) — a
+standalone app window that runs every probe and puts a fix button next
+to each non-green row (Start bot, Launch OBS / MixItUp / SMITE 2,
+Restart cloudflared, Re-auth tokens, Open recordings). It runs its own
+server so it works when the bot is down. `streamdeck\check_stream.bat`
+is the same set of probes as a plain console report if you ever want it.
 
 `streamdeck\build_thumbnail.bat` (the older prompt-driven thumbnail
 builder) is still there if you prefer it over the studio; swap the
