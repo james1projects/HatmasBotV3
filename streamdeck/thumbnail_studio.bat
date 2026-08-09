@@ -17,7 +17,7 @@ REM CLI flags pass straight through (e.g. --port 9000, --no-open).
 REM ============================================================
 
 setlocal
-pushd "%~dp0"
+pushd "%~dp0.."
 
 echo.
 echo ====================================

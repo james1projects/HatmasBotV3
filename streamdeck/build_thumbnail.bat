@@ -21,7 +21,7 @@ REM   fields like result/kda just don't show on the thumbnail)
 REM ============================================================
 
 setlocal enabledelayedexpansion
-pushd "%~dp0"
+pushd "%~dp0.."
 
 echo.
 echo ====================================

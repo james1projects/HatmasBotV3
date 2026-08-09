@@ -11,7 +11,7 @@ REM  After launch: Multiplayer -> Host saved game -> pick your
 REM  streaming save. RCON goes live when the multiplayer game
 REM  starts hosting, NOT in single player.
 REM ============================================================
-pushd "%~dp0"
+pushd "%~dp0.."
 
 REM -- password from config (single source of truth) --
 for /f "delims=" %%p in ('python -c "import sys; sys.path.insert(0, '.'); from core import config; print(config.FACTORIO_RCON_PASSWORD)"') do set RCONPW=%%p

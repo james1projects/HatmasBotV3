@@ -14,7 +14,7 @@ REM Pair with go_offline.bat at end of stream to revert.
 REM ============================================================
 
 setlocal
-pushd "%~dp0"
+pushd "%~dp0.."
 
 echo.
 echo ============================

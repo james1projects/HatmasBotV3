@@ -11,7 +11,7 @@ REM just prints "nothing to revert" and exits cleanly.
 REM ============================================================
 
 setlocal
-pushd "%~dp0"
+pushd "%~dp0.."
 
 echo.
 echo =============================

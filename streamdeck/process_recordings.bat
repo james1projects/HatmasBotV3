@@ -17,10 +17,10 @@ REM Output is captured to data\process_recordings.log so you can review
 REM what happened after the fact even if the console window flashed past.
 REM ============================================================================
 
-REM Always operate from the script's own folder (the HatmasBot repo root),
-REM regardless of where Stream Deck launches us from.  %~dp0 expands to
-REM the directory this .bat lives in, with a trailing backslash.
-pushd "%~dp0"
+REM Always operate from the HatmasBot repo root (one level above this
+REM .bat's streamdeck\ folder), regardless of where Stream Deck
+REM launches us from.
+pushd "%~dp0.."
 
 REM Make sure the log directory exists (data\ already does in a real
 REM install, but this keeps a fresh clone happy too).

@@ -22,7 +22,7 @@ REM Exit codes: 0 = sent (or list shown), 1 = something failed.
 REM ============================================================
 
 setlocal
-pushd "%~dp0"
+pushd "%~dp0.."
 
 python tools\discord_test.py %*
 set "RC=%ERRORLEVEL%"

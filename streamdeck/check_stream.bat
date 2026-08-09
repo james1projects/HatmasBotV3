@@ -18,7 +18,7 @@ REM   2 = readiness checker itself errored (rare)
 REM ============================================================
 
 setlocal
-pushd "%~dp0"
+pushd "%~dp0.."
 
 echo.
 echo ====================================
