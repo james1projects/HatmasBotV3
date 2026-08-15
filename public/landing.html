@@ -55,11 +55,26 @@
     vertical-align: middle;
   }
 
-  /* ─── hero ───────────────────────────────────────────────────── */
+  /* ─── hero: billboard (copy left, latest upload right) ───────── */
   .hero {
-    text-align: center;
-    padding: 32px 0 18px;
+    display: grid;
+    grid-template-columns: minmax(0, 1.02fr) minmax(0, 0.98fr);
+    gap: 40px;
+    align-items: center;
+    padding: 40px 0 28px;
+    position: relative;
   }
+  /* Soft bronze light behind the feature slot — palette-only depth,
+     kept inside the column so it can't cause sideways scroll. */
+  .hero::before {
+    content: '';
+    position: absolute;
+    inset: -30px -10px;
+    background: radial-gradient(560px 280px at 72% 34%,
+                rgba(223, 160, 110, 0.07), transparent 70%);
+    pointer-events: none;
+  }
+  .hero-copy { position: relative; min-width: 0; }
   .hero .kicker {
     font-family: var(--font-sans);
     font-size: 11px;
@@ -72,7 +87,7 @@
   .hero-title {
     margin: 0;
     font-family: var(--font-display);
-    font-size: 84px;
+    font-size: 76px;
     line-height: 0.88;
     letter-spacing: 0.015em;
     font-weight: 400;
@@ -82,26 +97,125 @@
     color: var(--accent);
     text-shadow: 0 0 32px rgba(223, 160, 110, 0.35);
   }
-  @media (max-width: 560px) {
-    .hero-title { font-size: 58px; }
-  }
   .hero-tagline {
-    margin: 16px auto 0;
+    margin: 16px 0 0;
     color: var(--text);
-    font-size: 16px;
+    font-size: 15.5px;
     line-height: 1.55;
-    max-width: 620px;
+    max-width: 460px;
     font-weight: 400;
+  }
+  /* Feature slot fetch failed → single centered column, like before */
+  .hero.no-feature { grid-template-columns: minmax(0, 1fr); }
+  .hero.no-feature .hero-copy { text-align: center; }
+  .hero.no-feature .hero-tagline { margin-inline: auto; }
+  .hero.no-feature .platform-strip { justify-content: center; }
+  .hero.no-feature .feature-card { display: none !important; }
+
+  /* ─── feature card: latest upload (or big skeleton while loading) */
+  .feature-card {
+    position: relative;
+    display: block;
+    min-width: 0;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    text-decoration: none;
+    color: var(--text);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.045),
+      0 2px 8px rgba(11, 16, 22, 0.35);
+    transition: transform 0.15s ease, border-color 0.15s ease;
+  }
+  .feature-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .feature-thumb {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    background: var(--bg-2);
+  }
+  .feature-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .feature-thumb iframe {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+  }
+  .feature-tag {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    font-family: var(--font-sans);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    line-height: 1;
+    color: var(--accent);
+    background: rgba(21, 30, 40, 0.88);
+    border: 1px solid rgba(223, 160, 110, 0.5);
+    border-radius: var(--radius-sm);
+    padding: 5px 8px;
+  }
+  .feature-play {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 54px;
+    height: 54px;
+    border-radius: 50%;
+    background: rgba(21, 30, 40, 0.72);
+    border: 1px solid rgba(223, 160, 110, 0.65);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent);
+    transition: background 0.15s, color 0.15s;
+  }
+  .feature-play svg { width: 18px; height: 18px; margin-left: 3px; }
+  .feature-card:hover .feature-play {
+    background: var(--accent);
+    color: var(--bg);
+    border-color: var(--accent);
+  }
+  .feature-card.playing .feature-play,
+  .feature-card.playing .feature-tag { display: none; }
+  .feature-info {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 11px 14px 12px;
+  }
+  .feature-title {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.35;
+    min-height: 1.35em;
+  }
+  .feature-meta {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    white-space: nowrap;
   }
 
   /* ─── platform strip ─────────────────────────────────────────── */
   .platform-strip {
     display: flex;
     flex-wrap: wrap;
-    justify-content: center;
+    justify-content: flex-start;
     gap: 6px;
-    margin: 22px auto 0;
-    max-width: 760px;
+    margin: 24px 0 0;
   }
   .platform-pill {
     display: inline-flex;
@@ -205,11 +319,129 @@
   }
   .market-card .mk-cta:hover { background: var(--accent); color: var(--bg); }
 
+  /* Top movers — real prices inside the market teaser. Same math and
+     ▲/▼ conventions as the market page ticker (change vs the first
+     point of the recent sparkline window). */
+  .mk-movers {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+  }
+  .mv-label {
+    font-family: var(--font-sans);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+  .mv-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .mv-tile {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 9px 12px;
+    text-decoration: none;
+    color: var(--text);
+    min-width: 0;
+    transition: border-color 0.12s, background 0.12s;
+  }
+  .mv-tile:hover { border-color: var(--accent); background: var(--panel-hi); }
+  .mv-icon {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    flex-shrink: 0;
+  }
+  .mv-main { min-width: 0; }
+  .mv-name {
+    display: block;
+    font-family: var(--font-sans);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .mv-spark { width: 56px; height: 16px; display: block; margin-top: 3px; }
+  .mv-spark polyline {
+    fill: none;
+    stroke-width: 1.5;
+    vector-effect: non-scaling-stroke;
+  }
+  .mv-num {
+    margin-left: auto;
+    text-align: right;
+    flex-shrink: 0;
+  }
+  .mv-px {
+    font-family: var(--font-mono);
+    font-feature-settings: 'tnum' 1;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .mv-chg {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    display: block;
+    margin-top: 2px;
+  }
+  .mv-chg.up   { color: var(--green); }
+  .mv-chg.down { color: var(--red); }
+  .mv-chg.flat { color: var(--text-fade); }
+
+  /* ─── content head: LATEST + tabs docked right ───────────────── */
+  .content-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 30px 0 12px;
+    flex-wrap: wrap;
+  }
+  .ch-bar {
+    width: 5px;
+    height: 16px;
+    flex-shrink: 0;
+    background: var(--accent);
+    transform: skewX(-14deg);
+  }
+  .ch-title {
+    font-family: var(--font-display);
+    font-size: 22px;
+    font-weight: 400;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    line-height: 1;
+    margin: 0;
+    color: var(--text);
+  }
+  .ch-rule {
+    flex: 1;
+    height: 1px;
+    min-width: 40px;
+    background: linear-gradient(90deg, var(--border), transparent);
+  }
+
   /* ─── social tabs (Social_Tabs_Plan.md) ──────────────────────── */
   .social-tab-row {
     display: flex;
     gap: 6px;
-    margin: 14px 0 10px;
+    margin: 0;
     flex-wrap: wrap;
   }
   .social-tab {
@@ -217,11 +449,11 @@
     align-items: center;
     gap: 8px;
     font-family: var(--font-sans);
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.05em;
     text-transform: uppercase;
-    padding: 8px 16px;
+    padding: 6px 13px;
     background: transparent;
     border: 1px solid var(--border);
     border-bottom-width: 2px;
@@ -277,10 +509,10 @@
     background: var(--bg-2);
   }
   .yt-title {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 600;
     line-height: 1.35;
-    padding: 8px 10px 4px;
+    padding: 9px 12px 4px;
     max-height: 3.9em;
     overflow: hidden;
   }
@@ -288,7 +520,9 @@
     font-family: var(--font-mono);
     font-size: 10px;
     color: var(--text-dim);
-    padding: 0 10px 9px;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    padding: 0 12px 10px;
   }
   .yt-inline-player {
     position: relative;
@@ -441,25 +675,108 @@
   .bsky-more:disabled { opacity: 0.4; cursor: default; }
   .social-cta { text-align: center; margin-top: 12px; }
 
-  /* ─── stream-live: collapse hero, keep platform strip ────────── */
-  body.stream-live .hero { padding: 14px 0 8px; }
-  body.stream-live .hero .kicker,
-  body.stream-live .hero-title,
-  body.stream-live .hero-tagline { display: none; }
-  body.stream-live .platform-strip { margin-top: 0; }
+  /* ─── site footer ────────────────────────────────────────────── */
+  .site-footer {
+    margin-top: 56px;
+    border-top: 1px solid var(--border);
+    padding-top: 28px;
+  }
+  .ft-grid {
+    display: grid;
+    grid-template-columns: 1.5fr 1fr 1fr;
+    gap: 28px;
+  }
+  .ft-brand-mark {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    font-family: var(--font-display);
+    font-size: 17px;
+    letter-spacing: 0.06em;
+    line-height: 1;
+    color: var(--accent);
+    text-transform: uppercase;
+  }
+  .ft-brand-mark img {
+    height: 20px;
+    width: 20px;
+    object-fit: contain;
+    filter: drop-shadow(0 0 4px rgba(223, 160, 110, 0.35));
+  }
+  .ft-tag {
+    margin: 10px 0 0;
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: var(--text-dim);
+    max-width: 300px;
+  }
+  .ft-head {
+    font-family: var(--font-sans);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 10px;
+  }
+  .ft-col a {
+    display: block;
+    color: var(--text-dim);
+    font-size: 12.5px;
+    padding: 4px 0;
+    text-decoration: none;
+  }
+  .ft-col a:hover { color: var(--accent); }
+  .ft-bottom {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 26px;
+    padding: 14px 0 0;
+    border-top: 1px solid var(--border);
+    font-family: var(--font-sans);
+    font-size: 11px;
+    color: var(--text-fade);
+  }
+  .ft-bottom a { color: var(--text-fade); text-decoration: none; }
+  .ft-bottom a:hover { color: var(--accent); }
 
-  /* ─── mobile ─────────────────────────────────────────────────── */
+  /* ─── stream-live: stream takes the stage ────────────────────── */
+  /* Hero (incl. the featured upload — the stream outranks it) and
+     the movers row collapse so the player sits near the top. */
+  body.stream-live .hero { display: none; }
+  body.stream-live .mk-movers { display: none; }
+
+  /* ─── tablet / mobile ────────────────────────────────────────── */
+  @media (max-width: 920px) {
+    .hero {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 24px;
+      padding: 26px 0 16px;
+      text-align: center;
+    }
+    .hero::before { inset: -20px 0; }
+    .hero-tagline { margin-inline: auto; }
+    .platform-strip { justify-content: center; }
+    .feature-card { max-width: 560px; margin: 0 auto; width: 100%; }
+    .mv-row { grid-template-columns: minmax(0, 1fr); }
+    .ft-grid { grid-template-columns: 1fr; gap: 22px; }
+  }
   @media (max-width: 720px) {
-    .hero { padding: 22px 0 14px; }
-    .hero-title { font-size: 40px; }
+    .hero-title { font-size: 44px; }
     .hero-tagline { font-size: 14px; }
     .brand-band { flex-wrap: wrap; gap: 8px; }
     .platform-pill { min-height: 40px; padding: 9px 14px; }
     .platform-pill .handle { font-size: 13px; }
     .market-card .mk-cta { width: 100%; text-align: center; }
+    .content-head { row-gap: 10px; }
+    .ch-rule { display: none; }
+    .social-tab-row { width: 100%; }
   }
   @media (max-width: 380px) {
-    .hero-title { font-size: 32px; }
+    .hero-title { font-size: 36px; }
     .hero-tagline { font-size: 13px; }
   }
 </style>
@@ -487,10 +804,11 @@
     </div>
 
     <section class="hero" id="hero">
+      <div class="hero-copy">
       <div class="kicker">Smite 2 Streams · Videos · Community</div>
       <h1 class="hero-title">Hatmaster<span class="accent">.tv</span></h1>
       <p class="hero-tagline">
-        Watch live on Twitch, catch VODs on YouTube,<br>
+        Watch live on Twitch, catch VODs on YouTube,
         and follow along everywhere else.
       </p>
       <nav class="platform-strip" aria-label="Hatmaster on social">
@@ -531,6 +849,26 @@
         </a>
         -->
       </nav>
+      </div>
+
+      <!-- Latest upload billboard. Skeleton until /api/social/youtube
+           answers; the whole hero centers itself if the fetch fails
+           (JS adds .no-feature). First click plays in place. -->
+      <a class="feature-card" id="feature-card"
+         href="https://www.youtube.com/@Hatmaster"
+         target="_blank" rel="noopener noreferrer">
+        <div class="feature-thumb" id="feature-thumb">
+          <img id="feature-img" alt="" style="display:none">
+          <span class="feature-tag">Latest upload</span>
+          <span class="feature-play" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          </span>
+        </div>
+        <div class="feature-info">
+          <div class="feature-title" id="feature-title">&nbsp;</div>
+          <div class="feature-meta" id="feature-meta"></div>
+        </div>
+      </a>
     </section>
 
     <section class="market-card" aria-label="The Hatmas Market">
@@ -546,17 +884,23 @@
         </div>
         <a class="mk-cta" href="/market">Enter the Market →</a>
       </div>
+      <div class="mk-movers" id="mk-movers" style="display:none"></div>
     </section>
 
-    <nav class="social-tab-row" id="social-tab-row"
-         aria-label="Hatmaster content tabs">
-      <button class="social-tab" data-tab="twitch" id="tab-twitch"
-              style="display:none">Twitch
-        <span class="live-pill">LIVE</span></button>
-      <button class="social-tab" data-tab="youtube">YouTube</button>
-      <button class="social-tab" data-tab="tiktok">TikTok</button>
-      <button class="social-tab" data-tab="bluesky">Bluesky</button>
-    </nav>
+    <div class="content-head">
+      <span class="ch-bar" aria-hidden="true"></span>
+      <h2 class="ch-title">Latest</h2>
+      <span class="ch-rule" aria-hidden="true"></span>
+      <nav class="social-tab-row" id="social-tab-row"
+           aria-label="Hatmaster content tabs">
+        <button class="social-tab" data-tab="twitch" id="tab-twitch"
+                style="display:none">Twitch
+          <span class="live-pill">LIVE</span></button>
+        <button class="social-tab" data-tab="youtube">YouTube</button>
+        <button class="social-tab" data-tab="tiktok">TikTok</button>
+        <button class="social-tab" data-tab="bluesky">Bluesky</button>
+      </nav>
+    </div>
 
     <section id="stream-section" class="stream-section" style="display:none">
       <div id="preview-banner" class="preview-banner" style="display:none">
@@ -592,14 +936,44 @@
     <div class="social-panel" id="panel-tiktok" style="display:none"></div>
     <div class="social-panel" id="panel-bluesky" style="display:none"></div>
 
-    <!-- Minimal footer: Google OAuth verification requires the
-         privacy policy to be linked from the homepage. -->
-    <div style="margin-top: 48px; padding-top: 12px;
-                border-top: 1px solid var(--border); text-align: center;
-                font-family: var(--font-sans); font-size: 11px;">
-      <a href="/privacy" style="color: var(--text-fade);
-         text-decoration: none;">Privacy</a>
-    </div>
+    <!-- Footer. The /privacy link must stay reachable from the
+         homepage — Google OAuth verification requirement. -->
+    <footer class="site-footer">
+      <div class="ft-grid">
+        <div>
+          <span class="ft-brand-mark">
+            <img src="/hat.png" alt="">Hatmaster.tv
+          </span>
+          <p class="ft-tag">
+            Smite 2 streams, videos, and the Hatmas Market —
+            a stock exchange for gods.
+          </p>
+        </div>
+        <div class="ft-col">
+          <div class="ft-head">Site</div>
+          <a href="/market">Hatmas Market</a>
+          <a href="/community">Community</a>
+          <a href="/events">Events</a>
+          <a href="/live">Live match</a>
+          <a href="/FindIt">FindIt</a>
+        </div>
+        <div class="ft-col">
+          <div class="ft-head">Follow</div>
+          <a href="https://twitch.tv/hatmaster"
+             target="_blank" rel="noopener noreferrer">Twitch</a>
+          <a href="https://www.youtube.com/@Hatmaster"
+             target="_blank" rel="noopener noreferrer">YouTube</a>
+          <a href="https://www.tiktok.com/@awfulmasterhat"
+             target="_blank" rel="noopener noreferrer">TikTok</a>
+          <a href="https://bsky.app/profile/hatmasteryt.bsky.social"
+             target="_blank" rel="noopener noreferrer">Bluesky</a>
+        </div>
+      </div>
+      <div class="ft-bottom">
+        <span>© 2026 Hatmaster</span>
+        <a href="/privacy">Privacy</a>
+      </div>
+    </footer>
 
   </div>
 
@@ -993,8 +1367,131 @@
     _socialTwitchAvailable(false);
   }
 
+  // ─── hero billboard: latest upload ──────────────────────────────
+  // Fills the feature card from the same endpoint the YouTube tab
+  // uses. On failure the hero recenters as a single column
+  // (.no-feature) — the pre-billboard layout.
+  async function loadFeature() {
+    var hero = document.getElementById('hero');
+    var card = document.getElementById('feature-card');
+    try {
+      var r = await fetch('/api/social/youtube');
+      var data = await r.json();
+      var v = (data.videos || [])[0];
+      if (!v || !v.video_id) throw new Error('no videos');
+      var img = document.getElementById('feature-img');
+      // The API hands out mqdefault (320w); the billboard is ~2x
+      // that. hqdefault always exists (480w, 4:3 letterboxed —
+      // object-fit:cover crops the bars); fall back on error.
+      var hq = String(v.thumbnail_url || '')
+        .replace('mqdefault', 'hqdefault');
+      img.onerror = function () {
+        img.onerror = null;
+        img.src = v.thumbnail_url;
+      };
+      img.src = hq || v.thumbnail_url;
+      img.style.display = '';
+      img.alt = v.title || '';
+      document.getElementById('feature-title').textContent =
+        v.title || '';
+      document.getElementById('feature-meta').textContent =
+        relTime(v.published_at) + ' ago · YouTube';
+      card.href = 'https://www.youtube.com/watch?v=' + v.video_id;
+      var playing = false;
+      card.addEventListener('click', function (ev) {
+        // First plain left-click plays in place. Modified clicks —
+        // and clicks once playing (title bar) — keep link behavior.
+        if (playing || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
+        ev.preventDefault();
+        playing = true;
+        card.classList.add('playing');
+        document.getElementById('feature-thumb').innerHTML =
+          '<iframe src="https://www.youtube.com/embed/' + v.video_id +
+          '?autoplay=1" allow="autoplay; encrypted-media; fullscreen"' +
+          ' allowfullscreen></iframe>';
+      });
+    } catch (e) {
+      hero.classList.add('no-feature');
+    }
+  }
+
+  // ─── market teaser: top movers ──────────────────────────────────
+  // Same conventions as the market page ticker: change = price vs
+  // first point of the recent sparkline window, ▲/▼ with one
+  // decimal, flat under 0.05%.
+  function _sparkSvg(values, dir) {
+    var w = 56, h = 16;
+    var min = Math.min.apply(null, values);
+    var max = Math.max.apply(null, values);
+    var range = (max - min) || 1;
+    var step = w / (values.length - 1);
+    var pts = values.map(function (v, i) {
+      var x = i * step;
+      var y = 2 + (1 - (v - min) / range) * (h - 4);
+      return x.toFixed(1) + ',' + y.toFixed(1);
+    }).join(' ');
+    var color = dir === 'down' ? 'var(--red)' :
+                dir === 'up' ? 'var(--green)' : 'var(--text-fade)';
+    return '<svg class="mv-spark" viewBox="0 0 ' + w + ' ' + h + '"' +
+      ' preserveAspectRatio="none" aria-hidden="true">' +
+      '<polyline points="' + pts + '" style="stroke:' + color +
+      '"/></svg>';
+  }
+
+  async function loadMovers() {
+    try {
+      var r = await fetch('/api/gods');
+      var data = await r.json();
+      var rows = (data.gods || [])
+        .filter(function (g) { return (g.games || 0) > 0; })
+        .map(function (g) {
+          var sp = g.sparkline || [];
+          var chg = (sp.length >= 2 && sp[0] > 0)
+            ? ((g.price - sp[0]) / sp[0]) * 100 : 0;
+          return { g: g, chg: chg };
+        })
+        .sort(function (a, b) {
+          return Math.abs(b.chg) - Math.abs(a.chg);
+        })
+        .slice(0, 3);
+      if (!rows.length) return;
+      var html =
+        '<div class="mv-label">Top movers</div><div class="mv-row">';
+      rows.forEach(function (item) {
+        var g = item.g, chg = item.chg;
+        var dir = 'flat', chgText = '·';
+        if (Math.abs(chg) >= 0.05) {
+          dir = chg > 0 ? 'up' : 'down';
+          chgText = (chg > 0 ? '▲' : '▼') +
+            Math.abs(chg).toFixed(1) + '%';
+        }
+        var slug = g.slug || String(g.name).toLowerCase()
+          .replace(/\s+/g, '-').replace(/'/g, '');
+        html += '<a class="mv-tile" href="/god/' +
+          encodeURIComponent(g.name) + '">' +
+          '<img class="mv-icon" loading="lazy" alt="" ' +
+          'src="/god-icon/' + encodeURIComponent(slug) + '" ' +
+          'onerror="this.style.visibility=\'hidden\'">' +
+          '<span class="mv-main">' +
+          '<span class="mv-name">' + escapeHtml(g.name) + '</span>' +
+          ((g.sparkline || []).length >= 2
+            ? _sparkSvg(g.sparkline, dir) : '') +
+          '</span>' +
+          '<span class="mv-num">' +
+          '<span class="mv-px">' + Math.round(g.price) + '</span>' +
+          '<span class="mv-chg ' + dir + '">' + chgText + '</span>' +
+          '</span></a>';
+      });
+      var el = document.getElementById('mk-movers');
+      el.innerHTML = html + '</div>';
+      el.style.display = '';
+    } catch (e) { /* market teaser stays compact without movers */ }
+  }
+
   refreshStreamStatus();
   setInterval(refreshStreamStatus, 30 * 1000);
+  loadFeature();
+  loadMovers();
 
   function relTime(iso) {
     if (!iso) return '';

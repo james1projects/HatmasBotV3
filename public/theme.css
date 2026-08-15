@@ -484,7 +484,15 @@ html body {
   white-space: nowrap;
 }
 .market-chip.open   { color: var(--green); border-color: var(--green); }
-.market-chip.closed { color: var(--text-dim); }
+/* Closed is the resting state most of the day — read as a whisper,
+ * not a boxed warning next to the nav. */
+.market-chip.closed { color: var(--text-fade); border-color: transparent; }
+
+/* Account controls injected by auth.js (log in / log out / link)
+ * sit borderless until hover — logged-out wide screens otherwise
+ * stack six same-weight boxes in the brand band. Nav links keep
+ * their chips; the base .icon-toggle:hover restores the border. */
+.auth-chip .icon-toggle { border-color: transparent; }
 /* Cross-platform badge in the auth chip: shows when the logged-in
    identity has its other platform linked (YT Linked on a Twitch
    session, Linked to Twitch on a YouTube session). */
