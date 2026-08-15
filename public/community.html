@@ -653,7 +653,7 @@
       viewer per day. Hatmaster runs <code>!spin</code> to randomly pick
       one (weighted by votes). Add the word <code>aspect</code>
       (e.g. <code>!nominate Khepri aspect</code>) to request a god's
-      Aspect — it counts as its own entry, separate from the base god.
+      Aspect. It counts as its own entry, separate from the base god.
     </div>
 
     <!-- Priority god request: $5 via Stripe Checkout to push a god
@@ -704,7 +704,7 @@
         </div>
 
         <button type="submit" class="pc-pay" id="pc-pay">
-          Pay $5 — Skip the Line
+          Pay $5 to Skip the Line
         </button>
         <div class="pc-error" id="pc-error"></div>
         <div class="pc-disabled-note" id="pc-disabled-note"
@@ -1174,7 +1174,7 @@
     if (!god) { pcShowError('Pick a god first.'); return; }
     if (!twitch) { pcShowError('Twitch username required so we can shout you out.'); return; }
     if (!/^[A-Za-z0-9_]{4,25}$/.test(twitch)) {
-      pcShowError('Twitch username must be 4–25 letters, numbers, or underscores.');
+      pcShowError('Twitch username must be 4-25 letters, numbers, or underscores.');
       return;
     }
 
@@ -1235,7 +1235,7 @@
       setTimeout(() => {
         if (!document.hidden) {
           $pcPay.disabled = false;
-          $pcPay.textContent = 'Pay $5 — Skip the Line';
+          $pcPay.textContent = 'Pay $5 to Skip the Line';
         }
       }, 800);
     }

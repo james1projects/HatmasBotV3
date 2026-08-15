@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#202C39">
 <meta name="robots" content="noindex">
-<title>Your profile — Hatmas Market</title>
+<title>Your profile: Hatmas Market</title>
 <meta name="description" content="Your holdings, trades, and god requests on hatmaster.tv.">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -243,7 +243,7 @@
       '<span class="mono">' + fmt(h.value) + "</span>" +
       '<span class="mono ' + (h.pl >= 0 ? "pos" : "neg") + '">' +
       (h.pl >= 0 ? "+" : "") + fmt(h.pl) + " (" + h.pl_pct + "%)</span>"
-    ), "No shares yet — buy your first god on the market page.");
+    ), "No shares yet. Buy your first god on the market page.");
 
     const st = p.stats || {};
     $("tx-stats").textContent = (st.trades || 0) + " trades · " +
@@ -281,7 +281,7 @@
     reqBox.innerHTML = "";
     if (!reqs.length) {
       reqBox.innerHTML =
-        '<div class="empty">No god requests yet — spend a God Token in chat with !godrequest.</div>';
+        '<div class="empty">No god requests yet. Spend a God Token in chat with !godrequest.</div>';
     } else {
       for (const el of reqs) reqBox.appendChild(el);
     }
@@ -290,7 +290,7 @@
       '<span class="god">' + esc(v.god) + "</span>" +
       '<span class="grow"></span>' +
       '<span class="mono dim">' + esc(v.date) + "</span>"
-    ), "No spin-pool votes yet — nominate a god on the community page.");
+    ), "No spin-pool votes yet. Nominate a god on the community page.");
 
     fillOrEmpty($("payments"), p.priority_payments, (x) => rowEl(
       '<span class="status-pill ' + esc(x.status) + '">' +
@@ -318,7 +318,7 @@
     .then((p) => { if (p) render(p); })
     .catch(() => {
       $("loading").textContent =
-        "Could not load your profile — try refreshing.";
+        "Could not load your profile. Try refreshing.";
     });
 })();
 </script>

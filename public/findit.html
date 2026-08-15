@@ -574,7 +574,7 @@ function updateUsualBanner() {
 function renderItems() {
   document.getElementById('drawerTitle').textContent = profileName ? `${profileName}'s items` : 'Items';
   if (!myItems.length) {
-    itemsGrid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:#9fb1c1;padding:20px;">No saved items yet — find something, tap its box, give it a name.</div>';
+    itemsGrid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:#9fb1c1;padding:20px;">No saved items yet. Find something, tap its box, give it a name.</div>';
     return;
   }
   itemsGrid.innerHTML = '';
@@ -680,7 +680,7 @@ function showItemMenu(item) {
   if (!mine) {
     const note = document.createElement('div');
     note.style.cssText = 'font-size:12px;color:#9fb1c1;text-align:center;margin-bottom:8px;';
-    note.textContent = `Shared by ${esc(item.owner_name || 'someone')} — tap Found to log where you saw it.`;
+    note.textContent = `Shared by ${esc(item.owner_name || 'someone')}. Tap Found to log where you saw it.`;
     menuBody.insertBefore(note, menuBody.firstChild);
   }
   menuBody.appendChild(btnCancel);
@@ -831,7 +831,7 @@ captureBtn.onclick = () => {
       statusFlash('captured! now turn it a bit and capture again');
   } else {
     if (sendEnrollCrop(box, { item_id: addModeItemId, name: addModeName, base: addModeBase }))
-      statusFlash('captured — another angle helps');
+      statusFlash('captured, another angle helps');
   }
 };
 </script>

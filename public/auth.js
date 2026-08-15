@@ -125,7 +125,7 @@ window.HatmasAuth = (function () {
     el.id = 'market-chip';
     el.textContent = me.market_open ? 'MARKET OPEN' : 'MARKET CLOSED';
     el.title = me.market_open
-      ? 'The bot is up — trades execute immediately'
+      ? 'The bot is up. Trades execute immediately'
       : 'Trades need the bot + MixItUp running';
     return el;
   }
@@ -146,7 +146,7 @@ window.HatmasAuth = (function () {
           '<span class="ft-brand-mark">' +
             '<img src="/hat.png" alt="">Hatmaster.tv</span>' +
           '<p class="ft-tag">Smite 2 streams, videos, and the ' +
-            'Hatmas Market — a stock exchange for gods.</p>' +
+            'Hatmas Market.</p>' +
         '</div>' +
         '<div class="ft-col"><div class="ft-head">Site</div>' +
           '<a href="/market">Hatmas Market</a>' +
@@ -191,7 +191,7 @@ window.HatmasAuth = (function () {
       const a = document.createElement('a');
       a.className = 'live-chip';
       a.href = '/';
-      a.title = 'Hatmaster is live right now — watch on the homepage';
+      a.title = 'Hatmaster is live. Watch on the homepage.';
       const dot = document.createElement('span');
       dot.className = 'dot';
       a.appendChild(dot);

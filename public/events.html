@@ -336,7 +336,7 @@
     if (ev.ends_at) {
       const e = new Date(Date.parse(ev.ends_at));
       const sameDay = d.toDateString() === e.toDateString();
-      text += " – " + e.toLocaleString([], sameDay
+      text += " to " + e.toLocaleString([], sameDay
         ? { hour: "numeric", minute: "2-digit" } : opts);
     }
     return text;
@@ -561,7 +561,7 @@
     } catch (e) {
       empty.style.display = "";
       empty.classList.add("load-err");
-      empty.textContent = "Could not load events — " + e.message;
+      empty.textContent = "Could not load events: " + e.message;
     }
   }
 

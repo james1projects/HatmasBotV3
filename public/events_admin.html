@@ -93,7 +93,7 @@
         <div class="field grow">
           <label for="f-title">Title</label>
           <input type="text" id="f-title" maxlength="80" required
-                 placeholder="Duel tournament — 1v1">
+                 placeholder="Duel tournament: 1v1">
         </div>
         <div class="field">
           <label for="f-type">Type</label>
@@ -252,7 +252,7 @@
     if (!events.length) {
       const p = document.createElement("p");
       p.className = "sub";
-      p.textContent = "No events yet — create the first one above.";
+      p.textContent = "No events yet. Create the first one above.";
       listEl.appendChild(p);
       return;
     }
