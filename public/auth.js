@@ -130,7 +130,79 @@ window.HatmasAuth = (function () {
     return el;
   }
 
+  function buildSiteFooter() {
+    // Shared footer for every page that loads auth.js. The landing
+    // page ships its own static copy (Google OAuth verification wants
+    // the /privacy link in the no-JS homepage HTML) — the
+    // .site-footer guard below skips it there. Static trusted markup
+    // only; keep the link list in sync with landing.html's footer.
+    const wrap = document.querySelector('.wrap');
+    if (!wrap || document.querySelector('.site-footer')) return;
+    const el = document.createElement('footer');
+    el.className = 'site-footer';
+    el.innerHTML =
+      '<div class="ft-grid">' +
+        '<div>' +
+          '<span class="ft-brand-mark">' +
+            '<img src="/hat.png" alt="">Hatmaster.tv</span>' +
+          '<p class="ft-tag">Smite 2 streams, videos, and the ' +
+            'Hatmas Market — a stock exchange for gods.</p>' +
+        '</div>' +
+        '<div class="ft-col"><div class="ft-head">Site</div>' +
+          '<a href="/market">Hatmas Market</a>' +
+          '<a href="/community">Community</a>' +
+          '<a href="/events">Events</a>' +
+          '<a href="/live">Live match</a>' +
+          '<a href="/FindIt">FindIt</a>' +
+        '</div>' +
+        '<div class="ft-col"><div class="ft-head">Follow</div>' +
+          '<a href="https://twitch.tv/hatmaster" target="_blank" ' +
+            'rel="noopener noreferrer">Twitch</a>' +
+          '<a href="https://www.youtube.com/@Hatmaster" target="_blank" ' +
+            'rel="noopener noreferrer">YouTube</a>' +
+          '<a href="https://www.tiktok.com/@awfulmasterhat" ' +
+            'target="_blank" rel="noopener noreferrer">TikTok</a>' +
+          '<a href="https://bsky.app/profile/hatmasteryt.bsky.social" ' +
+            'target="_blank" rel="noopener noreferrer">Bluesky</a>' +
+        '</div>' +
+      '</div>' +
+      '<div class="ft-bottom">' +
+        '<span>© 2026 Hatmaster</span>' +
+        '<a href="/privacy">Privacy</a>' +
+      '</div>';
+    wrap.appendChild(el);
+  }
+
+  async function maybeLiveChip() {
+    // Site-wide "stream is live" awareness: a red chip in the brand
+    // band linking home to the embed. Live-only — the permanent
+    // OFFLINE pill was removed July 2026 on purpose. Pages with
+    // their own stream UI (#stream-section, i.e. the landing page)
+    // handle live state themselves. CSS order:-1 pins the chip
+    // leftmost however late this fetch resolves.
+    if (document.getElementById('stream-section')) return;
+    const cluster = document.querySelector('.brand-band .right-cluster')
+      || document.querySelector('.brand-band');
+    if (!cluster) return;
+    try {
+      const r = await fetch('/api/stream-status', { cache: 'no-store' });
+      const data = await r.json();
+      if (!data.is_live) return;
+      const a = document.createElement('a');
+      a.className = 'live-chip';
+      a.href = '/';
+      a.title = 'Hatmaster is live right now — watch on the homepage';
+      const dot = document.createElement('span');
+      dot.className = 'dot';
+      a.appendChild(dot);
+      a.appendChild(document.createTextNode('LIVE'));
+      cluster.insertBefore(a, cluster.firstChild);
+    } catch (e) { /* chip is a nicety — never block on it */ }
+  }
+
   async function init() {
+    buildSiteFooter();          // static — render before any fetch
+    maybeLiveChip();            // fire-and-forget
     await fetchMe();
     const cluster = document.querySelector('.brand-band .right-cluster')
       || document.querySelector('.brand-band');

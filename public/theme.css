@@ -444,6 +444,7 @@ html body {
   .ticker-track            { animation: none !important; }
   .live-indicator .dot     { animation: none !important; }
   .platform-pill .pip      { animation: none !important; }
+  .live-chip .dot          { animation: none !important; }
   .brand-band .status .dot { box-shadow: none !important; }
 }
 
@@ -677,4 +678,111 @@ html body {
 }
 .skip-link:focus {
   left: 0;
+}
+
+/* ─── Site footer (August 2026) ────────────────────────────────────
+ * One footer for every page. Subpages get it injected by auth.js
+ * (buildSiteFooter); the landing page ships its own static copy so
+ * the /privacy link exists in the no-JS homepage HTML (Google OAuth
+ * verification). Keep auth.js + landing.html link lists in sync. */
+.site-footer {
+  margin-top: 56px;
+  border-top: 1px solid var(--border);
+  padding-top: 28px;
+}
+.ft-grid {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1fr;
+  gap: 28px;
+}
+.ft-brand-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-family: var(--font-display);
+  font-size: 17px;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  color: var(--accent);
+  text-transform: uppercase;
+}
+.ft-brand-mark img {
+  height: 20px;
+  width: 20px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 4px rgba(223, 160, 110, 0.35));
+}
+.ft-tag {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-dim);
+  max-width: 300px;
+}
+.ft-head {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+}
+.ft-col a {
+  display: block;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  padding: 4px 0;
+  text-decoration: none;
+}
+.ft-col a:hover { color: var(--accent); }
+.ft-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 26px;
+  padding: 14px 0 0;
+  border-top: 1px solid var(--border);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--text-fade);
+}
+.ft-bottom a { color: var(--text-fade); text-decoration: none; }
+.ft-bottom a:hover { color: var(--accent); }
+@media (max-width: 920px) {
+  .ft-grid { grid-template-columns: 1fr; gap: 22px; }
+}
+
+/* ─── Live chip (August 2026) ──────────────────────────────────────
+ * Injected into the brand band by auth.js when the stream is live —
+ * site-wide "go watch" awareness on pages without their own embed.
+ * Never shows an offline state (the permanent OFFLINE pill was
+ * removed July 2026 on purpose). order:-1 pins it leftmost in the
+ * cluster regardless of async injection timing. */
+.live-chip {
+  order: -1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 3px 8px;
+  border: 1px solid var(--red);
+  border-radius: var(--radius-sm);
+  color: var(--red);
+  text-decoration: none;
+  margin-right: 10px;
+  white-space: nowrap;
+}
+.live-chip:hover { background: var(--red-bg); color: var(--red); }
+.live-chip .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--red);
+  animation: livepulse 1.6s infinite;
 }

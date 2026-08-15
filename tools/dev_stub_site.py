@@ -224,6 +224,8 @@ ROUTES = {
     # "Aspect" checkboxes. Ymir deliberately absent so the hidden
     # state is exercisable too.
     "/api/aspects": {"gods": ["Achilles", "Atlas"], "total": 2},
+    "/api/events": {"ok": True, "now": "2026-08-14T12:00:00Z",
+                    "events": []},
     # Queue + pool with one aspect entry each so the ASPECT pills and
     # icon badges render in dev.
     "/api/community": {
@@ -253,6 +255,9 @@ PAGES = {
     "/community": "community.html",
     "/priority-success": "priority-success.html",
     "/privacy": "privacy.html",
+    "/events": "events.html",
+    "/live": "live.html",     # ws + /api/live absent: shows empty state
+    "/me": "profile.html",
 }
 
 
