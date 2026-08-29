@@ -99,7 +99,15 @@ MAX_PORT_PROBE = 8089
 BIND_HOST = "127.0.0.1"
 
 # Presets to expose in the dropdown. Filters out experimental "_*" presets.
-ALLOWED_PRESETS = ("build_guide", "1v1", "1v2", "2matches", "2gods", "3gods", "single")
+ALLOWED_PRESETS = ("build_guide", "1v1", "1v2", "2matches", "2gods", "3gods",
+                   "single", "god_only")
+
+# Optional dropdown display labels. Presets not listed here show their
+# raw stem (the on-disk JSON filename), which is also what /api/render
+# receives — the label is cosmetic only.
+PRESET_LABELS: Dict[str, str] = {
+    "god_only": "God Only",
+}
 
 # Gods that have a card on disk but no Custom God Icons primary file.
 # Used so the dropdown shows the proper display name (and the icon
@@ -144,6 +152,12 @@ PRESET_FIELDS: Dict[str, List[str]] = {
                    "text", "subtext", "kda", "result",
                    "flip_god",
                    "aspect_god"],
+    # God Only: full-bleed card + big god name. The name layer renders
+    # {text} (defaults to the god's name), so Headline / Headline Size
+    # tweak it. No icon layer -> no aspect checkbox.
+    "god_only":   ["god", "skin",
+                   "text", "text_size",
+                   "flip_god"],
 }
 
 # In-memory cache: stem -> (canvas_size, layer_outputs).
@@ -500,6 +514,7 @@ async def api_options(request: web.Request) -> web.Response:
     return web.json_response({
         "presets": list_presets(),
         "preset_fields": PRESET_FIELDS,
+        "preset_labels": PRESET_LABELS,
         "gods": list_gods(),
         "items_by_category": load_items(),
     })
@@ -1290,7 +1305,7 @@ INDEX_HTML = """<!doctype html>
   const presetSel = $("#preset");
   for (const p of opts.presets) {
     const o = document.createElement("option");
-    o.value = p; o.textContent = p;
+    o.value = p; o.textContent = (opts.preset_labels || {})[p] || p;
     presetSel.appendChild(o);
   }
   presetSel.value = opts.presets.includes("build_guide") ? "build_guide" : opts.presets[0];

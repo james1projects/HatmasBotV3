@@ -100,6 +100,20 @@ python tools\build_thumbnail.py --god "Hou Yi" --preset single --text "SOLO LANE
 
 ---
 
+## god_only — "God Only" (full-bleed card + big name, nothing else)
+
+Full-canvas card art with the god's name huge across the bottom. No
+KDA / result / items. The name defaults to the god; `--text` overrides
+it and `--text-size` resizes it (preset default: 210).
+
+```
+python tools\build_thumbnail.py --god Zeus --preset god_only
+python tools\build_thumbnail.py --god Zeus --preset god_only --text "THE THUNDERER"
+python tools\build_thumbnail.py --god Zeus --preset god_only --skin "Almighty" --text-size 260
+```
+
+---
+
 ## Skin art (optional)
 
 Drop manually-downloaded skin art into `Custom God Cards\` at the repo
