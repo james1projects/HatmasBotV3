@@ -72,6 +72,56 @@ def _format_god_name(slug: str) -> str:
     """Convert a slug like 'ah_muzen_cab' into 'Ah Muzen Cab'."""
     return slug.replace("_", " ").title()
 
+
+# ---------------------------------------------------------------------------
+# Per-god voiceline exclusions
+# ---------------------------------------------------------------------------
+# Sylvanus rides Grover, and the wiki splits each taunt/joke/laugh
+# exchange into one file per speaker. Grover never speaks — his halves
+# are wordless tree-groans — so redemptions should only draw lines
+# where Sylvanus actually talks.
+#
+# Classification verified 2026-08-28 two independent ways: the wiki
+# transcripts label each file's speaker, and spectral analysis agrees
+# on all files — every Grover file has <86% of its energy above 300 Hz,
+# every Sylvanus file >89% (speech concentrates in the formant band,
+# tree-rumble doesn't).
+#
+# The exact-name set covers the wiki's current filenames for Grover's
+# joke halves so a future re-download stays filtered; the substring
+# rule catches the on-disk names (Grover_groan_N, *_Grover) and any
+# future Grover-named additions. Matching is case-insensitive.
+
+EXCLUDED_VOICELINES = {
+    "sylvanus": {
+        # taunts: the b-halves are Grover's replies
+        "sylvanus_taunt_1b.ogg", "sylvanus_taunt_2b.ogg",
+        "sylvanus_taunt_3b.ogg", "sylvanus_taunt_4b.ogg",
+        # jokes: wiki's current names for Grover's halves
+        "sylvanus_joke_2b.ogg", "sylvanus_joke_3b.ogg",
+        "sylvanus_joke_4b.ogg", "sylvanus_joke_5b.ogg",
+        "sylvanus_joke_5d.ogg",
+    },
+}
+
+EXCLUDED_VOICELINE_SUBSTRINGS = {
+    "sylvanus": ("grover",),
+}
+
+
+def _filter_voiceline_files(god_slug: str, files: list) -> list:
+    """Drop files where the god isn't the one speaking (e.g. Grover's
+    groans in Sylvanus's folders). Returns the unfiltered list rather
+    than an empty one if the filter would remove everything."""
+    exact = EXCLUDED_VOICELINES.get(god_slug, ())
+    subs = EXCLUDED_VOICELINE_SUBSTRINGS.get(god_slug, ())
+    if not exact and not subs:
+        return files
+    kept = [f for f in files
+            if f.name.lower() not in exact
+            and not any(s in f.name.lower() for s in subs)]
+    return kept or files
+
 # Map from Twitch reward ID → our internal key (god_joke, god_taunt, god_laugh)
 # Persisted to STATE_FILE so we don't recreate rewards every startup.
 
@@ -181,7 +231,7 @@ class VoiceLinePlugin:
             print(f"[VoiceLine] No {folder} folder for {slug}")
             return False
 
-        ogg_files = list(vl_dir.glob("*.ogg"))
+        ogg_files = _filter_voiceline_files(slug, list(vl_dir.glob("*.ogg")))
         if not ogg_files:
             print(f"[VoiceLine] No .ogg files in {vl_dir}")
             return False
@@ -323,6 +373,7 @@ class VoiceLinePlugin:
         # redemption instead of keeping the viewer's points.
         vl_dir = VOICELINE_DIR / god_slug / folder
         ogg_files = list(vl_dir.glob("*.ogg")) if vl_dir.exists() else []
+        ogg_files = _filter_voiceline_files(god_slug, ogg_files)
         if not ogg_files:
             refunded = await self._refund_redemption(reward_id, redemption_id)
             suffix = (" Points refunded." if refunded
