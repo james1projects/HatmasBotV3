@@ -152,7 +152,7 @@
        with pool size (every god in the pool needs to read past the
        marker during the slow phase). The bezier here is only a
        fallback for when JS hasn't set an inline transition yet. */
-    transition: transform 4.4s cubic-bezier(0.20, 0.55, 0.25, 1.0);
+    transition: transform 2.2s cubic-bezier(0.20, 0.55, 0.25, 1.0);
   }
 
   /* Each card: portrait + name */
@@ -380,9 +380,9 @@
   // (more gods → longer spin so each one is readable in the slow phase).
   // Both the CSS transition and the audio scheduler reference this var,
   // so it must stay a `let` and be updated BEFORE scheduleSpinAudio runs.
-  let SPIN_DURATION_MS = 4400;
-  const SPIN_DURATION_BASE_MS = 4400;
-  const SPIN_DURATION_PER_GOD_MS = 150;  // extra ms per god beyond 8
+  let SPIN_DURATION_MS = 2200;
+  const SPIN_DURATION_BASE_MS = 2200;
+  const SPIN_DURATION_PER_GOD_MS = 75;   // extra ms per god beyond 8
   const SPIN_DURATION_FREE_GODS = 8;     // first N gods are "free"
 
   // ────────────────────────────────────────────────────────────────
@@ -497,7 +497,7 @@
     if (targetY >= 1) return 1;
     // Monotonic on [0,1] for our chosen control points, so binary
     // search converges. 24 iterations is well under ±0.0001ms error
-    // at our 4.4s duration.
+    // at our 2.2s duration.
     let lo = 0, hi = 1;
     for (let i = 0; i < 24; i++) {
       const mid = 0.5 * (lo + hi);

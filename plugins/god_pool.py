@@ -616,8 +616,8 @@ class GodPoolPlugin:
         # Play the god-select voice line — delayed so it lands AFTER
         # the spin reel animation completes and the win chime fades.
         # Timing math:
-        #   - Reel transition: SPIN_DURATION_BASE_MS (4.4s) plus
-        #     SPIN_DURATION_PER_GOD_MS (150ms) for every god in the
+        #   - Reel transition: SPIN_DURATION_BASE_MS (2.2s) plus
+        #     SPIN_DURATION_PER_GOD_MS (75ms) for every god in the
         #     pool beyond SPIN_DURATION_FREE_GODS (8). The overlay
         #     scales its spin so every god in the reveal pass reads
         #     past the marker, so big pools = longer spins.
@@ -627,8 +627,8 @@ class GodPoolPlugin:
         #   → Voice line at t=spin_duration + 1.0s.
         # If the SPIN_DURATION_* constants in overlays/god_pool_spin.html
         # change, mirror them here.
-        SPIN_DURATION_BASE_MS = 4400
-        SPIN_DURATION_PER_GOD_MS = 150
+        SPIN_DURATION_BASE_MS = 2200
+        SPIN_DURATION_PER_GOD_MS = 75
         SPIN_DURATION_FREE_GODS = 8
         spin_duration_ms = (
             SPIN_DURATION_BASE_MS
