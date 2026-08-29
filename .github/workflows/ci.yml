@@ -1,0 +1,44 @@
+# ============================================================
+# CI — run the full test suite on every push and PR.
+#
+# The suite is the repo's self-running test scripts, executed via
+# tools/run_tests.py (each tests/test_*.py exits 0 on full pass;
+# the runner fails on any nonzero exit, any hang, or an empty run —
+# so "no tests collected" can never read as green).
+#
+# windows-latest on purpose: the bot runs on Windows in production,
+# so CI matches prod instead of introducing a Linux-only class of
+# path/platform failures. Checkout is cheap despite the heavy repo
+# history — actions/checkout is shallow by default and the tracked
+# tip tree is ~20 MB.
+# ============================================================
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# A newer push to the same branch supersedes the running build.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"   # matches the bot's Python314 install
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run test suite
+        run: python tools/run_tests.py
