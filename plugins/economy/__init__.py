@@ -28,6 +28,8 @@ from .plugin import EconomyPlugin
 # continues to work without any changes elsewhere.
 from .fair_value import (
     calculate_fair_value,
+    directional_settlement_price,
+    SETTLE_MAX_MOVE_PCT,
     FAIR_VALUE_BASE,
     FAIR_VALUE_CONFIDENCE_K,
     FAIR_VALUE_WINRATE_WEIGHT,
@@ -43,6 +45,8 @@ from .fair_value import (
 __all__ = [
     "EconomyPlugin",
     "calculate_fair_value",
+    "directional_settlement_price",
+    "SETTLE_MAX_MOVE_PCT",
     "FAIR_VALUE_BASE",
     "FAIR_VALUE_CONFIDENCE_K",
     "FAIR_VALUE_WINRATE_WEIGHT",

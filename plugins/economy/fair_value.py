@@ -187,6 +187,56 @@ def calculate_fair_value(wins: int, losses: int,
     return float(price)
 
 
+# ── Settlement direction guard ──────────────────────────────────────────
+SETTLE_MAX_MOVE_PCT = 30.0  # Max % a single settlement may move the price
+                            # while converging toward fair value. Keeps a
+                            # big price/fair-value gap (stale seed, retuned
+                            # constants) from resolving in one jarring snap.
+
+
+def directional_settlement_price(start_price: float, fair_price: float,
+                                  kda_change_pct: float,
+                                  outcome: str) -> float:
+    """
+    Bound a match settlement so the price ALWAYS moves in the outcome
+    direction: a win settles up, a loss settles down. No exceptions
+    (other than the global price floor applied by _update_price).
+
+    Fair value stays the anchor — it's what encodes "100 games at 55%
+    is worth more than 2 games at 100%":
+
+      * Fair value agrees with the outcome direction -> move from the
+        pre-match price toward fair value, capped at
+        ±SETTLE_MAX_MOVE_PCT per match so a large gap converges over
+        several matches instead of snapping at once.
+      * Fair value disagrees (e.g. a loss on a god priced far BELOW
+        its fair value would "snap up") -> ignore the gap this match
+        and apply the KDA-shaped per-match delta instead
+        (_calculate_match_end_change: +3..15% wins, -5..-13% losses,
+        x volatility), which always has the correct sign.
+
+    `kda_change_pct` is the signed output of
+    _calculate_match_end_change for this match; its sign is coerced to
+    the outcome direction defensively.
+    """
+    if start_price <= 0:
+        return fair_price
+
+    raw_pct = ((fair_price - start_price) / start_price) * 100.0
+    if outcome == "win":
+        if raw_pct <= 0:
+            change_pct = abs(kda_change_pct)
+        else:
+            change_pct = min(raw_pct, SETTLE_MAX_MOVE_PCT)
+    else:
+        if raw_pct >= 0:
+            change_pct = -abs(kda_change_pct)
+        else:
+            change_pct = max(raw_pct, -SETTLE_MAX_MOVE_PCT)
+
+    return start_price * (1.0 + change_pct / 100.0)
+
+
 # ── Base price change targets (win/loss + KDA quality) ──────────────────
 # The match-end-change formula produces a base_change_pct, then multiplied
 # by volatility. Win base: +3% to +15% depending on KDA ratio.

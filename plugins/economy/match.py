@@ -52,9 +52,9 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
-from core.config import ECONOMY_STARTING_PRICE
+from core.config import ECONOMY_PRICE_FLOOR, ECONOMY_STARTING_PRICE
 
-from .fair_value import calculate_fair_value
+from .fair_value import calculate_fair_value, directional_settlement_price
 
 
 def _normalize_played_at(ts: Optional[str]) -> Optional[str]:
@@ -408,8 +408,22 @@ class _MatchMixin:
             return False
         agg_wins, agg_losses, agg_k, agg_d, agg_a = row
 
-        settlement_price = calculate_fair_value(
+        fair_price = calculate_fair_value(
             agg_wins, agg_losses, agg_k, agg_d, agg_a)
+
+        # Directional guarantee: a win ALWAYS settles up, a loss ALWAYS
+        # settles down, even when the pre-match price disagrees with
+        # fair value (stale seed prices, constants retuned without a
+        # replay, the volume-premium cliff at 50% winrate). Fair value
+        # stays the anchor: correct-direction settlements converge
+        # toward it (capped per match); wrong-direction fair values
+        # fall back to the KDA-shaped delta for this match only.
+        kda_change_pct = self._calculate_match_end_change(
+            outcome, kills, deaths, assists, god_name)
+        settlement_price = max(
+            directional_settlement_price(
+                match_start_price, fair_price, kda_change_pct, outcome),
+            ECONOMY_PRICE_FLOOR)
 
         # commit=False: the settlement's writes (aggregates, price,
         # history, processed_matches claim) all land in the single

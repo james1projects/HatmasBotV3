@@ -10,7 +10,14 @@ Usage: python tests/test_economy.py
 import asyncio
 import sys
 import os
+import time
 from pathlib import Path
+
+# Test output uses emoji/box-drawing chars that raise UnicodeEncodeError
+# on legacy Windows codepages (cp1252) when run directly — force UTF-8
+# (tools/run_tests.py already does this for the whole suite via env).
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -77,16 +84,63 @@ class MockMixItUp:
         return True
 
 
+def _remove_test_db(test_db):
+    """
+    Delete the test DB plus its WAL/SHM sidecars.
+
+    Best-effort: on Windows a lingering handle raises PermissionError
+    ([WinError 32]), so retry briefly and warn instead of crashing the
+    harness — the next run's pre-test cleanup will pick up leftovers.
+    """
+    for suffix in ("", "-wal", "-shm"):
+        path = Path(str(test_db) + suffix)
+        if not path.exists():
+            continue
+        for _ in range(5):
+            try:
+                os.remove(path)
+                break
+            except PermissionError:
+                time.sleep(0.2)
+        else:
+            print(f"  WARNING: could not delete {path.name} (still locked); "
+                  f"will be cleaned up on next run")
+
+
 async def run_tests():
     print("=" * 60)
     print("  Economy Plugin Test Harness")
     print("=" * 60)
     print()
 
-    # Clean up test DB if it exists
+    # Clean up test DB (and any sidecars a crashed run left behind)
     test_db = config.ECONOMY_DB_PATH
-    if test_db.exists():
-        os.remove(test_db)
+    _remove_test_db(test_db)
+
+    # ── Pure-function checks: directional settlement ─────────────────
+    print("Testing directional_settlement_price()...")
+    from plugins.economy import directional_settlement_price, SETTLE_MAX_MOVE_PCT
+
+    def approx(got, want):
+        assert abs(got - want) < 1e-6, f"expected {want}, got {got}"
+
+    cap = 1.0 + SETTLE_MAX_MOVE_PCT / 100.0
+    # Win, fair value above: converge toward fair, capped per match
+    approx(directional_settlement_price(100.0, 120.0, 8.0, "win"), 120.0)
+    approx(directional_settlement_price(100.0, 200.0, 8.0, "win"), 100.0 * cap)
+    # Win, fair value below: still settles UP via the KDA-shaped delta
+    approx(directional_settlement_price(100.0, 80.0, 8.0, "win"), 108.0)
+    approx(directional_settlement_price(100.0, 80.0, -8.0, "win"), 108.0)  # sign coerced
+    # Loss mirrors: converge down (capped per match), never up
+    approx(directional_settlement_price(100.0, 80.0, -9.0, "loss"), 80.0)
+    approx(directional_settlement_price(100.0, 40.0, -9.0, "loss"), 100.0 * (2.0 - cap))
+    approx(directional_settlement_price(100.0, 130.0, -9.0, "loss"), 91.0)
+    approx(directional_settlement_price(100.0, 130.0, 9.0, "loss"), 91.0)  # sign coerced
+    # Degenerate start price falls back to fair value
+    approx(directional_settlement_price(0.0, 55.0, 5.0, "win"), 55.0)
+    print("  Directional settlement: win always up, loss always down, "
+          "cap respected ✓")
+    print()
 
     # Create plugin with mock bot
     bot = MockBot()
@@ -452,10 +506,11 @@ async def run_tests():
     # Cleanup. close_db() matters twice over: it releases the file
     # lock so os.remove works, and it stops aiosqlite's non-daemon
     # worker thread — without it the process hangs forever at exit.
+    # Closing the last connection also checkpoints the WAL, but the
+    # sidecar files can still exist — _remove_test_db sweeps them.
     await economy.cleanup()
     await shared_db.close_db()
-    if test_db.exists():
-        os.remove(test_db)
+    _remove_test_db(test_db)
 
     print("=" * 60)
     print("  All tests completed!")

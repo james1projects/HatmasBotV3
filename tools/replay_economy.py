@@ -222,6 +222,11 @@ async def cmd_replay(skip_confirm: bool, dry_run: bool,
             print("State wiped.")
 
         # ─── Apply aggregate stats + fair-value price per god ───────
+        # Deliberately NOT directional_settlement_price: a replay works
+        # from lifetime aggregates, not a per-match sequence, so there
+        # is nothing to walk directionally. Reconcile/replay therefore
+        # RE-ANCHORS every price straight to fair value — any directional
+        # walk history since the last anchor is discarded on purpose.
         from plugins.economy import calculate_fair_value
         applied = 0
         for god, agg in aggregates.items():
