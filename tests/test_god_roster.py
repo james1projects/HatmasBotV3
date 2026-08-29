@@ -181,16 +181,27 @@ def test_corrupt_and_tiny_cache_fall_back_to_bundled():
 
 
 def test_new_gods_window():
+    # Deterministic: seed first_seen stamps relative to *now* instead of
+    # asserting real gods are still "recent" (the old version rotted on
+    # the calendar — Bastet/Chronos aged out of every window by August).
     reset()
-    recent = gr.new_gods(days=21)
-    assert {g["name"] for g in recent} >= {"Bastet", "Chronos"}
-    # A first_seen far in the past falls out of the window
-    old = gr.new_gods(days=0)
-    names = {g["name"] for g in old}
-    cutoff_ok = all(
-        datetime.fromisoformat(g["first_seen"]) >= datetime.now() - timedelta(days=0)
-        for g in old)
-    assert cutoff_ok, f"stale gods leaked into a 0-day window: {names}"
+
+    def stamp(days_ago):
+        return (datetime.now() - timedelta(days=days_ago)).date().isoformat()
+
+    gr._roster = [
+        {"name": "Freshgod", "slug": "freshgod", "wiki_filename": "f",
+         "first_seen": stamp(3)},
+        {"name": "Oldgod", "slug": "oldgod", "wiki_filename": "o",
+         "first_seen": stamp(40)},
+        {"name": "Dateless", "slug": "dateless", "wiki_filename": "d",
+         "first_seen": None},
+    ]
+    assert {g["name"] for g in gr.new_gods(days=21)} == {"Freshgod"}
+    assert [g["name"] for g in gr.new_gods(days=90)] == ["Freshgod", "Oldgod"], \
+        "90-day window should hold both, newest first"
+    # Nothing is newer than "now", and dateless gods never count as new
+    assert gr.new_gods(days=0) == []
 
 
 def test_smite1_only_excludes_ported():

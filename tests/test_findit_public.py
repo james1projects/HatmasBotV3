@@ -19,8 +19,10 @@ minutes (CLIP auto-install); later runs are ~15-30s.
 """
 import asyncio
 import base64
+import io
 import json
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -28,12 +30,31 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import aiohttp
 from aiohttp.test_utils import TestClient, TestServer
+from PIL import Image
 
 from core.public_webserver import PublicWebServer
 from plugins.findit import FindItPlugin
+import plugins.findit.plugin as findit_plugin
 
 BUS_JPG = (Path(__file__).resolve().parent.parent / ".venv-findit" / "Lib"
            / "site-packages" / "ultralytics" / "assets" / "bus.jpg")
+
+# Machine-bound integration test: it spawns the REAL GPU worker out of
+# .venv-findit (torch/ultralytics live there, not in the bot env). On a
+# box without that venv — CI included — there is nothing real to test,
+# so skip loudly rather than fail or fake it.
+if not BUS_JPG.exists():
+    print("[SKIP] test_findit_public: .venv-findit (FindIt GPU worker env) "
+          "not present on this machine — integration test skipped.")
+    sys.exit(0)
+
+# Hermetic item store: the worker must NOT open the live gallery
+# (data/findit/items.json). Runs against the live store both polluted it
+# (D1 test items showed up in the real gallery) and broke this suite —
+# leftover items' embeds relabeled detection boxes in later runs. The
+# worker cwd stays data/findit so the cached model weights are reused.
+findit_plugin.ITEMS_PATH = (
+    Path(tempfile.mkdtemp(prefix="findit_test_")) / "items.json")
 
 PASS, FAIL = 0, 0
 
@@ -103,7 +124,19 @@ async def run():
               f"{len(msg['boxes'])} boxes {labels} in {msg['ms']}ms")
 
         # ── 4. enroll / forget through proxy ──
-        b64 = "data:image/jpeg;base64," + base64.b64encode(jpeg).decode()
+        # Enroll a CROP of the detected bus, exactly like the real client
+        # (findit.html cuts the tapped box out of the frame before it
+        # sends the enroll). A whole-scene embed barely resembles a box
+        # crop under DINOv2 — instance embeddings are the point — so the
+        # old full-frame enroll here stopped matching at the DINOv2 swap
+        # and never represented real usage in the first place.
+        bus_box = next(b for b in msg["boxes"] if b["label"] == "bus")
+        crop = Image.open(io.BytesIO(jpeg)).crop(
+            (int(bus_box["x1"]), int(bus_box["y1"]),
+             int(bus_box["x2"]), int(bus_box["y2"])))
+        buf = io.BytesIO()
+        crop.save(buf, "JPEG", quality=90)
+        b64 = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
         await ws.send_str(json.dumps(
             {"type": "enroll", "name": "Test Bus", "base": "bus", "image": b64}))
         msg = json.loads((await ws.receive(timeout=60)).data)

@@ -39,6 +39,8 @@ from core.config import (
 
 WORKER_SCRIPT = Path(__file__).resolve().parent / "worker.py"
 WORKER_DIR = DATA_DIR / "findit"   # cwd for the worker: weights download here
+ITEMS_PATH = WORKER_DIR / "items.json"   # custom-item gallery (tests point this
+                                         # at a temp store to stay hermetic)
 
 
 class FindItPlugin:
@@ -120,7 +122,7 @@ class FindItPlugin:
                 "--model", FINDIT_MODEL,
                 "--embed-model", FINDIT_EMBED_MODEL,
                 "--sim-threshold", str(FINDIT_SIM_THRESHOLD),
-                "--items", str(WORKER_DIR / "items.json"),
+                "--items", str(ITEMS_PATH),
                 cwd=str(WORKER_DIR),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
