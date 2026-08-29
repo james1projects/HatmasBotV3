@@ -83,6 +83,34 @@ for f in $(git ls-files '*.py'); do
 done
 ```
 
+### Tests and CI (added 2026-08-28)
+
+Every file in `tests/` named `test_*.py` is a SELF-RUNNING script (its own
+harness and fakes, exit 0 on full pass) — not a pytest suite. The one
+trustworthy way to run everything:
+
+```bash
+python tools/run_tests.py            # whole suite (~20s without FindIt)
+python tools/run_tests.py web trade  # only files matching a term
+```
+
+The runner fails on any nonzero exit, any hang (300s/file), or an empty
+run, so "0 tests collected" can never read as green. Use it as the
+verify command everywhere: it is what `.github/workflows/ci.yml` runs on
+every push/PR (windows-latest, Python 3.14), what `streamdeck/ship_it.bat`
+gates on, and what local-worker `verify_cmd`s should invoke.
+
+New test files must follow the house convention: self-contained script,
+exit 0 only on full pass, no network, no live data files — point anything
+stateful at a temp dir (see `test_findit_public.py`'s hermetic
+`ITEMS_PATH` override for the pattern; it once polluted the real FindIt
+gallery). `test_findit_public.py` self-skips (exit 0, loud print) on
+machines without `.venv-findit`, CI included.
+
+Shipping: work is not done while it only exists on disk. `streamdeck/
+ship_it.bat` = test -> commit -> push -> restart the bot; plain
+`restart_bot.bat` reloads committed changes without touching git.
+
 ---
 
 ## Tone and Style
