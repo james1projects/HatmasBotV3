@@ -28,6 +28,7 @@ File structure example:
 """
 
 import argparse
+import json
 import re
 import sys
 import time
@@ -36,7 +37,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 try:
     from curl_cffi import requests as cffi_requests
-    _SESSION = cffi_requests.Session(impersonate="chrome")
+    # "chrome124" pinned: since July 2026 Cloudflare challenges the
+    # generic "chrome" fingerprint. Same fix as core/god_roster.py.
+    _SESSION = cffi_requests.Session(impersonate="chrome124")
     _USE_CURL_CFFI = True
 except ImportError:
     import urllib.request
@@ -48,6 +51,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 BASE_URL = "https://smite.fandom.com/wiki"
+API_URL = "https://smite.fandom.com/api.php"
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "data" / "smite_voicelines"
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -109,9 +113,37 @@ def _make_request(url: str, retries: int = RETRY_ATTEMPTS) -> bytes:
                 raise RuntimeError(f"Failed to fetch {url}: {e}") from e
 
 
+def _fetch_page_html(page_title: str) -> str:
+    """
+    Fetch a wiki page's rendered body HTML.
+
+    Primary route is the MediaWiki parse API: since 2026-08 Cloudflare
+    serves challenge pages on the /wiki/ HTML routes (even to the
+    chrome124 fingerprint) but leaves api.php and the audio CDN alone.
+    The parsed body carries the same headline/audio markup the full
+    page did, so parse_voiceline_page() works on it unchanged. The
+    /wiki/ route is kept as a fallback in case the API breaks.
+
+    page_title slugs scraped from wiki hrefs are already percent-
+    encoded (Chang%27e) — do not quote() them again.
+    """
+    api_url = f"{API_URL}?action=parse&page={page_title}&prop=text&format=json"
+    try:
+        data = json.loads(_make_request(api_url))
+        return data["parse"]["text"]["*"]
+    except Exception as api_err:
+        try:
+            return _make_request(f"{BASE_URL}/{page_title}").decode("utf-8")
+        except RuntimeError:
+            raise RuntimeError(
+                f"Failed to fetch {page_title} via api.php ({api_err}) "
+                "and via /wiki/ fallback"
+            ) from api_err
+
+
 def fetch_god_list() -> list[str]:
     """Fetch the master list of god names from the voicelines index page."""
-    html = _make_request(f"{BASE_URL}/God_voicelines").decode("utf-8")
+    html = _fetch_page_html("God_voicelines")
     pattern = r'href="/wiki/([^"]+)_voicelines"'
     gods = sorted(set(re.findall(pattern, html)))
     return gods
@@ -211,9 +243,8 @@ def download_god(god_slug: str, resume: bool = False) -> tuple[int, int]:
         return (0, 0)
 
     # Fetch the voiceline page
-    page_url = f"{BASE_URL}/{god_slug}_voicelines"
     try:
-        html = _make_request(page_url).decode("utf-8")
+        html = _fetch_page_html(f"{god_slug}_voicelines")
     except RuntimeError as e:
         print(f"  ERROR fetching page for {god_slug}: {e}")
         return (0, 1)
