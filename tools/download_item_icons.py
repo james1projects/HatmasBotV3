@@ -361,7 +361,10 @@ def main() -> int:
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    session = _cffi_requests.Session(impersonate="chrome")
+    # "chrome124" pinned: since July 2026 Cloudflare challenges the
+    # generic "chrome" fingerprint against wiki.smite2.com. Same fix
+    # as core/god_roster.py:_fetch_url.
+    session = _cffi_requests.Session(impersonate="chrome124")
 
     print(f"[items] Fetching wiki index: {WIKI_ITEMS_INDEX}")
     html = fetch_index_html(session)

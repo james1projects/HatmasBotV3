@@ -68,7 +68,10 @@ except Exception:
 # tools/download_voicelines.py uses for tracker.gg.
 try:
     from curl_cffi import requests as _cffi_requests
-    _CFFI_SESSION = _cffi_requests.Session(impersonate="chrome")
+    # "chrome124" pinned: since July 2026 Cloudflare challenges the
+    # generic "chrome" fingerprint (403 + challenge page) but lets
+    # chrome124 through. Same fix as core/god_roster.py:_fetch_url.
+    _CFFI_SESSION = _cffi_requests.Session(impersonate="chrome124")
     _USE_CURL_CFFI = True
 except Exception:
     _CFFI_SESSION = None

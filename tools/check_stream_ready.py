@@ -404,7 +404,10 @@ async def check_tracker_gg():
 
     def _sync_get():
         url = f"https://api.tracker.gg/api/v2/smite2/standard/profile/{platform_name}/{platform_id}"
-        session = cffi_requests.Session(impersonate="chrome")
+        # "chrome124" pinned: matches every other tracker.gg caller
+        # (plugins/smite/plugin.py etc.); Cloudflare challenges the
+        # generic "chrome" fingerprint since July 2026.
+        session = cffi_requests.Session(impersonate="chrome124")
         try:
             resp = session.get(url, timeout=DEFAULT_TIMEOUT)
             return resp.status_code, len(resp.content or b"")
