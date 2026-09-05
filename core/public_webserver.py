@@ -59,6 +59,7 @@ from core.config import (
 from core import account_linking as _links
 from core import aspect_roster
 from core.aspect_roster import display_god
+from core.vod_web import VodWeb
 from core import web_session as _ws
 from core import events_store as _events
 from core import config as _config
@@ -355,6 +356,8 @@ class PublicWebServer:
         self.app.router.add_get("/api/me/profile",
                                 self._handle_api_me_profile)
         self.app.router.add_get("/live", self._handle_live_page)
+        # "Ask the VOD" archive search (core/vod_web.py) — page + /api/vod/*
+        VodWeb(self).register()
         self.app.router.add_get(
             "/Live",
             lambda r: web.HTTPMovedPermanently("/live"))

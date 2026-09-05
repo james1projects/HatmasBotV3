@@ -45,6 +45,16 @@ powershell -NoProfile -Command ^
 
 set EXITCODE=%ERRORLEVEL%
 
+REM "Ask the VOD": transcribe + index whatever the sorter just filed so
+REM hatmaster.tv/vod can search tonight's stream. Incremental (already-
+REM indexed recordings are skipped), GPU-bound, ~10x realtime. Its exit
+REM code is logged but never masks the sorter's.
+echo. >> "data\process_recordings.log"
+echo --- vod_index (Ask the VOD) --- >> "data\process_recordings.log"
+powershell -NoProfile -Command ^
+    "& { python toolsod_index.py index 2>&1 | Tee-Object -FilePath 'data\process_recordings.log' -Append }"
+echo vod_index exit code %ERRORLEVEL% >> "data\process_recordings.log"
+
 echo. >> "data\process_recordings.log"
 echo Run ended:   %DATE% %TIME%   (exit code %EXITCODE%) >> "data\process_recordings.log"
 

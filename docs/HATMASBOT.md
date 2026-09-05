@@ -2445,3 +2445,105 @@ movement is discarded, nobody held phantom shares), renamed 3
 price_history + 2 processed_matches rows. Suite:
 tools/test_clean_god_name.py (6, incl. exhaustive
 every-roster-god-concatenated round-trip).
+
+
+## v2.11 Update — Ask the VOD (2026-09-04)
+
+Searchable stream archive at **hatmaster.tv/vod**. Every sentence spoken on
+stream (GPU transcription of the mic and Discord tracks) plus every kill /
+death the offline detector already found, indexed against the source
+recordings so any hit plays as a short clip. Built as a standalone package
+(`vodsearch/`, zero HatmasBot imports) so it can be lifted out for other
+streamers; HatmasBot wires it in through two thin shims.
+
+### Pieces
+
+| Path | Role |
+| --- | --- |
+| `vodsearch/audio.py` | ffprobe + one-pass multi-track decode to 16 kHz mono numpy (`decode_tracks`), loudness / speech-fraction gates, `same_audio` duplicate-track check |
+| `vodsearch/transcribe.py` | faster-whisper wrapper (large-v3 fp16, batched pipeline, word timestamps), `split_sentences` (sentence-sized moments, max 15 s), `clean_segments` (hallucination + loop filter) |
+| `vodsearch/store.py` | SQLite schema: `recordings`, `tracks`, `segments` + FTS5 `segments_fts` (porter), `events`; `search()` (AND then OR fallback, bm25, `<mark>` snippets, event-proximity filter), `browse()`, `stats()` |
+| `vodsearch/clips.py` | `clip_window` clamping, deterministic `clip_name`, `build_clip_cmd` (H.264 720p, NVENC, all voice tracks `amix`ed, `-hwaccel cuda` decode), `render_attempts` fallback chain |
+| `vodsearch/indexer.py` | discover (sorted subfolders only, newest first) -> sidecar events -> decode -> gate -> transcribe -> store; incremental on size/mtime/model; prunes rows whose file vanished |
+| `vodsearch/cli.py` | `index` / `search` / `browse` / `clip` / `stats` |
+| `vodsearch/cuda.py` | Windows shim: ctranslate2 loads cuBLAS/cuDNN via plain `LoadLibrary`, which ignores `os.add_dll_directory`; this prepends the pip-installed `nvidia/*/bin` dirs to PATH and preloads the DLLs |
+| `tools/vod_index.py` | Stream Deck / CLI shim that fills `vodsearch.cli` defaults from `core/config.py` (`VOD_*`) |
+| `core/vod_web.py` | `VodWeb(server).register()`: `/vod`, `/api/vod/stats`, `/api/vod/search`, `/api/vod/clip/{key}.mp4`, `/api/vod/thumb/{key}.jpg` |
+| `public/vod.html` | The page: search box, event chips, god select, moment cards with on-demand video, copy-link deep links (`/vod?clip=s123`) |
+| `tools/vod_devserver.py` | aiohttp dev host for the real routes without the bot (launch.json `vod-dev`, port 8078) |
+| `tests/test_vodsearch.py` | 27 hermetic tests (store/FTS, query building, splitting, clip math, discovery, audio math) |
+
+### Data flow
+
+1. `streamdeck/process_recordings.bat` sorts tonight's recordings as before, then runs
+   `python tools\vod_index.py index` (incremental, ~10x realtime on the 5090; the full
+   22 h archive backfilled in about two hours).
+2. Per recording: ffprobe -> read `<stem>.events.json` -> decode tracks 1-3 in one
+   ffmpeg pass -> skip silent tracks (`speech_fraction < 2%`) and tracks byte-identical
+   to an earlier one (some OBS profiles mirrored the mic on track 2) -> transcribe ->
+   `split_sentences` -> FTS rows labelled `hatmaster` (track 1) or `friends` (tracks 2-3).
+3. The public site opens `data/vod/vod_index.db` read-only per request (in
+   `asyncio.to_thread`). A clip request resolves its key (`s<segment_id>` or
+   `e<event_id>`) to a window (segments: -5 s / +8 s, max 40 s; events: the detector's
+   pre/post + 3 s), renders once with ffmpeg as an asyncio subprocess (2 concurrent,
+   shared future per key), caches under `data/vod/clips/` (LRU-evicted past
+   `VOD_CLIP_CACHE_MAX_MB`), and serves it with `Cache-Control: public`.
+
+### Config (`core/config.py`)
+
+`VOD_RECORDINGS_DIR`, `VOD_DB_PATH`, `VOD_CLIPS_DIR`, `VOD_WHISPER_MODEL` (large-v3),
+`VOD_TRACKS` (`"1:hatmaster,2:friends,3:friends"`), `VOD_CLIP_AUDIO_TRACKS` (all four),
+`VOD_CLIP_HEIGHT` (720), `VOD_CLIP_ENCODER` (h264_nvenc, auto-falls back to libx264),
+`VOD_CLIP_MAX_CONCURRENT` (2), `VOD_CLIP_CACHE_MAX_MB` (4096), `VOD_FFMPEG`/`VOD_FFPROBE`.
+Feature toggle `web_vod` (dashboard) gates the page and every `/api/vod/*` route and is
+**OFF by default** (2026-09-04, James's call: not every recording is meant to be public).
+Until it is flipped on the dashboard the archive is reachable only through
+`tools/vod_devserver.py` on localhost. Flipping it publishes EVERY indexed recording,
+friends' Discord audio included; a per-recording publish flag is the planned next step
+before it ever goes on.
+
+### Install
+
+The bot needs nothing new (sqlite3 + ffmpeg). Transcription extras live in
+`requirements-vod.txt` (faster-whisper + ~1.5 GB of CUDA wheels), streaming PC only.
+huggingface-hub wants `click>=8.4` while gtts pins `click<8.2`; runtime is fine on
+8.1.x, so if pip ever bumps click, `pip install "click<8.2"`.
+
+### Editing workflow (local only)
+
+- **Full recording from here:** `GET /api/vod/stream/{key}.mp4` live-transcodes the source
+  from the moment's start (fragmented MP4 via `build_stream_cmd`, NVENC + CUDA decode,
+  capped at `VOD_STREAM_MAX_S`, `VOD_STREAM_MAX_CONCURRENT` at once). The page's
+  "Full recording from m:ss" button plays it; first frame in under a second, seeking
+  limited (no known duration). Client disconnect kills the ffmpeg child.
+- **Source file + offset:** when the request comes from loopback (`_is_local`, which
+  defers to the public server's `_is_local_admin` so tunneled visitors never qualify),
+  moments carry `path`, the page shows "Source Sylvanus-187.mp4 at 12:34" and a
+  "Copy file path" button for jumping to the spot in Resolve. `local: true/false` is
+  echoed in the search response.
+
+### Multikill tiers
+
+Every kill event carries `tier` (1 single .. 5 penta). The detectors already judge
+streaks with the 10 s rule and write the label on the kill that completed it ("double
+kill", "triple kill"); after overlap merging that label sits in the sidecar's `merged`
+list, so `event_tier` takes the biggest label in the group. The note text
+"kill + kill + kill + kill" is the merger listing overlapping clip windows, NOT a streak
+(the first cut counted it and produced phantom quadras, fixed 2026-09-04). With no label
+at all it falls back to the 10 s chain rule on the merged timestamps. `kind` is
+`multikill` for tier >= 2. `python tools\vod_index.py events` re-reads every sidecar and
+rewrites event rows without transcribing, for tier-rule changes or detector re-scans. The Multikills view sorts by tier then newest, and
+`event=double|triple|quadra|penta` (API and page chips) filters one tier. Event dicts in
+API responses carry `tier` + `label` ("Quadra kill"). `Store._migrate()` adds the column
+to older indexes and back-fills tiers from notes on open, so an index written by an older
+indexer self-heals.
+
+### Known limits / next
+
+- A `--force` re-index renumbers segment ids, so shared `?clip=s…` links from before
+  it stop resolving (incremental runs keep ids stable).
+- Whisper's batched mode punctuates sparsely, so some 15 s pieces cut mid-thought.
+- Search is keyword (FTS5 + porter stemming); semantic search is the obvious phase two.
+- Friends' Discord audio is transcribed and public; they know they are on stream, but
+  the `VOD_TRACKS` string is where to drop tracks 2-3 if that ever needs to change.
+- Not yet wired: `!clip <words>` in chat, feeding hits into `resolve_tiktok.py`.

@@ -9,6 +9,10 @@ import os
 import shutil
 from pathlib import Path
 
+# Safety net for tools that import config before touching the network:
+# points SSL_CERT_FILE at certifi's bundle (see core/tls_trust.py).
+from core import tls_trust  # noqa: F401
+
 BASE_DIR = Path(__file__).parent.parent
 DATA_DIR = BASE_DIR / "data"
 OVERLAY_DIR = BASE_DIR / "overlays"
@@ -475,6 +479,29 @@ FACTORIO_CARD_MAP = {
     "Boss Attack":  {"action": "boss_attack", "cooldown": 120},
 }
 
+# === ASK THE VOD (vodsearch/ + core/vod_web.py — hatmaster.tv/vod) ===
+# Searchable stream archive: GPU transcription of the mic/Discord tracks
+# of every sorted recording + the detector's kill/death sidecars, in one
+# SQLite FTS index. Indexed offline by tools/vod_index.py (the Stream
+# Deck sorter calls it after filing new recordings); served read-only
+# by the public site. Clips are rendered on demand (H.264 720p) and
+# cached under VOD_CLIPS_DIR so the 80 Mbps HEVC sources never leave
+# the PC. Toggle "web_vod" in DEFAULT_FEATURES hides the page.
+VOD_RECORDINGS_DIR = BASE_DIR / "recordings"
+VOD_DB_PATH = DATA_DIR / "vod" / "vod_index.db"
+VOD_CLIPS_DIR = DATA_DIR / "vod" / "clips"
+VOD_WHISPER_MODEL = "large-v3"          # faster-whisper model id (large-v3 ~10x realtime on the 5090)
+VOD_TRACKS = "1:hatmaster,2:friends,3:friends"   # OBS audio tracks to transcribe as index:speaker (identical tracks auto-skipped)
+VOD_CLIP_AUDIO_TRACKS = (0, 1, 2, 3)     # tracks mixed into rendered clips (game + voices)
+VOD_CLIP_HEIGHT = 720
+VOD_CLIP_ENCODER = "h264_nvenc"          # falls back to libx264 automatically
+VOD_CLIP_MAX_CONCURRENT = 2              # simultaneous ffmpeg renders on the public server
+VOD_CLIP_CACHE_MAX_MB = 4096             # oldest cached clips are evicted past this
+VOD_STREAM_MAX_S = 1800                  # "full recording from here" streams stop after 30 min
+VOD_STREAM_MAX_CONCURRENT = 2            # simultaneous live transcodes (each holds an NVENC session)
+VOD_FFMPEG = "ffmpeg"
+VOD_FFPROBE = "ffprobe"
+
 # === FEATURE TOGGLES ===
 # Defaults only. The dashboard's features card flips these live, and
 # flips persist across restarts in data/feature_overrides.json (sparse:
@@ -493,6 +520,7 @@ DEFAULT_FEATURES = {
     "web_trading": True,   # dashboard kill-switch; WEB_TRADING_ENABLED still gates
     "web_profile": True,   # off = hatmaster.tv/me 404s (invisibility contract)
     "web_live": True,      # off = hatmaster.tv/live 404s + /ws/live refuses
+    "web_vod": False,      # PRIVATE by default: hatmaster.tv/vod + /api/vod/* 404 until flipped on the dashboard
     "streamloots": True,   # gates event dispatch; connection stays up
     "factorio": True,      # gates card handling + chat announcements
     "spacegame": False,    # off = commands silent + hidden from /mod, game page 404s

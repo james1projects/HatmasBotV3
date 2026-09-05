@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#202C39">
+<title>Ask the VOD: Hatmaster.tv</title>
+<meta name="description" content="Search everything Hatmaster said on stream. Every kill, every death, every call, as a clip.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Hatmas Market">
+<meta property="og:url" content="https://hatmaster.tv/vod">
+<meta property="og:title" content="Ask the VOD: Hatmaster.tv">
+<meta property="og:description" content="Search everything Hatmaster said on stream. Every kill, every death, every call, as a clip.">
+<meta property="og:image" content="https://hatmaster.tv/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="stylesheet" href="/theme.css">
+<style>
+  .wrap { max-width: 860px; margin: 0 auto; padding: 16px 14px 80px; }
+
+  .brand-band {
+    display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 1px solid var(--border);
+    padding: 8px 0 12px; margin-bottom: 20px;
+    font-family: var(--font-sans); font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim);
+  }
+  .brand-band a.left { color: var(--accent); font-weight: 700; }
+  .brand-hat { height: 16px; vertical-align: -3px; margin-right: 6px; }
+  .right-cluster { display: flex; gap: 10px; }
+
+  .hero h1 {
+    font-family: var(--font-display); text-transform: uppercase;
+    font-size: 44px; line-height: 1; letter-spacing: 0.02em; margin: 0 0 6px;
+  }
+  .hero .sub { color: var(--text-dim); font-size: 15px; margin: 0 0 8px; max-width: 560px; }
+  .hero .stats { font-family: var(--font-mono); font-size: 12px; color: var(--text-fade); min-height: 16px; }
+
+  form.search { display: flex; gap: 8px; margin: 18px 0 10px; }
+  form.search input {
+    flex: 1; min-width: 0; font: inherit; font-size: 16px; padding: 12px 14px;
+    background: var(--panel); color: var(--text); border: 1px solid var(--border);
+    border-radius: var(--radius); outline: none;
+  }
+  form.search input:focus { border-color: var(--accent); }
+  form.search button {
+    font: inherit; font-weight: 700; padding: 0 18px; cursor: pointer;
+    background: var(--accent); color: var(--bg); border: 0; border-radius: var(--radius);
+  }
+  form.search button:hover { background: var(--accent-hi); }
+
+  .filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 18px; }
+  .chip {
+    font: inherit; font-size: 12px; font-weight: 600; padding: 6px 12px; cursor: pointer;
+    background: var(--panel); color: var(--text-dim); border: 1px solid var(--border);
+    border-radius: 999px;
+  }
+  .chip:hover { border-color: var(--border-hi); color: var(--text); }
+  .chip[aria-pressed="true"] { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  .chip.small { font-size: 11px; padding: 4px 10px; }
+  .tiers { display: inline-flex; gap: 6px; padding-left: 8px; border-left: 1px solid var(--border); }
+  .badge.multikill.tier-3 { background: var(--accent-hi); }
+  .badge.multikill.tier-4, .badge.multikill.tier-5 { background: var(--red); color: var(--bg); }
+  .filters select {
+    font: inherit; font-size: 12px; font-weight: 600; padding: 6px 10px;
+    background: var(--panel); color: var(--text-dim); border: 1px solid var(--border);
+    border-radius: 999px; margin-left: auto; max-width: 200px;
+  }
+
+  .results-head {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+    font-family: var(--font-display); text-transform: uppercase; letter-spacing: 0.04em;
+    font-size: 20px; margin: 0 0 10px;
+  }
+  .results-head .note { font-family: var(--font-sans); text-transform: none; letter-spacing: 0;
+    font-size: 12px; color: var(--text-dim); }
+  .results-head a { font-family: var(--font-sans); text-transform: none; letter-spacing: 0;
+    font-size: 13px; color: var(--accent); }
+  .empty, .error { color: var(--text-dim); padding: 24px 0; }
+  .error { color: var(--red); }
+
+  .card {
+    display: grid; grid-template-columns: 280px 1fr; gap: 14px;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 12px; margin-bottom: 12px;
+  }
+  .thumb {
+    position: relative; aspect-ratio: 16 / 9; background: var(--bg-2);
+    border-radius: var(--radius); overflow: hidden; cursor: pointer;
+  }
+  .thumb img, .thumb video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .thumb video { object-fit: contain; background: #000; }
+  .thumb .play {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  }
+  .thumb .play::before {
+    content: ""; width: 0; height: 0;
+    border-left: 22px solid var(--text); border-top: 13px solid transparent; border-bottom: 13px solid transparent;
+    margin-left: 6px; filter: drop-shadow(0 1px 4px rgba(0,0,0,0.7)); opacity: 0.92;
+  }
+  .thumb:hover .play::before { border-left-color: var(--accent); }
+  .thumb .state {
+    position: absolute; left: 0; right: 0; bottom: 0; padding: 6px 8px;
+    font-family: var(--font-mono); font-size: 11px; background: rgba(0,0,0,0.65); color: var(--text);
+  }
+  .thumb .state.bad { color: var(--red); }
+
+  .meta { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: 12px; color: var(--text-dim); }
+  .god { font-family: var(--font-display); text-transform: uppercase; font-size: 16px; letter-spacing: 0.04em; color: var(--text); }
+  .god a { color: inherit; text-decoration: none; }
+  .god a:hover { color: var(--accent); }
+  .mono { font-family: var(--font-mono); }
+  .badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: var(--radius-sm); background: var(--bg-2); color: var(--text-dim); }
+  .badge.kill { background: var(--green-bg); color: var(--green); }
+  .badge.multikill { background: var(--accent); color: var(--bg); }
+  .badge.death { background: var(--red-bg); color: var(--red); }
+  .badge.speaker { background: var(--panel-hi); color: var(--text); }
+  .line { margin: 8px 0 0; font-size: 15px; line-height: 1.45; }
+  .line mark { background: var(--accent); color: var(--bg); padding: 0 2px; border-radius: 2px; }
+  .line.quiet { color: var(--text-fade); font-style: italic; }
+  .actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .source { margin-top: 8px; font-family: var(--font-mono); font-size: 11px; color: var(--text-fade);
+    word-break: break-all; }
+  .source b { color: var(--text-dim); font-weight: 600; }
+  .actions button {
+    font: inherit; font-size: 12px; padding: 5px 10px; cursor: pointer;
+    background: transparent; color: var(--text-dim); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  }
+  .actions button:hover { color: var(--text); border-color: var(--border-hi); }
+
+  .more { display: block; width: 100%; margin: 6px 0 0; font: inherit; font-weight: 600; padding: 12px;
+    cursor: pointer; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); }
+  .more:hover { border-color: var(--border-hi); }
+  .more[hidden] { display: none; }   /* display:block above would otherwise beat the hidden attribute */
+
+  @media (max-width: 640px) {
+    .card { grid-template-columns: 1fr; }
+    .hero h1 { font-size: 36px; }
+    .filters select { margin-left: 0; max-width: 100%; }
+  }
+</style>
+</head>
+<body>
+  <a class="skip-link" href="#maincontent">Skip to content</a>
+  <div class="wrap" id="maincontent" role="main" tabindex="-1">
+    <div class="brand-band" role="banner">
+      <a class="left" href="/"><img class="brand-hat" src="/hat.png" alt="">HATMASTER.TV</a>
+      <div class="right-cluster">
+        <a href="/market" class="icon-toggle" style="text-decoration: none;" title="All god prices + the full market">Market</a>
+        <a href="/live" class="icon-toggle" style="text-decoration: none;" title="Live match">Live</a>
+        <a href="/me" class="icon-toggle" style="text-decoration: none;" title="Your profile">Profile</a>
+      </div>
+    </div>
+
+    <div class="hero">
+      <h1>Ask the VOD</h1>
+      <p class="sub">Search everything Hatmaster said on stream. Every kill, every death, every call, as a clip.</p>
+      <div class="stats" id="stats"></div>
+    </div>
+
+    <form class="search" id="form" role="search">
+      <input type="search" id="q" name="q" placeholder="nice trap, first blood, I hate this god" autocomplete="off" aria-label="Search the archive">
+      <button type="submit">Search</button>
+    </form>
+    <div class="filters" id="filters">
+      <button type="button" class="chip" data-event="" aria-pressed="true">All</button>
+      <button type="button" class="chip" data-event="kill" aria-pressed="false">Kills</button>
+      <button type="button" class="chip" data-event="multikill" aria-pressed="false">Multikills</button>
+      <button type="button" class="chip" data-event="death" aria-pressed="false">Deaths</button>
+      <span class="tiers" id="tiers" hidden>
+        <button type="button" class="chip small" data-event="double" aria-pressed="false">Double</button>
+        <button type="button" class="chip small" data-event="triple" aria-pressed="false">Triple</button>
+        <button type="button" class="chip small" data-event="quadra" aria-pressed="false">Quadra</button>
+        <button type="button" class="chip small" data-event="penta" aria-pressed="false">Penta</button>
+      </span>
+      <select id="god" aria-label="Filter by god"><option value="">All gods</option></select>
+    </div>
+
+    <div class="results-head"><span id="head">Latest moments</span><span class="note" id="note"></span></div>
+    <div id="results"></div>
+    <button type="button" class="more" id="more" hidden>Load more</button>
+  </div>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const state = { q: "", god: "", event: "", offset: 0, limit: 20, total: 0, key: "" };
+  let activeVideo = null;
+
+  function esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+  function snippetHtml(s) {
+    return esc(s).replace(/&lt;mark&gt;/g, "<mark>").replace(/&lt;\/mark&gt;/g, "</mark>");
+  }
+  function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+
+  function badgeFor(ev) {
+    const kind = ev.kind || "";
+    if (kind === "multikill") {
+      const tier = ev.tier || 0;
+      const label = ev.label || (cap(((/(double|triple|quadra|penta)/i.exec(ev.note || "") || [])[1] || "multikill").toLowerCase()) + (tier ? " kill" : ""));
+      return '<span class="badge multikill tier-' + tier + '">' + esc(label) + "</span>";
+    }
+    if (kind === "kill") return '<span class="badge kill">Kill</span>';
+    if (kind === "death") return '<span class="badge death">Death</span>';
+    if (kind === "assist") return '<span class="badge">Assist</span>';
+    return "";
+  }
+
+  function speakerChip(sp) {
+    if (!sp) return "";
+    const label = sp === "hatmaster" ? "Hatmaster" : "Friends";
+    return '<span class="badge speaker">' + label + "</span>";
+  }
+
+  function renderCard(m) {
+    const card = document.createElement("article");
+    card.className = "card";
+    const god = m.god
+      ? '<span class="god"><a href="/god/' + encodeURIComponent(m.god) + '">' + esc(m.god) + "</a></span>"
+      : '<span class="god">Unknown god</span>';
+    const badges = (m.events || []).map(badgeFor).join("");
+    const line = m.snippet
+      ? '<p class="line">' + snippetHtml(m.snippet) + "</p>"
+      : '<p class="line quiet">(no speech near this moment)</p>';
+    card.innerHTML =
+      '<div class="thumb" role="button" tabindex="0" aria-label="Play clip">' +
+        (m.thumb_url ? '<img loading="lazy" src="' + esc(m.thumb_url) + '" alt="">' : "") +
+        '<div class="play"></div>' +
+      "</div>" +
+      "<div>" +
+        '<div class="meta">' + god +
+          '<span class="mono">' + esc(m.date || "") + "</span>" +
+          '<span class="mono">' + esc(m.clock || "") + "</span>" +
+          speakerChip(m.speaker) + badges +
+        "</div>" + line +
+        '<div class="actions">' +
+          '<button type="button" class="full" title="Play the whole recording from this moment">Full recording from ' + esc(m.clock || "") + "</button>" +
+          '<button type="button" class="copy">Copy link</button>' +
+          (m.path ? '<button type="button" class="copypath" title="Copy the source file path for the editor">Copy file path</button>' : "") +
+        "</div>" +
+        (m.path ? '<div class="source"><b>Source</b> ' + esc(fileName(m.path)) + " at " + esc(m.clock || "") + "</div>" : "") +
+      "</div>";
+    const thumb = card.querySelector(".thumb");
+    const play = () => playClip(thumb, m);
+    thumb.addEventListener("click", play);
+    thumb.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); play(); } });
+    card.querySelector(".copy").addEventListener("click", (e) => copyLink(e.currentTarget, m));
+    card.querySelector(".full").addEventListener("click", () => playStream(thumb, m));
+    const cp = card.querySelector(".copypath");
+    if (cp) cp.addEventListener("click", (e) => copyText(e.currentTarget, m.path, "Copy file path"));
+    return card;
+  }
+
+  function fileName(p) { return String(p || "").split(/[\\/]/).pop(); }
+
+  function playStream(thumb, m) {
+    if (!m.stream_url) return;
+    document.querySelectorAll("video").forEach((o) => { try { o.pause(); } catch (_) {} });
+    activeVideo = thumb;
+    thumb.innerHTML = '<div class="state">Starting full recording from ' + esc(m.clock || "") + ", seeking is limited</div>";
+    const v = document.createElement("video");
+    v.controls = true; v.autoplay = true; v.playsInline = true; v.preload = "auto";
+    v.src = m.stream_url;
+    const st = thumb.querySelector(".state");
+    v.addEventListener("playing", () => { st.textContent = "Full recording from " + (m.clock || ""); setTimeout(() => st.remove(), 2500); });
+    v.addEventListener("error", () => { st.textContent = "Stream unavailable"; st.className = "state bad"; });
+    thumb.insertBefore(v, st);
+  }
+
+  function copyText(btn, text, label) {
+    const done = () => { btn.textContent = "Copied"; setTimeout(() => { btn.textContent = label; }, 1500); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, () => { prompt("Copy this", text); });
+    } else {
+      prompt("Copy this", text);
+    }
+  }
+
+  function playClip(thumb, m) {
+    if (!m.clip_url) return;
+    const existing = thumb.querySelector("video");
+    if (existing) { existing.play(); return; }
+    if (activeVideo && activeVideo !== thumb) { try { activeVideo.querySelector("video").pause(); } catch (_) {} }
+    activeVideo = thumb;
+    thumb.innerHTML = '<div class="state">Rendering clip</div>';
+    const v = document.createElement("video");
+    v.controls = true; v.autoplay = true; v.playsInline = true; v.preload = "auto";
+    v.src = m.clip_url;
+    const st = thumb.querySelector(".state");
+    v.addEventListener("loadeddata", () => { st.remove(); });
+    v.addEventListener("error", () => { st.textContent = "Clip unavailable"; st.className = "state bad"; });
+    v.addEventListener("play", () => {
+      document.querySelectorAll("video").forEach((o) => { if (o !== v) o.pause(); });
+    });
+    thumb.insertBefore(v, st);
+  }
+
+  function copyLink(btn, m) {
+    const url = location.origin + "/vod?clip=" + encodeURIComponent(m.key || "");
+    const done = () => { btn.textContent = "Copied"; setTimeout(() => { btn.textContent = "Copy link"; }, 1500); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(done, () => { prompt("Copy this link", url); });
+    } else {
+      prompt("Copy this link", url);
+    }
+  }
+
+  function syncUrl() {
+    const p = new URLSearchParams();
+    if (state.key) p.set("clip", state.key);
+    else {
+      if (state.q) p.set("q", state.q);
+      if (state.god) p.set("god", state.god);
+      if (state.event) p.set("event", state.event);
+    }
+    const qs = p.toString();
+    history.replaceState(null, "", location.pathname + (qs ? "?" + qs : ""));
+  }
+
+  async function fetchJson(url) {
+    const r = await fetch(url, { headers: { "Accept": "application/json" } });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return r.json();
+  }
+
+  async function loadStats() {
+    try {
+      const s = await fetchJson("/api/vod/stats");
+      const kills = ((s.events || {}).kill || 0) + ((s.events || {}).multikill || 0);
+      if (!s.ready) {
+        $("stats").textContent = "The archive is still being built. Check back soon.";
+        $("q").disabled = true;
+        return;
+      }
+      $("stats").textContent = s.hours + " hours, " + s.recordings + " recordings, " +
+        s.segments + " lines, " + kills + " kills indexed";
+      const sel = $("god");
+      (s.gods || []).forEach((g) => {
+        const o = document.createElement("option");
+        o.value = g.god; o.textContent = g.god + " (" + g.recordings + ")";
+        sel.appendChild(o);
+      });
+      sel.value = state.god;
+      if (sel.value !== state.god) { state.god = ""; }
+    } catch (_) {
+      $("stats").textContent = "";
+    }
+  }
+
+  function setHead(text, note) {
+    $("head").textContent = text;
+    $("note").textContent = note || "";
+  }
+
+  async function search(append) {
+    if (!append) { state.offset = 0; $("results").innerHTML = ""; }
+    $("more").hidden = true;
+    const p = new URLSearchParams({ limit: String(state.limit), offset: String(state.offset) });
+    if (state.key) p.set("key", state.key);
+    else {
+      if (state.q) p.set("q", state.q);
+      if (state.god) p.set("god", state.god);
+      if (state.event) p.set("event", state.event);
+    }
+    let res;
+    try {
+      res = await fetchJson("/api/vod/search?" + p.toString());
+    } catch (_) {
+      $("results").innerHTML = '<div class="error">Could not reach the archive. Try again.</div>';
+      return;
+    }
+    state.total = res.total || 0;
+    const moments = res.moments || [];
+    if (state.key) {
+      setHead("Shared moment", "");
+      $("note").innerHTML = '<a href="/vod">Back to search</a>';
+    } else if (!state.q) {
+      const multi = state.event === "multikill" || TIERS.includes(state.event);
+      setHead(multi ? "Biggest multikills" : "Latest moments",
+              multi ? "Sorted by streak size, then newest" : (state.event ? "" : "Newest kills and deaths first"));
+    } else {
+      setHead(state.total + (state.total === 1 ? " result for " : " results for ") + '"' + state.q + '"',
+              res.mode === "or" ? "No exact match, showing lines with any of those words." : "");
+    }
+    if (!moments.length && !append) {
+      $("results").innerHTML = '<div class="empty">' +
+        (state.key ? "That moment is no longer in the archive." : "Nothing found. Try fewer words, or a different god.") +
+        "</div>";
+      return;
+    }
+    const frag = document.createDocumentFragment();
+    moments.forEach((m) => frag.appendChild(renderCard(m)));
+    $("results").appendChild(frag);
+    state.offset += moments.length;
+    $("more").hidden = state.key || state.offset >= state.total || moments.length < state.limit;
+    syncUrl();
+  }
+
+  // ── wiring ──
+  $("form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    state.key = "";
+    state.q = $("q").value.trim();
+    search(false);
+  });
+  const TIERS = ["double", "triple", "quadra", "penta"];
+  function applyChips() {
+    const ev = state.event;
+    const mainVal = TIERS.includes(ev) ? "multikill" : ev;
+    document.querySelectorAll(".chip").forEach((c) => {
+      const v = c.dataset.event || "";
+      const on = c.classList.contains("small") ? v === ev : v === mainVal;
+      c.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+    $("tiers").hidden = !(mainVal === "multikill");
+  }
+  $("filters").addEventListener("click", (e) => {
+    const b = e.target.closest(".chip");
+    if (!b) return;
+    const v = b.dataset.event || "";
+    // clicking the active tier chip goes back to all multikills
+    state.event = (b.classList.contains("small") && state.event === v) ? "multikill" : v;
+    state.key = "";
+    applyChips();
+    search(false);
+  });
+  $("god").addEventListener("change", () => { state.god = $("god").value; state.key = ""; search(false); });
+  $("more").addEventListener("click", () => search(true));
+
+  // ── boot ──
+  const params = new URLSearchParams(location.search);
+  state.q = (params.get("q") || "").trim();
+  state.god = params.get("god") || "";
+  state.event = params.get("event") || "";
+  state.key = (params.get("clip") || "").trim();
+  $("q").value = state.q;
+  applyChips();
+  if (window.matchMedia && !window.matchMedia("(max-width: 640px)").matches && !state.key) { $("q").focus(); }
+  loadStats().then(() => search(false));
+})();
+</script>
+<script src="/auth.js"></script>
+</body>
+</html>

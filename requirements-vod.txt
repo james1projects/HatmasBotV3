@@ -1,0 +1,21 @@
+# "Ask the VOD" transcription extras (vodsearch/ + tools/vod_index.py)
+# ---------------------------------------------------------------------
+# Kept out of requirements.txt on purpose: these pull ~1.5 GB of CUDA
+# runtime wheels, which CI and the bot itself never need. The public
+# site only READS the index (sqlite3 + ffmpeg), so the bot runs without
+# any of this. Install once on the streaming PC:
+#
+#     pip install -r requirements-vod.txt
+#
+# Model weights (~3 GB for large-v3) download from Hugging Face on the
+# first `python tools\vod_index.py` run and are cached under
+# %USERPROFILE%\.cache\huggingface.
+
+faster-whisper>=1.2.1           # GPU transcription (CTranslate2)
+nvidia-cublas-cu12>=12.9        # CUDA runtime DLLs ctranslate2 loads at run time
+nvidia-cudnn-cu12>=9.25         # (vodsearch/cuda.py puts them on PATH; see its docstring)
+
+# faster-whisper -> huggingface-hub wants click>=8.4, while gtts (bot TTS)
+# pins click<8.2. Runtime is fine on click 8.1.x because hf-hub only needs
+# click for its CLI. If pip ever upgrades click past 8.2, gtts breaks:
+#     pip install "click<8.2"

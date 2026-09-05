@@ -22,6 +22,12 @@ Pillow>=10.0.0                  # PIL — image read/write/composition
 opencv-python>=4.9.0            # cv2 — god portrait + KDA digit matching
 numpy>=1.26.0                   # array ops for cv2 / kda_reader
 
+# === Ask the VOD (vodsearch/ + hatmaster.tv/vod) ===
+# The site only reads the index (sqlite3 + ffmpeg), nothing to install
+# here. The GPU transcription extras (faster-whisper + CUDA wheels,
+# ~1.5 GB) live in requirements-vod.txt for the streaming PC only:
+#     pip install -r requirements-vod.txt
+
 # === Cloudflare bypass (tracker.gg + smite2 wiki) ===
 curl_cffi>=0.6.0                # Chrome TLS fingerprint impersonation
 

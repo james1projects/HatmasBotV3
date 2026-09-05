@@ -97,6 +97,12 @@ Optional refinement once the basics feel good: an END STREAM Multi
 Action that fires `go_offline.bat` then `process_recordings.bat` in
 one press.
 
+PROCESS RECS also runs the "Ask the VOD" indexer (`tools\vod_index.py`)
+after the sorter, so tonight's recordings are searchable on
+hatmaster.tv/vod a few minutes later. Its output lands in the same
+`data\process_recordings.log`; a failure there never masks the sorter's
+exit code.
+
 ---
 
 ## Maintenance

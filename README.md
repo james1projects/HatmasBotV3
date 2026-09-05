@@ -23,6 +23,7 @@ A Twitch chat bot, stream-automation suite, and companion website for Hatmaster'
 - **Streamloots Hub** — Listens to the alert SSE stream and dispatches card redemptions, chest purchases, and gifts to consumers.
 - **Factorio Integration** — The `hatmas-events` Factorio mod (viewer pets, boss biters) driven by Streamloots cards.
 - **Discord Bridge** — Cross-posts stream status / events to Discord.
+- **Ask the VOD** — `hatmaster.tv/vod`: full-text search over everything said on stream (GPU transcription of the mic and Discord tracks) plus every detector kill/death, with clips rendered on demand and shareable links. Standalone `vodsearch/` package; the Stream Deck recording sorter indexes each night's recordings automatically.
 - **Public Website** — `hatmaster.tv`: a home page with the live Twitch embed + YouTube/TikTok/Bluesky tabs, the Hatmas Market at `/market` (god prices, portfolios, trading with Twitch login), and the community/god-request page.
 - **Auto-Shoutout on Raid**, **OBS Control**, and a browser **Control Panel** for your second monitor.
 
@@ -153,6 +154,7 @@ plugins/
   voicelines, economy/, god_pool, streamloots, factorio/,
   discord_bridge, youtube_rewards, stream_status,
   youtube_live_badge, backup_manager, custom_commands
+vodsearch/             — "Ask the VOD" archive: transcription, FTS index, clip rendering (standalone package)
 overlays/              — OBS browser-source HTML + shared theme/client
 public/                — hatmaster.tv front-end (login, trading, community)
 tools/                 — Ops + offline pipelines (VOD highlights, thumbnails, etc.)
