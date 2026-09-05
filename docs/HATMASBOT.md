@@ -2636,6 +2636,23 @@ Added later the same night.
   meaning matches, key lookups, stats) while keeping it searchable locally, struck
   through with a Hidden badge. Per-moment privacy on top of per-recording visibility.
 
+### Speaker labels follow the voice; death report
+
+- **The mic moved tracks.** May–July 2026 recordings carry the mic on OBS track 3
+  with track 1 silent; later ones have it on track 1 with a mirror on 2. A fixed
+  index→label map mislabeled 13,357 of 14,267 lines as "friends". `assign_speakers`
+  (indexer.py) now decides per recording: the configured primary track (`VOD_TRACKS`
+  index labeled `hatmaster`) keeps its label when it has speech; when it is silent,
+  the track with the most speech becomes `hatmaster` and the others keep the
+  non-primary label. `python tools\vod_index.py relabel` re-applies the rule to an
+  existing index from the stored per-track speech levels (no transcription; 308 of
+  442 recordings, 10,094 lines fixed on 9/5).
+- **`tools/death_report.py`**: for each detector death, your own lines from the
+  25 s before it (`--friends` adds the other track), grouped by god, plus the words
+  that recur across deaths. `--summarize` asks a LOCAL Ollama model for a two-
+  paragraph read. Private review tool: reads the index, never touches the site.
+  Example on 9/5: 34 Sylvanus deaths, "baron" said before 4 of them.
+
 ### Still open after this run
 
 - The co-caster is stage 1: no on-stream voice by default. `overlays/cocaster.html`
