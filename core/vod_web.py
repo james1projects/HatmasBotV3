@@ -19,6 +19,19 @@ Routes
                                     transcoded as a fragmented MP4 (starts in ~1 s,
                                     limited seeking, capped at VOD_STREAM_MAX_S)
 
+    GET /vod/review                 LOCAL ONLY: per-recording publish/unpublish page
+    GET /api/vod/review             LOCAL ONLY: every recording + counts + visibility
+    POST /api/vod/review            LOCAL ONLY: {"ids": [..], "visibility": "public"|"private"}
+
+Access model (2026-09-05, James's privacy call):
+  * A loopback browser (James at localhost) always gets the whole
+    archive, toggle or not, plus file paths and the review page.
+  * Everyone else gets nothing unless the "web_vod" toggle is on, and
+    then only recordings whose visibility is 'public'. New recordings
+    are private by default; only the review page / `vod_index.py
+    publish` can flip them. Clips, thumbnails, and streams of private
+    recordings 404 for non-local requests even with a valid key.
+
 Clips are rendered on first request (H.264 720p, all voice tracks mixed
 in) and cached under VOD_CLIPS_DIR; concurrent requests for the same
 clip share one render, and total renders are capped by a semaphore so
@@ -81,13 +94,21 @@ class VodWeb:
         r.add_get("/api/vod/clip/{key}.mp4", self.handle_clip)
         r.add_get("/api/vod/thumb/{key}.jpg", self.handle_thumb)
         r.add_get("/api/vod/stream/{key}.mp4", self.handle_stream)
+        r.add_get("/vod/review", self.handle_review_page)
+        r.add_get("/api/vod/review", self.handle_review_list)
+        r.add_post("/api/vod/review", self.handle_review_set)
 
-    def _enabled(self) -> bool:
+    def _toggle_on(self) -> bool:
         try:
-            on = bool(self.server._feature_on("web_vod"))
+            return bool(self.server._feature_on("web_vod"))
         except Exception:
-            on = True
-        return on
+            return True
+
+    def _enabled(self, request: Optional[web.Request] = None) -> bool:
+        """Local browser: always. Tunneled visitor: only with the toggle."""
+        if request is not None and self._is_local(request):
+            return True
+        return self._toggle_on()
 
     def _index_ready(self) -> bool:
         return self.db_path.exists()
@@ -123,6 +144,7 @@ class VodWeb:
             d = dict(m)
             if not local:
                 d.pop("path", None)
+                d.pop("visibility", None)
             if d.get("segment_id"):
                 key = f"s{int(d['segment_id'])}"
             elif d.get("event_id"):
@@ -141,23 +163,28 @@ class VodWeb:
     # ── handlers ──────────────────────────────────────────────────────
 
     async def handle_page(self, request: web.Request):
-        if not self._enabled():
+        if not self._enabled(request):
             raise web.HTTPNotFound()
         return web.FileResponse(PUBLIC_DIR / "vod.html",
                                 headers={"Cache-Control": "no-cache"})
 
     async def handle_stats(self, request: web.Request):
-        if not self._enabled():
+        if not self._enabled(request):
             raise web.HTTPNotFound()
         if not self._index_ready():
             return web.json_response({"ready": False, "recordings": 0, "hours": 0,
                                       "segments": 0, "events": {}, "gods": []})
-        stats = await self._with_store(lambda s: s.stats())
+        local = self._is_local(request)
+        stats = await self._with_store(lambda s: s.stats(public_only=not local))
         stats["ready"] = stats.get("recordings", 0) > 0
-        return web.json_response(stats, headers={"Cache-Control": "public, max-age=60"})
+        stats["local"] = local
+        if not local:
+            stats.pop("by_status", None)
+            stats.pop("by_visibility", None)
+        return web.json_response(stats, headers={"Cache-Control": "no-cache" if local else "public, max-age=60"})
 
     async def handle_search(self, request: web.Request):
-        if not self._enabled():
+        if not self._enabled(request):
             raise web.HTTPNotFound()
         q = (request.query.get("q") or "").strip()[:200]
         god = (request.query.get("god") or "").strip()[:40] or None
@@ -178,7 +205,7 @@ class VodWeb:
             if not _KEY_RE.match(key):
                 return web.json_response({"error": "bad key"}, status=400)
             moment = await self._with_store(lambda s: self._moment_for_key(s, key))
-            if moment is None:
+            if moment is None or (not local and moment.get("visibility") != "public"):
                 return web.json_response({"mode": "key", "total": 0, "moments": [], "q": ""})
             return web.json_response({"mode": "key", "total": 1, "q": "",
                                       "moments": self._decorate([moment], local)},
@@ -186,8 +213,10 @@ class VodWeb:
 
         def _query(store: Store) -> dict:
             if q:
-                return store.search(q, god=god, event=event, limit=limit, offset=offset)
-            return store.browse(god=god, event=event or "any", limit=limit, offset=offset)
+                return store.search(q, god=god, event=event, limit=limit, offset=offset,
+                                    public_only=not local)
+            return store.browse(god=god, event=event or "any", limit=limit, offset=offset,
+                                public_only=not local)
 
         res = await self._with_store(_query)
         if local:
@@ -224,7 +253,7 @@ class VodWeb:
             mid = (float(seg["start_s"]) + float(seg["end_s"])) / 2.0
             return {
                 "segment_id": int(seg["id"]), "recording_id": int(seg["recording_id"]),
-                "path": seg.get("path"),
+                "path": seg.get("path"), "visibility": seg.get("visibility") or "private",
                 "god": seg.get("god"), "recorded_at": seg.get("recorded_at"),
                 "start_s": float(seg["start_s"]), "end_s": float(seg["end_s"]),
                 "speaker": seg.get("speaker"), "text": seg.get("text"),
@@ -241,6 +270,7 @@ class VodWeb:
         return {
             "segment_id": None, "event_id": int(ev["id"]),
             "recording_id": int(ev["recording_id"]), "path": ev.get("path"),
+            "visibility": ev.get("visibility") or "private",
             "god": ev.get("god") or ev.get("rec_god"), "recorded_at": ev.get("recorded_at"),
             "start_s": max(0.0, ts - float(ev.get("pre_s") or 0)),
             "end_s": ts + float(ev.get("post_s") or 0), "ts_s": ts,
@@ -252,8 +282,20 @@ class VodWeb:
 
     # ── clips ─────────────────────────────────────────────────────────
 
-    async def _resolve_key(self, key: str) -> Optional[Tuple[int, str, float, float, float]]:
-        """-> (recording_id, source_path, start_s, end_s, mid_s) or None."""
+    async def _resolve_key(self, key: str, request: Optional[web.Request] = None
+                           ) -> Optional[Tuple[int, str, float, float, float]]:
+        """-> (recording_id, source_path, start_s, end_s, mid_s) or None.
+        With `request`, a private recording resolves to None for anyone
+        who is not the local browser."""
+        resolved = await self._resolve_key_raw(key)
+        if resolved is None:
+            return None
+        rec_id, src, start, end, mid, visibility = resolved
+        if request is not None and not self._is_local(request) and visibility != "public":
+            return None
+        return rec_id, src, start, end, mid
+
+    async def _resolve_key_raw(self, key: str):
         m = _KEY_RE.match(key or "")
         if not m:
             return None
@@ -269,7 +311,8 @@ class VodWeb:
                                                    dur, SEGMENT_PRE_S, SEGMENT_POST_S,
                                                    max_len=SEGMENT_MAX_S)
                 mid = (float(seg["start_s"]) + float(seg["end_s"])) / 2.0
-                return int(seg["recording_id"]), seg["path"], start, end, mid
+                return (int(seg["recording_id"]), seg["path"], start, end, mid,
+                        seg.get("visibility") or "private")
             ev = store.get_event(ident)
             if not ev:
                 return None
@@ -278,7 +321,8 @@ class VodWeb:
             post = (float(ev.get("post_s") or 0) or clips_mod.DEFAULT_POST_S) + EVENT_EXTRA_POST_S
             ts = float(ev["ts_s"])
             start, end = clips_mod.clip_window(ts, None, dur, pre, post)
-            return int(ev["recording_id"]), ev["path"], start, end, ts
+            return (int(ev["recording_id"]), ev["path"], start, end, ts,
+                    ev.get("visibility") or "private")
 
         return await self._with_store(_lookup)
 
@@ -359,10 +403,10 @@ class VodWeb:
                 break
 
     async def handle_clip(self, request: web.Request):
-        if not self._enabled() or not self._index_ready():
+        if not self._enabled(request) or not self._index_ready():
             raise web.HTTPNotFound()
         key = request.match_info.get("key", "")
-        resolved = await self._resolve_key(key)
+        resolved = await self._resolve_key(key, request)
         if not resolved:
             raise web.HTTPNotFound()
         rec_id, src, start, end, _mid = resolved
@@ -391,10 +435,10 @@ class VodWeb:
         VOD_STREAM_MAX_S later (or the end of the file), piping ffmpeg's
         fragmented MP4 straight into the response. The browser starts
         playing after the first fragment. Client disconnect kills ffmpeg."""
-        if not self._enabled() or not self._index_ready():
+        if not self._enabled(request) or not self._index_ready():
             raise web.HTTPNotFound()
         key = request.match_info.get("key", "")
-        resolved = await self._resolve_key(key)
+        resolved = await self._resolve_key(key, request)
         if not resolved:
             raise web.HTTPNotFound()
         rec_id, src, start, _end, _mid = resolved
@@ -460,11 +504,68 @@ class VodWeb:
             pass
         return resp
 
+    # ── review (local only) ───────────────────────────────────────────
+
+    async def handle_review_page(self, request: web.Request):
+        if not self._is_local(request):
+            raise web.HTTPNotFound()
+        return web.FileResponse(PUBLIC_DIR / "vod_review.html",
+                                headers={"Cache-Control": "no-cache"})
+
+    async def handle_review_list(self, request: web.Request):
+        if not self._is_local(request):
+            raise web.HTTPNotFound()
+        if not self._index_ready():
+            return web.json_response({"recordings": [], "toggle": self._toggle_on()})
+        rows = await self._with_store(lambda s: s.review_list())
+        for r in rows:
+            key = f"e{r['top_event_id']}" if r.get("top_event_id") else (
+                f"s{r['first_segment_id']}" if r.get("first_segment_id") else None)
+            r["thumb_url"] = f"/api/vod/thumb/{key}.jpg" if key else None
+            r["key"] = key
+            r["date"] = (r.get("recorded_at") or "")[:10]
+            r["clock"] = _fmt_clock(r.get("duration_s") or 0)
+        return web.json_response({"recordings": rows, "toggle": self._toggle_on()},
+                                 headers={"Cache-Control": "no-cache"})
+
+    async def handle_review_set(self, request: web.Request):
+        if not self._is_local(request):
+            raise web.HTTPNotFound()
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "bad json"}, status=400)
+        vis = str(body.get("visibility") or "").lower()
+        if vis not in ("public", "private"):
+            return web.json_response({"error": "visibility must be public or private"}, status=400)
+        try:
+            ids = [int(i) for i in (body.get("ids") or [])][:5000]
+        except (TypeError, ValueError):
+            return web.json_response({"error": "bad ids"}, status=400)
+        god = (body.get("god") or "").strip()[:40] or None
+        folder = (body.get("folder") or "").strip()[:80] or None
+
+        def _apply(store: Store) -> dict:
+            target = list(ids)
+            if god:
+                target += store.recording_ids(god=god)
+            if folder:
+                target += store.recording_ids(folder=folder)
+            if body.get("all"):
+                target += store.recording_ids()
+            n = store.set_visibility(sorted(set(target)), vis)
+            return {"changed": n, "by_visibility": store.stats().get("by_visibility")}
+
+        res = await self._with_store(_apply)
+        res["ok"] = True
+        res["visibility"] = vis
+        return web.json_response(res)
+
     async def handle_thumb(self, request: web.Request):
-        if not self._enabled() or not self._index_ready():
+        if not self._enabled(request) or not self._index_ready():
             raise web.HTTPNotFound()
         key = request.match_info.get("key", "")
-        resolved = await self._resolve_key(key)
+        resolved = await self._resolve_key(key, request)
         if not resolved:
             raise web.HTTPNotFound()
         rec_id, src, _start, _end, mid = resolved

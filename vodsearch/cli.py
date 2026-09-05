@@ -7,6 +7,8 @@ vodsearch command line.
     python -m vodsearch.cli clip   --segment ID | --event ID | --recording ID --start S [--end E]  [--out DIR]
     python -m vodsearch.cli stats
     python -m vodsearch.cli events                 # re-read sidecars only (tier rules changed / detector re-scanned)
+    python -m vodsearch.cli publish   --god Ymir | --recording 12 | --folder Sylvanus | --all
+    python -m vodsearch.cli unpublish --all        # everything private again (the default state)
 
 HatmasBot's `tools/vod_index.py` calls `main(argv, defaults=...)` with
 the repo's config values so none of the paths need typing on the
@@ -109,6 +111,15 @@ def build_parser(defaults: Optional[dict] = None) -> argparse.ArgumentParser:
     ev.add_argument("--recordings", type=Path, default=rec_default, required=rec_default is None)
     add_db(ev)
 
+    for name, help_text in (("publish", "mark recordings PUBLIC (visible on the site)"),
+                            ("unpublish", "mark recordings PRIVATE (the default)")):
+        vp = sub.add_parser(name, help=help_text)
+        add_db(vp)
+        vp.add_argument("--recording", type=int, action="append", default=[], help="recording id (repeatable)")
+        vp.add_argument("--god", help="every done recording of this god")
+        vp.add_argument("--folder", help="every done recording in this folder (e.g. Ymir, mixed, unknown)")
+        vp.add_argument("--all", action="store_true", help="every done recording")
+
     stt = sub.add_parser("stats", help="index statistics")
     add_db(stt)
     stt.add_argument("--errors", action="store_true", help="list recordings in error state")
@@ -195,10 +206,30 @@ def cmd_events(a) -> int:
     return 0
 
 
+def cmd_visibility(a) -> int:
+    vis = "public" if a.cmd == "publish" else "private"
+    with Store(a.db) as store:
+        ids = list(a.recording or [])
+        if a.god:
+            ids += store.recording_ids(god=a.god)
+        if a.folder:
+            ids += store.recording_ids(folder=a.folder)
+        if a.all:
+            ids += store.recording_ids()
+        if not ids:
+            print("nothing selected: pass --recording ID, --god NAME, --folder NAME, or --all", file=sys.stderr)
+            return 2
+        n = store.set_visibility(sorted(set(ids)), vis)
+        s = store.stats()
+    print(f"{n} recording(s) now {vis}; archive: {s['by_visibility']}")
+    return 0
+
+
 def cmd_stats(a) -> int:
     with Store(a.db) as store:
         s = store.stats()
-        print(f"recordings: {s['recordings']} done ({s['hours']} h), status {s['by_status']}")
+        print(f"recordings: {s['recordings']} done ({s['hours']} h), status {s['by_status']},"
+              f" visibility {s.get('by_visibility')}")
         print(f"segments:   {s['segments']} ({s['words']} words)")
         print(f"events:     {s['events']}")
         print(f"range:      {s['oldest']} .. {s['newest']}")
@@ -213,7 +244,8 @@ def cmd_stats(a) -> int:
 def main(argv: Optional[List[str]] = None, defaults: Optional[dict] = None) -> int:
     a = build_parser(defaults).parse_args(argv)
     handler = {"index": cmd_index, "search": cmd_search, "browse": cmd_browse,
-               "clip": cmd_clip, "stats": cmd_stats, "events": cmd_events}[a.cmd]
+               "clip": cmd_clip, "stats": cmd_stats, "events": cmd_events,
+               "publish": cmd_visibility, "unpublish": cmd_visibility}[a.cmd]
     try:
         return handler(a)
     except KeyboardInterrupt:

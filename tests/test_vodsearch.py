@@ -39,7 +39,7 @@ def _seed(store):
     """One Ymir recording with two spoken lines and two events; one Loki
     recording with one line and no events. Returns (ymir_id, loki_id)."""
     y = store.upsert_recording(r"C:\rec\Ymir\Ymir-1.mp4", god="Ymir", gods_seen=["Ymir"],
-                               duration_s=1500, size_bytes=10, mtime=5.0,
+                               folder="Ymir", duration_s=1500, size_bytes=10, mtime=5.0,
                                recorded_at="2026-07-15T17:10:48", model="large-v3",
                                status="done")
     store.replace_segments(y, [
@@ -57,7 +57,7 @@ def _seed(store):
         {"timestamp_sec": 0.0, "type": "game_start", "note": ""},
     ], god="Ymir")
     lk = store.upsert_recording(r"C:\rec\Loki\Loki-2.mp4", god="Loki", gods_seen=["Loki"],
-                                duration_s=900, size_bytes=20, mtime=6.0,
+                                folder="Loki", duration_s=900, size_bytes=20, mtime=6.0,
                                 recorded_at="2026-07-16T18:00:00", model="large-v3",
                                 status="done")
     store.replace_segments(lk, [
@@ -521,6 +521,74 @@ def test_migration_adds_tier_to_old_index():
     # which the DB doesn't keep), so the heal demotes to a plain kill and
     # `vod_index.py events` restores tiers from the sidecars
     assert [(r[0], r[1]) for r in rows] == [(1, "kill"), (1, "kill")]
+    s.close()
+
+
+# ── visibility (privacy) ──────────────────────────────────────────────
+
+def test_visibility_defaults_private_and_filters_public_views():
+    s = _store()
+    y, lk = _seed(s)
+    assert s.get_recording(y)["visibility"] == "private"
+    # visitor view: nothing until published
+    assert s.search("trap", public_only=True)["total"] == 0
+    assert s.browse(public_only=True)["total"] == 0
+    assert s.stats(public_only=True)["recordings"] == 0 and s.gods(public_only=True) == []
+    # local view: everything, moments carry the flag
+    assert s.search("trap")["total"] == 2
+    assert s.search("trap")["moments"][0]["visibility"] == "private"
+    # publish one god
+    assert s.set_visibility(s.recording_ids(god="Ymir"), "public") == 1
+    assert s.search("trap", public_only=True)["total"] == 1
+    assert s.search("trap", public_only=True)["moments"][0]["god"] == "Ymir"
+    assert s.browse(public_only=True)["total"] == 2          # Ymir's two events
+    st = s.stats(public_only=True)
+    assert st["recordings"] == 1 and st["segments"] == 3 and st["public_only"] is True
+    assert s.stats()["by_visibility"] == {"public": 1, "private": 1}
+    assert s.get_segment(1)["visibility"] == "public" and s.get_event(1)["visibility"] == "public"
+    # a re-index (upsert) never changes the flag, even if it tries
+    s.upsert_recording(r"C:\rec\Ymir\Ymir-1.mp4", status="done", visibility="private")
+    assert s.get_recording(y)["visibility"] == "public"
+    # folder / all selectors and unpublish
+    assert s.set_visibility(s.recording_ids(folder="Loki"), "public") == 1
+    assert s.set_visibility(s.recording_ids(), "private") == 2
+    assert s.stats(public_only=True)["recordings"] == 0
+    try:
+        s.set_visibility([y], "everyone")
+        assert False, "bad visibility accepted"
+    except ValueError:
+        pass
+    s.close()
+
+
+def test_review_list_counts():
+    s = _store()
+    y, lk = _seed(s)
+    rows = {r["id"]: r for r in s.review_list()}
+    ry = rows[y]
+    assert ry["segments"] == 3 and ry["friend_segments"] == 1
+    assert ry["kills"] == 1 and ry["deaths"] == 1 and ry["best_tier"] == 2
+    assert ry["top_event_id"] == 1 and ry["first_segment_id"] == 1
+    assert rows[lk]["kills"] == 0 and rows[lk]["top_event_id"] is None
+    assert [r["id"] for r in s.review_list()] == [lk, y]         # newest first
+    s.close()
+
+
+def test_migration_adds_visibility_to_old_index():
+    import sqlite3 as _sq
+    d = tempfile.mkdtemp(prefix="vod_vis_migrate_")
+    db = Path(d) / "old.db"
+    con = _sq.connect(db)
+    con.executescript("""
+        CREATE TABLE recordings (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, folder TEXT, stem TEXT,
+            god TEXT, gods_seen TEXT, duration_s REAL DEFAULT 0, size_bytes INTEGER DEFAULT 0, mtime REAL DEFAULT 0,
+            recorded_at TEXT, indexed_at TEXT, model TEXT, status TEXT DEFAULT 'pending', error TEXT);
+        INSERT INTO recordings (path, god, status) VALUES ('old.mp4', 'Ymir', 'done');
+    """)
+    con.commit(); con.close()
+    s = Store(db)
+    assert s.get_recording(1)["visibility"] == "private"
+    assert s.stats(public_only=True)["recordings"] == 0
     s.close()
 
 

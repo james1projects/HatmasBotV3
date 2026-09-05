@@ -116,6 +116,8 @@
   .badge.multikill { background: var(--accent); color: var(--bg); }
   .badge.death { background: var(--red-bg); color: var(--red); }
   .badge.speaker { background: var(--panel-hi); color: var(--text); }
+  .badge.vis-private { background: var(--bg-2); color: var(--text-fade); border: 1px dashed var(--border-hi); }
+  .badge.vis-public { background: var(--green-bg); color: var(--green); }
   .line { margin: 8px 0 0; font-size: 15px; line-height: 1.45; }
   .line mark { background: var(--accent); color: var(--bg); padding: 0 2px; border-radius: 2px; }
   .line.quiet { color: var(--text-fade); font-style: italic; }
@@ -150,6 +152,7 @@
         <a href="/market" class="icon-toggle" style="text-decoration: none;" title="All god prices + the full market">Market</a>
         <a href="/live" class="icon-toggle" style="text-decoration: none;" title="Live match">Live</a>
         <a href="/me" class="icon-toggle" style="text-decoration: none;" title="Your profile">Profile</a>
+        <a href="/vod/review" id="review-link" class="icon-toggle" style="text-decoration: none;" title="Choose which recordings are public" hidden>Review</a>
       </div>
     </div>
 
@@ -237,6 +240,7 @@
           '<span class="mono">' + esc(m.date || "") + "</span>" +
           '<span class="mono">' + esc(m.clock || "") + "</span>" +
           speakerChip(m.speaker) + badges +
+          (m.visibility ? '<span class="badge vis-' + esc(m.visibility) + '" title="Only public recordings are shown to viewers">' + (m.visibility === "public" ? "Public" : "Private") + "</span>" : "") +
         "</div>" + line +
         '<div class="actions">' +
           '<button type="button" class="full" title="Play the whole recording from this moment">Full recording from ' + esc(m.clock || "") + "</button>" +
@@ -375,6 +379,7 @@
       return;
     }
     state.total = res.total || 0;
+    if (res.local) { $("review-link").hidden = false; }
     const moments = res.moments || [];
     if (state.key) {
       setHead("Shared moment", "");

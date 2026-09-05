@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#202C39">
+<meta name="robots" content="noindex">
+<title>VOD Review: Hatmaster.tv</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="stylesheet" href="/theme.css">
+<style>
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 16px 14px 80px; }
+  .brand-band {
+    display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 1px solid var(--border); padding: 8px 0 12px; margin-bottom: 20px;
+    font-family: var(--font-sans); font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim);
+  }
+  .brand-band a.left { color: var(--accent); font-weight: 700; }
+  .brand-hat { height: 16px; vertical-align: -3px; margin-right: 6px; }
+  .right-cluster { display: flex; gap: 10px; }
+  h1 { font-family: var(--font-display); text-transform: uppercase; font-size: 40px; line-height: 1; margin: 0 0 6px; }
+  .sub { color: var(--text-dim); font-size: 14px; margin: 0 0 14px; max-width: 700px; }
+  .notice { padding: 10px 12px; border-radius: var(--radius); font-size: 13px; margin-bottom: 14px; border: 1px solid var(--border); }
+  .notice.off { background: var(--bg-2); color: var(--text-dim); }
+  .notice.on { background: var(--red-bg); color: var(--red); border-color: var(--red); }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+  .toolbar select, .toolbar input {
+    font: inherit; font-size: 13px; padding: 7px 10px; background: var(--panel); color: var(--text);
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+  }
+  .toolbar .spacer { flex: 1; }
+  .btn {
+    font: inherit; font-size: 12px; font-weight: 600; padding: 7px 12px; cursor: pointer;
+    background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  }
+  .btn:hover { border-color: var(--border-hi); }
+  .btn.pub { background: var(--green-bg); color: var(--green); border-color: transparent; }
+  .btn.priv { background: var(--bg-2); color: var(--text-dim); }
+  .btn.danger { background: var(--red-bg); color: var(--red); border-color: transparent; }
+  .count { font-family: var(--font-mono); font-size: 12px; color: var(--text-fade); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; font-family: var(--font-sans); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tr.public td { background: rgba(0, 200, 120, 0.05); }
+  .thumb { width: 96px; aspect-ratio: 16/9; background: var(--bg-2); border-radius: var(--radius-sm); overflow: hidden; }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .god { font-family: var(--font-display); text-transform: uppercase; font-size: 15px; letter-spacing: 0.04em; }
+  .mono { font-family: var(--font-mono); font-size: 12px; color: var(--text-dim); }
+  .pill { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: var(--radius-sm); }
+  .pill.public { background: var(--green-bg); color: var(--green); }
+  .pill.private { background: var(--bg-2); color: var(--text-fade); border: 1px dashed var(--border-hi); }
+  .friends { color: var(--accent); font-size: 11px; }
+  .row-actions { display: flex; gap: 6px; }
+  .empty { padding: 30px 0; color: var(--text-dim); }
+  @media (max-width: 720px) { .hide-sm { display: none; } }
+</style>
+</head>
+<body>
+  <div class="wrap" role="main">
+    <div class="brand-band" role="banner">
+      <a class="left" href="/"><img class="brand-hat" src="/hat.png" alt="">HATMASTER.TV</a>
+      <div class="right-cluster">
+        <a href="/vod" class="icon-toggle" style="text-decoration: none;">Search</a>
+        <a href="/market" class="icon-toggle" style="text-decoration: none;">Market</a>
+      </div>
+    </div>
+
+    <h1>VOD review</h1>
+    <p class="sub">This page only opens on this PC. Every recording starts private. Viewers on hatmaster.tv see a recording only when it is marked public here and the web_vod toggle is on.</p>
+    <div class="notice off" id="notice">Loading</div>
+
+    <div class="toolbar">
+      <select id="god"><option value="">All gods</option></select>
+      <select id="vis"><option value="">Public and private</option><option value="private">Private only</option><option value="public">Public only</option></select>
+      <input id="filter" type="search" placeholder="filter by file name" aria-label="Filter">
+      <span class="spacer"></span>
+      <span class="count" id="count"></span>
+      <button type="button" class="btn pub" id="pub-shown">Make shown public</button>
+      <button type="button" class="btn priv" id="priv-shown">Make shown private</button>
+      <button type="button" class="btn danger" id="priv-all">Everything private</button>
+    </div>
+
+    <div id="list"></div>
+  </div>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  let rows = [];
+  function esc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+  function tierLabel(t) { return ({2: "Double", 3: "Triple", 4: "Quadra", 5: "Penta"})[t] || ""; }
+
+  async function load() {
+    try {
+      const r = await fetch("/api/vod/review", { headers: { Accept: "application/json" } });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const data = await r.json();
+      rows = data.recordings || [];
+      const n = $("notice");
+      if (data.toggle) {
+        n.className = "notice on";
+        n.textContent = "The web_vod toggle is ON: public recordings are visible to viewers on hatmaster.tv right now.";
+      } else {
+        n.className = "notice off";
+        n.textContent = "The web_vod toggle is off: nothing is visible to viewers, whatever is marked here. Flip it on the dashboard when you are ready.";
+      }
+      const gods = [...new Set(rows.map((x) => x.god).filter(Boolean))].sort();
+      const sel = $("god"); const cur = sel.value;
+      sel.innerHTML = '<option value="">All gods</option>' + gods.map((g) => '<option value="' + esc(g) + '">' + esc(g) + "</option>").join("");
+      sel.value = cur;
+      render();
+    } catch (e) {
+      $("notice").className = "notice on";
+      $("notice").textContent = "Could not load the archive: " + e.message;
+    }
+  }
+
+  function shown() {
+    const g = $("god").value, v = $("vis").value, f = $("filter").value.trim().toLowerCase();
+    return rows.filter((r) => (!g || r.god === g) && (!v || r.visibility === v) &&
+      (!f || String(r.stem || "").toLowerCase().includes(f) || String(r.folder || "").toLowerCase().includes(f)));
+  }
+
+  function render() {
+    const list = shown();
+    const pub = rows.filter((r) => r.visibility === "public").length;
+    $("count").textContent = list.length + " shown, " + pub + " of " + rows.length + " public";
+    if (!list.length) { $("list").innerHTML = '<div class="empty">No recordings match.</div>'; return; }
+    let html = "<table><thead><tr><th></th><th>Recording</th><th class='hide-sm'>Date</th><th class='hide-sm'>Length</th><th>Speech</th><th>Kills</th><th>State</th><th></th></tr></thead><tbody>";
+    for (const r of list) {
+      const friends = r.friend_segments ? '<div class="friends">' + r.friend_segments + " friends lines</div>" : "";
+      const best = r.best_tier >= 2 ? " (" + tierLabel(r.best_tier) + ")" : "";
+      html += '<tr class="' + esc(r.visibility) + '" data-id="' + r.id + '">' +
+        '<td><div class="thumb">' + (r.thumb_url ? '<img loading="lazy" src="' + esc(r.thumb_url) + '" alt="">' : "") + "</div></td>" +
+        '<td><div class="god">' + esc(r.god || "Unknown") + '</div><div class="mono">' + esc(r.stem || "") + ".mp4</div>" +
+          '<a class="mono" href="/vod?clip=' + esc(r.key || "") + '" target="_blank">open</a></td>' +
+        '<td class="mono hide-sm">' + esc(r.date) + "</td>" +
+        '<td class="mono hide-sm">' + esc(r.clock) + "</td>" +
+        '<td class="mono">' + (r.segments || 0) + friends + "</td>" +
+        '<td class="mono">' + (r.kills || 0) + esc(best) + " / " + (r.deaths || 0) + " deaths</td>" +
+        '<td><span class="pill ' + esc(r.visibility) + '">' + (r.visibility === "public" ? "Public" : "Private") + "</span></td>" +
+        '<td class="row-actions">' +
+          (r.visibility === "public"
+            ? '<button type="button" class="btn priv" data-set="private">Make private</button>'
+            : '<button type="button" class="btn pub" data-set="public">Make public</button>') +
+        "</td></tr>";
+    }
+    $("list").innerHTML = html + "</tbody></table>";
+  }
+
+  async function setVisibility(ids, visibility, extra) {
+    const body = Object.assign({ ids: ids, visibility: visibility }, extra || {});
+    try {
+      const r = await fetch("/api/vod/review", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      await load();
+    } catch (e) {
+      alert("Could not update: " + e.message);
+    }
+  }
+
+  $("list").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-set]");
+    if (!b) return;
+    const id = parseInt(b.closest("tr").dataset.id, 10);
+    setVisibility([id], b.dataset.set);
+  });
+  $("pub-shown").addEventListener("click", () => {
+    const ids = shown().map((r) => r.id);
+    if (ids.length && confirm("Make " + ids.length + " shown recording(s) public?")) setVisibility(ids, "public");
+  });
+  $("priv-shown").addEventListener("click", () => { const ids = shown().map((r) => r.id); if (ids.length) setVisibility(ids, "private"); });
+  $("priv-all").addEventListener("click", () => { if (confirm("Make every recording private?")) setVisibility([], "private", { all: true }); });
+  ["god", "vis"].forEach((id) => $(id).addEventListener("change", render));
+  $("filter").addEventListener("input", render);
+  load();
+})();
+</script>
+</body>
+</html>

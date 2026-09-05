@@ -55,7 +55,8 @@ CREATE TABLE IF NOT EXISTS recordings (
     indexed_at   TEXT,
     model        TEXT,
     status       TEXT DEFAULT 'pending',   -- pending | indexing | done | error | skipped
-    error        TEXT
+    error        TEXT,
+    visibility   TEXT DEFAULT 'private'    -- private | public (public site only ever shows 'public')
 );
 CREATE INDEX IF NOT EXISTS idx_recordings_god ON recordings(god);
 CREATE INDEX IF NOT EXISTS idx_recordings_recorded ON recordings(recorded_at);
@@ -228,6 +229,10 @@ class Store:
     def _migrate(self) -> None:
         """Bring an older index up to the current schema. Cheap enough
         to run on every open (the site opens a Store per request)."""
+        rcols = {r[1] for r in self.conn.execute("PRAGMA table_info(recordings)")}
+        if "visibility" not in rcols:
+            self.conn.execute("ALTER TABLE recordings ADD COLUMN visibility TEXT DEFAULT 'private'")
+            self.conn.commit()
         cols = {r[1] for r in self.conn.execute("PRAGMA table_info(events)")}
         if "tier" not in cols:
             self.conn.execute("ALTER TABLE events ADD COLUMN tier INTEGER DEFAULT 0")
@@ -266,6 +271,8 @@ class Store:
         Returns the row id. Unknown meta keys are ignored."""
         cols = {"folder", "stem", "god", "gods_seen", "duration_s", "size_bytes",
                 "mtime", "recorded_at", "indexed_at", "model", "status", "error"}
+        # visibility is deliberately NOT here: it is set only through
+        # set_visibility() so a re-index can never publish or unpublish.
         data = {k: v for k, v in meta.items() if k in cols}
         if isinstance(data.get("gods_seen"), (list, tuple)):
             data["gods_seen"] = json.dumps(list(data["gods_seen"]))
@@ -290,6 +297,47 @@ class Store:
         self.conn.execute("UPDATE recordings SET status=?, error=? WHERE id=?",
                           (status, error, rec_id))
         self.conn.commit()
+
+    def set_visibility(self, rec_ids: Iterable[int], visibility: str) -> int:
+        """Publish or unpublish recordings. Returns rows changed."""
+        if visibility not in ("private", "public"):
+            raise ValueError("visibility must be 'private' or 'public'")
+        ids = [int(i) for i in rec_ids]
+        if not ids:
+            return 0
+        cur = self.conn.execute(
+            f"UPDATE recordings SET visibility=? WHERE id IN ({','.join('?' * len(ids))})",
+            [visibility] + ids)
+        self.conn.commit()
+        return int(cur.rowcount or 0)
+
+    def recording_ids(self, god: Optional[str] = None, folder: Optional[str] = None,
+                      status: Optional[str] = "done") -> List[int]:
+        where, params = [], []
+        if god:
+            where.append("god = ?"); params.append(god)
+        if folder:
+            where.append("folder = ?"); params.append(folder)
+        if status:
+            where.append("status = ?"); params.append(status)
+        sql = "SELECT id FROM recordings" + (" WHERE " + " AND ".join(where) if where else "")
+        return [int(r[0]) for r in self.conn.execute(sql, params)]
+
+    def review_list(self) -> List[dict]:
+        """Every indexed recording with the counts the review page shows."""
+        rows = self.conn.execute(
+            "SELECT r.id, r.stem, r.folder, r.god, r.recorded_at, r.duration_s, r.status,"
+            " r.visibility,"
+            " (SELECT COUNT(*) FROM segments s WHERE s.recording_id = r.id) AS segments,"
+            " (SELECT COUNT(*) FROM segments s WHERE s.recording_id = r.id AND s.speaker != 'hatmaster') AS friend_segments,"
+            " (SELECT COUNT(*) FROM events e WHERE e.recording_id = r.id AND e.kind IN ('kill','multikill')) AS kills,"
+            " (SELECT COUNT(*) FROM events e WHERE e.recording_id = r.id AND e.kind = 'death') AS deaths,"
+            " (SELECT MAX(e.tier) FROM events e WHERE e.recording_id = r.id) AS best_tier,"
+            " (SELECT e.id FROM events e WHERE e.recording_id = r.id AND e.kind IN ('kill','multikill')"
+            "   ORDER BY e.tier DESC, e.ts_s LIMIT 1) AS top_event_id,"
+            " (SELECT s.id FROM segments s WHERE s.recording_id = r.id ORDER BY s.start_s LIMIT 1) AS first_segment_id"
+            " FROM recordings r ORDER BY r.recorded_at DESC, r.id DESC").fetchall()
+        return [dict(r) for r in rows]
 
     def replace_tracks(self, rec_id: int, tracks: Iterable[dict]) -> None:
         self.conn.execute("DELETE FROM tracks WHERE recording_id=?", (rec_id,))
@@ -385,14 +433,16 @@ class Store:
     def get_segment(self, seg_id: int) -> Optional[dict]:
         row = self.conn.execute(
             "SELECT s.*, r.god AS god, r.recorded_at AS recorded_at, r.duration_s AS duration_s,"
-            " r.path AS path FROM segments s JOIN recordings r ON r.id = s.recording_id"
+            " r.path AS path, r.visibility AS visibility"
+            " FROM segments s JOIN recordings r ON r.id = s.recording_id"
             " WHERE s.id=?", (int(seg_id),)).fetchone()
         return dict(row) if row else None
 
     def get_event(self, ev_id: int) -> Optional[dict]:
         row = self.conn.execute(
             "SELECT e.*, r.god AS rec_god, r.recorded_at AS recorded_at, r.duration_s AS duration_s,"
-            " r.path AS path FROM events e JOIN recordings r ON r.id = e.recording_id"
+            " r.path AS path, r.visibility AS visibility"
+            " FROM events e JOIN recordings r ON r.id = e.recording_id"
             " WHERE e.id=?", (int(ev_id),)).fetchone()
         return dict(row) if row else None
 
@@ -419,26 +469,36 @@ class Store:
             (rec_id, t_s - window_s, t_s + window_s)).fetchall()
         return [dict(r) for r in rows]
 
-    def gods(self) -> List[dict]:
+    @staticmethod
+    def _vis_sql(public_only: bool, alias: str = "r") -> str:
+        return f" AND {alias}.visibility = 'public'" if public_only else ""
+
+    def gods(self, public_only: bool = False) -> List[dict]:
         rows = self.conn.execute(
             "SELECT god, COUNT(*) AS recordings, ROUND(SUM(duration_s)/3600.0, 1) AS hours"
-            " FROM recordings WHERE status='done' AND god IS NOT NULL AND god != ''"
+            " FROM recordings r WHERE status='done' AND god IS NOT NULL AND god != ''"
+            + self._vis_sql(public_only) +
             " GROUP BY god ORDER BY recordings DESC, god").fetchall()
         return [dict(r) for r in rows]
 
-    def stats(self) -> dict:
+    def stats(self, public_only: bool = False) -> dict:
         c = self.conn
+        vis = self._vis_sql(public_only)
         rec = c.execute("SELECT COUNT(*) AS n, COALESCE(SUM(duration_s),0) AS secs"
-                        " FROM recordings WHERE status='done'").fetchone()
-        segs = c.execute("SELECT COUNT(*) FROM segments").fetchone()[0]
-        words = c.execute("SELECT COALESCE(SUM(LENGTH(text) - LENGTH(REPLACE(text,' ',''))+1),0)"
-                          " FROM segments").fetchone()[0]
+                        " FROM recordings r WHERE status='done'" + vis).fetchone()
+        segs = c.execute("SELECT COUNT(*) FROM segments s JOIN recordings r ON r.id = s.recording_id"
+                         " WHERE 1=1" + vis).fetchone()[0]
+        words = c.execute("SELECT COALESCE(SUM(LENGTH(s.text) - LENGTH(REPLACE(s.text,' ',''))+1),0)"
+                          " FROM segments s JOIN recordings r ON r.id = s.recording_id WHERE 1=1" + vis).fetchone()[0]
         kinds = {r[0]: r[1] for r in c.execute(
-            "SELECT kind, COUNT(*) FROM events GROUP BY kind").fetchall()}
+            "SELECT e.kind, COUNT(*) FROM events e JOIN recordings r ON r.id = e.recording_id"
+            " WHERE 1=1" + vis + " GROUP BY e.kind").fetchall()}
         by_status = {r[0]: r[1] for r in c.execute(
             "SELECT status, COUNT(*) FROM recordings GROUP BY status").fetchall()}
-        newest = c.execute("SELECT MAX(recorded_at) FROM recordings WHERE status='done'").fetchone()[0]
-        oldest = c.execute("SELECT MIN(recorded_at) FROM recordings WHERE status='done'").fetchone()[0]
+        by_vis = {r[0]: r[1] for r in c.execute(
+            "SELECT visibility, COUNT(*) FROM recordings WHERE status='done' GROUP BY visibility").fetchall()}
+        newest = c.execute("SELECT MAX(recorded_at) FROM recordings r WHERE status='done'" + vis).fetchone()[0]
+        oldest = c.execute("SELECT MIN(recorded_at) FROM recordings r WHERE status='done'" + vis).fetchone()[0]
         return {
             "recordings": int(rec["n"]),
             "hours": round(float(rec["secs"]) / 3600.0, 1),
@@ -446,9 +506,11 @@ class Store:
             "words": int(words),
             "events": kinds,
             "by_status": by_status,
+            "by_visibility": by_vis,
+            "public_only": bool(public_only),
             "oldest": oldest,
             "newest": newest,
-            "gods": self.gods(),
+            "gods": self.gods(public_only),
         }
 
     # ── search ────────────────────────────────────────────────────────
@@ -500,10 +562,12 @@ class Store:
             "snippet": snippet if snippet is not None else d.get("text"),
             "events": self.events_near(rec_id, mid),
             "duration_s": float(d.get("duration_s") or 0),
+            "visibility": d.get("visibility") or "private",
         }
 
     def search(self, query: str, god: Optional[str] = None, event: Optional[str] = None,
-               speaker: Optional[str] = None, limit: int = 20, offset: int = 0) -> dict:
+               speaker: Optional[str] = None, limit: int = 20, offset: int = 0,
+               public_only: bool = False) -> dict:
         """Full-text search over transcript segments. Tries an AND query
         first; if nothing matches, falls back to OR so a typo in one word
         doesn't return an empty page. Returns {"mode", "total", "moments"}."""
@@ -513,7 +577,7 @@ class Store:
             match = build_match(query, mode)
             if not match:
                 return {"mode": mode, "total": 0, "moments": []}
-            where = " WHERE segments_fts MATCH ?"
+            where = " WHERE segments_fts MATCH ?" + self._vis_sql(public_only)
             params: List[Any] = [match]
             if god:
                 where += " AND r.god = ?"
@@ -533,6 +597,7 @@ class Store:
                 continue
             rows = self.conn.execute(
                 "SELECT s.*, r.god AS god, r.recorded_at AS recorded_at, r.duration_s AS duration_s,"
+                " r.visibility AS visibility,"
                 " snippet(segments_fts, 0, '<mark>', '</mark>', '…', 28) AS snip,"
                 " bm25(segments_fts) AS rank" + base +
                 " ORDER BY" + self._tier_order_sql(event) + " rank, r.recorded_at DESC LIMIT ? OFFSET ?",
@@ -542,7 +607,7 @@ class Store:
         return {"mode": "or", "total": 0, "moments": []}
 
     def browse(self, god: Optional[str] = None, event: Optional[str] = None,
-               limit: int = 20, offset: int = 0) -> dict:
+               limit: int = 20, offset: int = 0, public_only: bool = False) -> dict:
         """No-query view: newest detector events (kills by default, or
         the requested kind) with the nearest transcript line attached."""
         limit = max(1, min(int(limit), 100))
@@ -552,7 +617,7 @@ class Store:
                  "death": "('death')", "assist": "('assist')",
                  "any": "('kill','multikill','death','assist')"}.get(
             event, "('multikill')" if event in TIER_WORDS else "('kill','multikill','death','assist')")
-        where = f" WHERE e.kind IN {kinds} AND r.status='done'"
+        where = f" WHERE e.kind IN {kinds} AND r.status='done'" + self._vis_sql(public_only)
         params: List[Any] = []
         if event in TIER_WORDS:
             where += " AND e.tier = ?"
@@ -566,7 +631,8 @@ class Store:
                  if event == "multikill" or event in TIER_WORDS
                  else " ORDER BY r.recorded_at DESC, e.ts_s DESC")
         rows = self.conn.execute(
-            "SELECT e.*, r.god AS rec_god, r.recorded_at AS recorded_at, r.duration_s AS duration_s"
+            "SELECT e.*, r.god AS rec_god, r.recorded_at AS recorded_at, r.duration_s AS duration_s,"
+            " r.visibility AS visibility"
             + base + order + " LIMIT ? OFFSET ?",
             params + [limit, offset]).fetchall()
         moments = []
@@ -591,5 +657,6 @@ class Store:
                 "snippet": text,
                 "events": [self._event_dict(r)],
                 "duration_s": float(d.get("duration_s") or 0),
+                "visibility": d.get("visibility") or "private",
             })
         return {"mode": "browse", "total": total, "moments": moments}

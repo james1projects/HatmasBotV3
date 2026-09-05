@@ -64,7 +64,11 @@ def discover(recordings_dir: Path, include_root: bool = False,
     files are unsorted drop-folder recordings and are skipped unless
     `include_root` (the sorter will move them into a god folder later
     and they'd be re-indexed under the new path anyway)."""
-    root = Path(recordings_dir)
+    # Absolute paths only: the index is read by the public server (cwd =
+    # repo root) and by dev hosts elsewhere, so a relative path stored by
+    # a 'python -m vodsearch.cli index --recordings recordings' run would
+    # 404 every clip outside that cwd (seen 2026-09-05).
+    root = Path(recordings_dir).resolve()
     if not root.is_dir():
         return []
     skip = {s.lower() for s in skip_dirs}
@@ -253,6 +257,7 @@ def fmt_hms(seconds: float) -> str:
 
 def run(opts: IndexOptions, log: Logger = print) -> dict:
     """Index everything under opts.recordings_dir. Returns counters."""
+    opts.recordings_dir = Path(opts.recordings_dir).resolve()
     files = discover(opts.recordings_dir, opts.include_root, opts.skip_dirs)
     if opts.limit:
         files = files[: int(opts.limit)]
