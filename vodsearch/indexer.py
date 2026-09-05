@@ -28,7 +28,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from . import audio as audio_mod
 from .store import Store, now_iso
-from .transcribe import Transcriber
+from .transcribe import DEFAULT_INITIAL_PROMPT, Transcriber
 
 DEFAULT_TRACKS: Dict[int, str] = {1: "hatmaster", 2: "friends", 3: "friends"}
 _DATE_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})[ _](\d{2})-(\d{2})-(\d{2})")
@@ -44,6 +44,7 @@ class IndexOptions:
     compute_type: str = "float16"
     language: Optional[str] = "en"
     batch_size: int = 16
+    initial_prompt: Optional[str] = DEFAULT_INITIAL_PROMPT
     tracks: Dict[int, str] = field(default_factory=lambda: dict(DEFAULT_TRACKS))
     min_duration_s: float = 8.0
     min_speech_frac: float = 0.02
@@ -269,7 +270,8 @@ def run(opts: IndexOptions, log: Logger = print) -> dict:
         log("[vodsearch] dry run: nothing will be transcribed or written")
     store = Store(opts.db_path)
     transcriber = Transcriber(opts.model, opts.device, opts.compute_type,
-                              language=opts.language, batch_size=opts.batch_size)
+                              language=opts.language, batch_size=opts.batch_size,
+                              initial_prompt=opts.initial_prompt)
     t_run = time.time()
     try:
         if opts.prune_missing and not opts.dry_run:

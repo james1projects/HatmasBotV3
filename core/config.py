@@ -493,6 +493,7 @@ VOD_RECORDINGS_DIR = BASE_DIR / "recordings"
 VOD_DB_PATH = DATA_DIR / "vod" / "vod_index.db"
 VOD_CLIPS_DIR = DATA_DIR / "vod" / "clips"
 VOD_WHISPER_MODEL = "large-v3"          # faster-whisper model id (large-v3 ~10x realtime on the 5090)
+VOD_WHISPER_PROMPT = None               # None = vodsearch's neutral punctuation prompt; "" = no prompt
 VOD_TRACKS = "1:hatmaster,2:friends,3:friends"   # OBS audio tracks to transcribe as index:speaker (identical tracks auto-skipped)
 VOD_CLIP_AUDIO_TRACKS = (0, 1, 2, 3)     # tracks mixed into rendered clips (game + voices)
 VOD_CLIP_HEIGHT = 720

@@ -24,6 +24,7 @@ from typing import Dict, List, Optional
 
 from . import clips as clips_mod
 from .indexer import DEFAULT_TRACKS, IndexOptions, fmt_hms, refresh_events, run as run_index
+from .transcribe import DEFAULT_INITIAL_PROMPT
 from .store import Store
 
 
@@ -63,6 +64,8 @@ def build_parser(defaults: Optional[dict] = None) -> argparse.ArgumentParser:
     ix.add_argument("--compute-type", default=d.get("compute_type", "float16"))
     ix.add_argument("--language", default=d.get("language", "en"))
     ix.add_argument("--batch-size", type=int, default=int(d.get("batch_size", 16)))
+    ix.add_argument("--prompt", default=d.get("initial_prompt", None),
+                    help="Whisper initial prompt (punctuation style); '' disables; default is a neutral one")
     ix.add_argument("--tracks", default=d.get("tracks", "1:hatmaster,2:friends,3:friends"),
                     help="audio tracks to transcribe as idx:speaker, e.g. 1:hatmaster,2:discord")
     ix.add_argument("--min-speech", type=float, default=float(d.get("min_speech_frac", 0.02)),
@@ -143,6 +146,7 @@ def cmd_index(a) -> int:
         recordings_dir=Path(a.recordings), db_path=Path(a.db), model=a.model,
         device=a.device, compute_type=a.compute_type, language=a.language or None,
         batch_size=a.batch_size, tracks=parse_tracks(a.tracks) or dict(DEFAULT_TRACKS),
+        initial_prompt=(DEFAULT_INITIAL_PROMPT if a.prompt is None else (a.prompt or None)),
         min_duration_s=a.min_duration, min_speech_frac=a.min_speech,
         ffmpeg=a.ffmpeg, ffprobe=a.ffprobe, force=a.force, limit=a.limit,
         include_root=a.include_root, dry_run=a.dry_run, prune_missing=not a.no_prune)
