@@ -2547,3 +2547,77 @@ indexer self-heals.
 - Friends' Discord audio is transcribed and public; they know they are on stream, but
   the `VOD_TRACKS` string is where to drop tracks 2-3 if that ever needs to change.
 - Not yet wired: `!clip <words>` in chat, feeding hits into `resolve_tiktok.py`.
+
+
+## v2.12 Update — Overnight 2026-09-05: co-caster stage 1, archive privacy, chat log
+
+Built unattended the night of 9/4–9/5 on branch `overnight-2026-09-05`
+(James: "continue improving hatmasbot, keep my local privacy concerns in mind").
+Nothing here enables a new public surface: both features default off, and the
+archive is private per recording.
+
+### Co-caster stage 1 (`plugins/cocaster/`)
+
+The first slice of the AI co-caster from the 9/4 brainstorm. Feature toggle
+`cocaster` (dashboard) defaults **off**.
+
+| Piece | What it does |
+| --- | --- |
+| `chatlog.py` | Every chat message → `data/chat_log.db` (ts, user, text, is_command, is_mod). Always on, toggle or not. The bot's first telemetry; never leaves `data/`. |
+| `summarizer.py` | Prompts + backends. `ClaudeBackend` (Anthropic API, `COCASTER_MODEL` = claude-opus-5, effort low) or `OllamaBackend` (fully local, shares the GPU with Smite). `clean_spoken` makes any output TTS-safe (no markdown/quotes/emoji, word cap). `RateLimiter`. |
+| `voice.py` | Fully local TTS: Windows SAPI via PowerShell → WAV → `sounddevice` on a chosen output device (substring match, e.g. `"Headphones"` = Elgato XLR Dock jack, which is not in the stream mix; `"SFX"` = a Wave Link input that is). ~0.4 s per line. |
+| `plugin.py` | EAR channel: every `COCASTER_EAR_INTERVAL_S` (75), if ≥ `COCASTER_EAR_MIN_MSGS` (3) new non-command messages, one ≤35-word sentence (who asked what, who said hi, warnings) is spoken in the headphones. LINES channel: multikill → persona line; every 2nd death → persona line; 45 s cooldown; written to `data/cocaster/lines.jsonl` + emitted as overlay event `cocaster_line`; spoken on stream only if `COCASTER_STREAM_VOICE` (default False). |
+| `persona.md` | The on-stream voice (dry, quick, never mean, never invents facts, market only if a price is given). Edit freely; loaded at startup. |
+| `!cocaster` (mods) | `status` / `on` / `off` (runtime mute) / `test [text]` (earpiece check) / `now` (summarize chat right now) / `line [event]` (force a persona line). |
+| Dashboard (8069) | `GET /api/cocaster/status`; `GET|POST /api/cocaster/test?text=…` speaks in the earpiece even with the toggle off (device-routing check, Stream Deck button `streamdeck/earpiece_test.bat`); `?now=1` runs a real summary. |
+| `tests/test_cocaster.py` | 13 hermetic tests (chat log, prompts, TTS plumbing without audio, plugin logic with fake bot/backend/voice). |
+
+Wiring: `main.py` registers `cocaster` after `stream_status` and calls
+`attach_detector(kd)`. Context handed to the model: live/viewers
+(stream_status), god + KDA (`economy._match_god/_match_kda`), match minutes
+(`smite.match_start_time`), god-request queue length.
+
+Live-verified 9/5 01:00 with the real API and the real headphone jack: chat of
+four lines → "Dynacon wants your Sylvanus build, QueenAqua's here live for the
+first time, and edweird0 says watch out, that Ares is looking to flank you."
+(10.8 s including speech); a triple-kill line in 2.2 s.
+
+Privacy: chat text + match state go to the LLM backend; nothing else. Set
+`COCASTER_LLM_BACKEND = "ollama"` for zero external calls.
+
+To try it: flip `cocaster` on the dashboard, put on the headphones, type
+`!cocaster test` in chat (or press the EARPIECE deck button), then let chat
+talk. `COCASTER_EAR_DEVICE` must match your headphone output's name; the
+dashboard status shows the resolved device index (`ear_device_index`, None =
+system default).
+
+### Ask the VOD: private by default (see also v2.11)
+
+- `recordings.visibility` (`private` | `public`, default private; a re-index
+  can never change it). The public site serves **only public recordings, only
+  to visitors, only when `web_vod` is on**. Clips/thumbs/streams of private
+  recordings 404 for visitors even with a valid key. Visitors never receive
+  file paths or the visibility field.
+- The **local browser always works** (`_is_local`, which defers to the public
+  server's `_is_local_admin`, so tunneled requests never qualify): full
+  archive, file paths, and `/vod/review`.
+- `/vod/review` (local only): every recording with date, length, speech
+  lines (friends' lines called out), kills/deaths/best streak, a thumbnail, and
+  Make public / Make private per row; bulk buttons for the shown set and
+  "Everything private". The banner says whether the toggle is on.
+- `python tools\vod_index.py publish|unpublish --god X | --folder X |
+  --recording N | --all`.
+- Stats for visitors are public-only counts; `by_status`/`by_visibility` are
+  local-only.
+- `tools/vod_devserver.py --visitor --toggle on|off --db … --clips …` lets you
+  check what a viewer would see from one machine.
+- Indexer now stores absolute paths (6 duplicate relative rows from the first
+  test run were merged out of the live index on 9/5).
+
+### Still open after this run
+
+- The co-caster is stage 1: no on-stream voice by default, no overlay HTML for
+  `cocaster_line` yet (the event is emitted; an overlay can subscribe).
+- Whisper punctuation in batched mode stays sparse (see the v2.11 limits).
+- `!clip <words>` in chat is deliberately not built while the archive is
+  private.

@@ -23,7 +23,8 @@ A Twitch chat bot, stream-automation suite, and companion website for Hatmaster'
 - **Streamloots Hub** — Listens to the alert SSE stream and dispatches card redemptions, chest purchases, and gifts to consumers.
 - **Factorio Integration** — The `hatmas-events` Factorio mod (viewer pets, boss biters) driven by Streamloots cards.
 - **Discord Bridge** — Cross-posts stream status / events to Discord.
-- **Ask the VOD** — `hatmaster.tv/vod`: full-text search over everything said on stream (GPU transcription of the mic and Discord tracks) plus every detector kill/death, with clips rendered on demand and shareable links. Standalone `vodsearch/` package; the Stream Deck recording sorter indexes each night's recordings automatically.
+- **Ask the VOD** — `hatmaster.tv/vod` (private by default; a local review page decides which recordings viewers may see): full-text search over everything said on stream (GPU transcription of the mic and Discord tracks) plus every detector kill/death, with clips rendered on demand and shareable links. Standalone `vodsearch/` package; the Stream Deck recording sorter indexes each night's recordings automatically.
+- **Co-caster (stage 1)** — a private earpiece channel that whispers a one-sentence summary of new chat into your headphones every minute or so, plus persona one-liners on multikills and deaths (text-only on stream until you turn the voice on). Local Windows TTS; Claude API or local Ollama for the words. Off by default. Every chat message is logged locally to `data/chat_log.db`.
 - **Public Website** — `hatmaster.tv`: a home page with the live Twitch embed + YouTube/TikTok/Bluesky tabs, the Hatmas Market at `/market` (god prices, portfolios, trading with Twitch login), and the community/god-request page.
 - **Auto-Shoutout on Raid**, **OBS Control**, and a browser **Control Panel** for your second monitor.
 
@@ -130,6 +131,7 @@ Bind a key to `http://localhost:8069/api/spin` (GET or POST) to run the wheel ex
 | `!spin` / `!poolclear` | Spin the wheel / wipe the pool |
 | `!suggestions` / `!clearsuggestions` | View / clear suggestions |
 | `!discordstatus` / `!discordtest` | Discord bridge status / test |
+| `!cocaster [status\|on\|off\|test\|now\|line]` | Co-caster: status, runtime mute, earpiece test, summarize chat now, force a persona line |
 
 ## Architecture
 

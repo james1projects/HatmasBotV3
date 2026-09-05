@@ -37,6 +37,7 @@ Rows are stream phases, colored by the icon's top bar:
 | 3,2 | PROCESS RECS | System: Open | `C:\Projects\HatmasBot\streamdeck\process_recordings.bat` | `process_recordings.png` |
 | 3,3 | SORT UNKNOWNS | System: Open | `C:\Projects\HatmasBot\streamdeck\sort_unknowns.bat` | `sort_unknowns.png` |
 | 3,4 | THUMB STUDIO | System: Open | `C:\Projects\HatmasBot\streamdeck\thumbnail_studio.bat` | `thumbnail_studio.png` |
+| 4,1 | EARPIECE | System: Open | `C:\Projects\HatmasBot\streamdeck\earpiece_test.bat` | (none yet) |
 | 3,5 | RESOLVE IMPORT | System: Open | `C:\Projects\HatmasBot\streamdeck\resolve_import.bat` | `resolve_import.png` |
 | 3,6 | RESOLVE TIKTOK | System: Open | `C:\Projects\HatmasBot\streamdeck\resolve_tiktok.bat` | `resolve_tiktok.png` |
 | 4,1 | DISCORD TEST | System: Open | `C:\Projects\HatmasBot\streamdeck\discord_test.bat` | `discord_test.png` |
@@ -96,6 +97,10 @@ RESOLVE TIKTOK to cut the VOD in DaVinci.
 Optional refinement once the basics feel good: an END STREAM Multi
 Action that fires `go_offline.bat` then `process_recordings.bat` in
 one press.
+
+EARPIECE speaks a canned line through the co-caster's private headphone
+channel (works with the toggle off) so the routing can be checked before
+going live; `earpiece_test.bat now` runs a real chat summary instead.
 
 PROCESS RECS also runs the "Ask the VOD" indexer (`tools\vod_index.py`)
 after the sorter, so tonight's recordings are searchable on

@@ -486,7 +486,9 @@ FACTORIO_CARD_MAP = {
 # Deck sorter calls it after filing new recordings); served read-only
 # by the public site. Clips are rendered on demand (H.264 720p) and
 # cached under VOD_CLIPS_DIR so the 80 Mbps HEVC sources never leave
-# the PC. Toggle "web_vod" in DEFAULT_FEATURES hides the page.
+# the PC. Access: the local browser always sees everything (and the
+# /vod/review page); tunneled visitors see only recordings marked public,
+# and only while the "web_vod" toggle is on. New recordings are private.
 VOD_RECORDINGS_DIR = BASE_DIR / "recordings"
 VOD_DB_PATH = DATA_DIR / "vod" / "vod_index.db"
 VOD_CLIPS_DIR = DATA_DIR / "vod" / "clips"
@@ -556,7 +558,7 @@ DEFAULT_FEATURES = {
     "web_trading": True,   # dashboard kill-switch; WEB_TRADING_ENABLED still gates
     "web_profile": True,   # off = hatmaster.tv/me 404s (invisibility contract)
     "web_live": True,      # off = hatmaster.tv/live 404s + /ws/live refuses
-    "web_vod": False,      # PRIVATE by default: hatmaster.tv/vod + /api/vod/* 404 until flipped on the dashboard
+    "web_vod": False,      # visitors get /vod only when ON, and then only recordings marked public on /vod/review; localhost always works
     "streamloots": True,   # gates event dispatch; connection stays up
     "factorio": True,      # gates card handling + chat announcements
     "spacegame": False,    # off = commands silent + hidden from /mod, game page 404s
