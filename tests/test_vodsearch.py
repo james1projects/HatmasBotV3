@@ -729,6 +729,43 @@ def test_dedupe_moments_collapses_voice_bleed():
     s.close()
 
 
+# ── adaptive speaker labels ───────────────────────────────────────────
+
+def test_assign_speakers_follows_the_voice():
+    from vodsearch.indexer import assign_speakers
+    cfg = {1: "hatmaster", 2: "friends", 3: "friends"}
+    assert assign_speakers(cfg, {1: 0.1, 2: 0.05, 3: 0.6}, 0.02) == cfg          # mic on 1: keep
+    assert assign_speakers(cfg, {1: 0.0, 2: 0.0, 3: 0.6}, 0.02) == {1: "friends", 2: "friends", 3: "hatmaster"}
+    assert assign_speakers(cfg, {1: 0.0, 2: 0.08, 3: 0.09}, 0.02)[3] == "hatmaster"
+    assert assign_speakers(cfg, {1: 0.0, 2: 0.0, 3: 0.0}, 0.02) == cfg           # all silent: unchanged
+    assert assign_speakers({2: "friends"}, {2: 0.5}, 0.02) == {2: "friends"}      # no primary configured
+    assert assign_speakers(cfg, {1: 0.01, 3: 0.4}, 0.02)[3] == "hatmaster"        # below floor counts as silent
+
+
+def test_relabel_speakers_rewrites_existing_index():
+    from vodsearch.indexer import relabel_speakers
+    s = _store()
+    rid = s.upsert_recording("old.mp4", god="Sylvanus", status="done", duration_s=600,
+                             recorded_at="2026-05-25T18:00:00")
+    s.replace_tracks(rid, [
+        {"track_index": 1, "speaker": "hatmaster", "rms_db": -98, "speech_frac": 0.0, "transcribed": 0, "segments": 0},
+        {"track_index": 2, "speaker": "dup:1", "rms_db": -98, "speech_frac": 0.0, "transcribed": 0, "segments": 0},
+        {"track_index": 3, "speaker": "friends", "rms_db": -30, "speech_frac": 0.6, "transcribed": 1, "segments": 2},
+    ])
+    s.replace_segments(rid, [
+        dict(track_index=3, speaker="friends", start_s=1, end_s=2, text="I have no mana"),
+        dict(track_index=3, speaker="friends", start_s=5, end_s=6, text="backing up"),
+    ])
+    out = relabel_speakers(s, {1: "hatmaster", 2: "friends", 3: "friends"}, 0.02, log=lambda *_: None)
+    assert out == {"recordings": 1, "changed": 1, "segments": 2}
+    assert {r[0] for r in s.conn.execute("SELECT speaker FROM segments")} == {"hatmaster"}
+    assert s.conn.execute("SELECT speaker FROM tracks WHERE track_index=2").fetchone()[0] == "dup:1"
+    assert s.conn.execute("SELECT speaker FROM tracks WHERE track_index=3").fetchone()[0] == "hatmaster"
+    # idempotent
+    assert relabel_speakers(s, {1: "hatmaster", 2: "friends", 3: "friends"}, 0.02, log=lambda *_: None)["changed"] == 0
+    s.close()
+
+
 # ── harness ───────────────────────────────────────────────────────────
 
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

@@ -90,6 +90,34 @@ def discover(recordings_dir: Path, include_root: bool = False,
     return found
 
 
+def assign_speakers(configured: Dict[int, str], speech: Dict[int, float],
+                    min_speech: float, primary: str = "hatmaster") -> Dict[int, str]:
+    """Decide which track is the streamer for THIS recording.
+
+    OBS track layouts drift: from May to July 2026 the mic sat on track 3
+    (track 1 silent), later on track 1 with a mirror on track 2. A fixed
+    index->label map therefore mislabels most of the archive. Rule: keep
+    the configured labels when the configured primary track has speech;
+    if it is silent, the track with the most speech becomes the primary
+    and the rest keep their configured (non-primary) label."""
+    labels = dict(configured)
+    primary_tracks = [t for t, lab in configured.items() if lab == primary]
+    if not primary_tracks:
+        return labels
+    if any(speech.get(t, 0.0) >= min_speech for t in primary_tracks):
+        return labels
+    candidates = [(frac, t) for t, frac in speech.items()
+                  if t in configured and frac >= min_speech and configured[t] != primary]
+    if not candidates:
+        return labels
+    frac, best = max(candidates)
+    fallback = next((lab for t, lab in configured.items() if lab != primary), "friends")
+    for t in primary_tracks:
+        labels[t] = fallback
+    labels[best] = primary
+    return labels
+
+
 def sidecar_path(mp4: Path) -> Path:
     return mp4.parent / (mp4.stem + ".events.json")
 
@@ -181,12 +209,19 @@ def index_recording(store: Store, transcriber: Transcriber, path: Path,
     decoded = audio_mod.decode_tracks(path, wanted, opts.ffmpeg) if wanted else {}
     decode_s = time.time() - t0
     kept: List[int] = []
+    fracs = {t: audio_mod.speech_fraction(decoded[t], threshold_db=opts.speech_threshold_db)
+             for t in wanted if decoded.get(t) is not None}
+    labels = assign_speakers(opts.tracks, fracs, opts.min_speech_frac)
+    if labels != {t: opts.tracks[t] for t in labels}:
+        moved = [t for t in labels if labels[t] != opts.tracks.get(t)]
+        log(f"    speaker layout: track {[t for t in labels if labels[t] == 'hatmaster']} is the streamer"
+            f" (configured track silent; relabeled {moved})")
     for t in wanted:
         samples = decoded.get(t)
         if samples is None:
             continue
-        frac = audio_mod.speech_fraction(samples, threshold_db=opts.speech_threshold_db)
-        row = {"track_index": t, "speaker": opts.tracks[t],
+        frac = fracs[t]
+        row = {"track_index": t, "speaker": labels.get(t, opts.tracks[t]),
                "rms_db": audio_mod.rms_db(samples), "speech_frac": frac,
                "transcribed": False, "segments": 0}
         if frac < opts.min_speech_frac:
@@ -204,14 +239,15 @@ def index_recording(store: Store, transcriber: Transcriber, path: Path,
         kept.append(t)
         t1 = time.time()
         segs = transcriber.transcribe(samples)
+        speaker = labels.get(t, opts.tracks[t])
         n = store.replace_segments(rec_id, [
-            dict(track_index=t, speaker=opts.tracks[t], start_s=s.start, end_s=s.end,
+            dict(track_index=t, speaker=speaker, start_s=s.start, end_s=s.end,
                  text=s.text, no_speech_prob=s.no_speech_prob, avg_logprob=s.avg_logprob)
             for s in segs], track_index=t)
         row.update(transcribed=True, segments=n)
         total_segments += n
         track_rows.append(row)
-        log(f"    track {t} ({opts.tracks[t]}): speech {frac:.0%}, {n} segments, "
+        log(f"    track {t} ({speaker}): speech {frac:.0%}, {n} segments, "
             f"{time.time() - t1:.0f}s")
     store.replace_tracks(rec_id, track_rows)
     store.upsert_recording(path, status="done", error=None, indexed_at=now_iso())
@@ -262,6 +298,43 @@ def embed_pending(store: Store, embedder, batch: int = 256, log: Logger = print,
         log(f"[vodsearch] embedded {done} new line(s) with {embedder.model}"
             f" ({store.embedding_count(embedder.model)} total)")
     return done
+
+
+def relabel_speakers(store: Store, configured: Dict[int, str], min_speech: float,
+                     log: Logger = print) -> dict:
+    """Re-run assign_speakers over the stored per-track speech fractions
+    and rewrite segments.speaker, no transcription needed. Returns
+    counters; used after the rule changed (2026-09-05) or when a config
+    layout changes."""
+    counters = {"recordings": 0, "changed": 0, "segments": 0}
+    for rec in store.list_recordings("done"):
+        rid = int(rec["id"])
+        rows = store.conn.execute(
+            "SELECT track_index, speech_frac, speaker FROM tracks WHERE recording_id=?", (rid,)).fetchall()
+        if not rows:
+            continue
+        counters["recordings"] += 1
+        fracs = {int(r["track_index"]): float(r["speech_frac"] or 0.0) for r in rows
+                 if not str(r["speaker"] or "").startswith("dup:")}
+        labels = assign_speakers(configured, fracs, min_speech)
+        changed = False
+        for t, lab in labels.items():
+            cur = store.conn.execute(
+                "SELECT COUNT(*) FROM segments WHERE recording_id=? AND track_index=? AND speaker != ?",
+                (rid, t, lab)).fetchone()[0]
+            if cur:
+                store.conn.execute("UPDATE segments SET speaker=? WHERE recording_id=? AND track_index=?",
+                                   (lab, rid, t))
+                store.conn.execute("UPDATE tracks SET speaker=? WHERE recording_id=? AND track_index=?"
+                                   " AND speaker NOT LIKE 'dup:%'", (lab, rid, t))
+                counters["segments"] += int(cur)
+                changed = True
+        if changed:
+            counters["changed"] += 1
+    store.conn.commit()
+    log(f"[vodsearch] speakers relabeled: {counters['changed']} of {counters['recordings']} recordings,"
+        f" {counters['segments']} lines")
+    return counters
 
 
 def prune_missing(store: Store, log: Logger = print) -> int:

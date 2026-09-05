@@ -4,6 +4,7 @@ vodsearch command line.
     python -m vodsearch.cli index  --recordings <dir> --db <file> [--model large-v3] [--force] [--limit N] [--dry-run]
     python -m vodsearch.cli search "<words>" [--god Ymir] [--event kill|multikill|death|any] [--limit 20] [--semantic]
     python -m vodsearch.cli embed                  # vectors for semantic search (local Ollama, incremental)
+    python -m vodsearch.cli relabel                # re-assign streamer/friends labels from stored speech levels
     python -m vodsearch.cli browse [--god Ymir] [--event kill]
     python -m vodsearch.cli clip   --segment ID | --event ID | --recording ID --start S [--end E]  [--out DIR]
     python -m vodsearch.cli stats
@@ -25,7 +26,7 @@ from typing import Dict, List, Optional
 
 from . import clips as clips_mod
 from .indexer import (DEFAULT_TRACKS, IndexOptions, embed_pending, fmt_hms, refresh_events,
-                      run as run_index)
+                      relabel_speakers, run as run_index)
 from .transcribe import DEFAULT_INITIAL_PROMPT
 from .store import Store
 
@@ -95,6 +96,11 @@ def build_parser(defaults: Optional[dict] = None) -> argparse.ArgumentParser:
     se.add_argument("--semantic", action="store_true", help="rank by meaning (needs embeddings)")
     se.add_argument("--embed-host", default=d.get("embed_host", "http://localhost:11434"))
     se.add_argument("--embed-model", default=d.get("embed_model", "nomic-embed-text"))
+
+    rl = sub.add_parser("relabel", help="re-assign speaker labels from stored per-track speech levels (no transcription)")
+    add_db(rl)
+    rl.add_argument("--tracks", default=d.get("tracks", "1:hatmaster,2:friends,3:friends"))
+    rl.add_argument("--min-speech", type=float, default=float(d.get("min_speech_frac", 0.02)))
 
     em = sub.add_parser("embed", help="embed transcript lines for semantic search (incremental)")
     add_db(em)
@@ -187,6 +193,14 @@ def cmd_search(a) -> int:
         else:
             res = store.search(q, god=a.god, event=a.event, speaker=a.speaker, limit=a.limit)
     _print_moments(res)
+    return 0
+
+
+def cmd_relabel(a) -> int:
+    with Store(a.db) as store:
+        relabel_speakers(store, parse_tracks(a.tracks) or dict(DEFAULT_TRACKS), a.min_speech)
+        print("per speaker now:", [tuple(r) for r in store.conn.execute(
+            "SELECT speaker, COUNT(*) FROM segments GROUP BY speaker").fetchall()])
     return 0
 
 
@@ -289,7 +303,8 @@ def main(argv: Optional[List[str]] = None, defaults: Optional[dict] = None) -> i
     a = build_parser(defaults).parse_args(argv)
     handler = {"index": cmd_index, "search": cmd_search, "browse": cmd_browse,
                "clip": cmd_clip, "stats": cmd_stats, "events": cmd_events,
-               "publish": cmd_visibility, "unpublish": cmd_visibility, "embed": cmd_embed}[a.cmd]
+               "publish": cmd_visibility, "unpublish": cmd_visibility, "embed": cmd_embed,
+               "relabel": cmd_relabel}[a.cmd]
     try:
         return handler(a)
     except KeyboardInterrupt:
