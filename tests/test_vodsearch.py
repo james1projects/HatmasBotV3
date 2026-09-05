@@ -766,6 +766,24 @@ def test_relabel_speakers_rewrites_existing_index():
     s.close()
 
 
+# ── clip windows on the web layer ─────────────────────────────────────
+
+def test_event_window_and_key_preference():
+    from core.vod_web import EVENT_MIN_POST_S, EVENT_MIN_PRE_S, VodWeb, event_window
+    assert event_window({"pre_s": 7, "post_s": 6, "tier": 1}) == (EVENT_MIN_PRE_S, EVENT_MIN_POST_S)
+    assert event_window({"pre_s": 20, "post_s": 30, "tier": 1}) == (20.0, 30.0)     # wider detector window wins
+    pre, post = event_window({"pre_s": 7, "post_s": 15.6, "tier": 3})
+    assert pre == 12.0 and post == 18.0 + 8.0                                        # +4 s per extra kill
+    pre_l, post_l = event_window({"pre_s": 7, "post_s": 6, "tier": 2}, 1.8)
+    assert abs(pre_l - 12.0 * 1.8) < 1e-6 and abs(post_l - 22.0 * 1.8) < 1e-6
+    assert event_window({"pre_s": 7, "post_s": 6, "tier": 0}, 0.6)[0] < 12.0
+    # browse moments (event_id set) clip around the event, not the nearby line
+    dec = VodWeb._decorate([{"segment_id": 5, "event_id": 9, "recording_id": 1, "start_s": 10.0},
+                            {"segment_id": 5, "recording_id": 1, "start_s": 10.0}], local=True)
+    assert dec[0]["key"] == "e9" and dec[0]["clip_url"] == "/api/vod/clip/e9.mp4"
+    assert dec[1]["key"] == "s5"
+
+
 # ── harness ───────────────────────────────────────────────────────────
 
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

@@ -65,8 +65,9 @@
   .filters select {
     font: inherit; font-size: 12px; font-weight: 600; padding: 6px 10px;
     background: var(--panel); color: var(--text-dim); border: 1px solid var(--border);
-    border-radius: 999px; margin-left: auto; max-width: 200px;
+    border-radius: 999px; max-width: 200px;
   }
+  .filters select#god { margin-left: auto; }
 
   .results-head {
     display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
@@ -186,6 +187,11 @@
         <button type="button" class="chip small" data-mode="keyword" aria-pressed="false" title="Exact words only">Words</button>
         <button type="button" class="chip small" data-mode="meaning" aria-pressed="false" title="Rank every line by meaning">Meaning</button>
       </span>
+      <select id="len" aria-label="Clip length" title="How much to show around each moment">
+        <option value="normal">Clip: normal</option>
+        <option value="long">Clip: long</option>
+        <option value="short">Clip: short</option>
+      </select>
       <select id="god" aria-label="Filter by god"><option value="">All gods</option></select>
     </div>
 
@@ -197,7 +203,8 @@
 <script>
 (function () {
   const $ = (id) => document.getElementById(id);
-  const state = { q: "", god: "", event: "", offset: 0, limit: 20, total: 0, key: "", mode: "hybrid" };
+  const state = { q: "", god: "", event: "", offset: 0, limit: 20, total: 0, key: "", mode: "hybrid", len: "normal" };
+  function clipSrc(url) { return url + (state.len && state.len !== "normal" ? "?len=" + state.len : ""); }
   let activeVideo = null;
 
   function esc(s) {
@@ -321,7 +328,7 @@
     thumb.innerHTML = '<div class="state">Rendering clip</div>';
     const v = document.createElement("video");
     v.controls = true; v.autoplay = true; v.playsInline = true; v.preload = "auto";
-    v.src = m.clip_url;
+    v.src = clipSrc(m.clip_url);
     const st = thumb.querySelector(".state");
     v.addEventListener("loadeddata", () => { st.remove(); });
     v.addEventListener("error", () => { st.textContent = "Clip unavailable"; st.className = "state bad"; });
@@ -467,6 +474,11 @@
     search(false);
   });
   $("god").addEventListener("change", () => { state.god = $("god").value; state.key = ""; search(false); });
+  $("len").addEventListener("change", () => {
+    state.len = $("len").value;
+    try { localStorage.setItem("vod.len", state.len); } catch (_) {}
+    // an already-playing clip keeps its length; the next play uses the new one
+  });
   $("modes").addEventListener("click", (e) => {
     const b = e.target.closest("[data-mode]");
     if (!b) return;
@@ -484,6 +496,7 @@
   state.event = params.get("event") || "";
   state.key = (params.get("clip") || "").trim();
   state.mode = ["hybrid", "keyword", "meaning"].includes(params.get("mode")) ? params.get("mode") : "hybrid";
+  try { const l = localStorage.getItem("vod.len"); if (l && ["short", "normal", "long"].includes(l)) { state.len = l; $("len").value = l; } } catch (_) {}
   document.querySelectorAll("[data-mode]").forEach((c) => c.setAttribute("aria-pressed", c.dataset.mode === state.mode ? "true" : "false"));
   $("q").value = state.q;
   applyChips();

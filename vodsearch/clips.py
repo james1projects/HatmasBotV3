@@ -19,7 +19,7 @@ from typing import List, Optional, Sequence, Tuple
 
 DEFAULT_PRE_S = 8.0
 DEFAULT_POST_S = 12.0
-MAX_CLIP_S = 90.0
+MAX_CLIP_S = 120.0
 MIN_CLIP_S = 3.0
 
 

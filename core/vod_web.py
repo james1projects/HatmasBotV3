@@ -63,11 +63,32 @@ from vodsearch.store import Store
 PUBLIC_DIR = Path(__file__).resolve().parent.parent / "public"
 _KEY_RE = re.compile(r"^([se])(\d{1,12})$")
 _EVENTS = {"any", "kill", "multikill", "death", "assist", "double", "triple", "quadra", "penta"}
-SEGMENT_PRE_S = 5.0     # a spoken line: a little lead-in, a bit more after
-SEGMENT_POST_S = 8.0
-SEGMENT_MAX_S = 40.0    # a moment is a sentence, not a monologue
-EVENT_EXTRA_POST_S = 3.0  # detector windows are cut tight for editing; breathe
+# Clip windows. The detector's sidecar pre/post (7 s / 6 s) are editing
+# cut points, far too tight to watch: James asked for longer previews
+# (2026-09-05). Events get at least EVENT_MIN_PRE_S before and
+# EVENT_MIN_POST_S after, plus EVENT_TIER_BONUS_S per extra kill in a
+# streak; spoken lines get a lead-in and room after the sentence.
+# ?len=short|normal|long scales the whole window (0.6x / 1x / 1.8x).
+SEGMENT_PRE_S = 8.0
+SEGMENT_POST_S = 15.0
+SEGMENT_MAX_S = 60.0
+EVENT_MIN_PRE_S = 12.0
+EVENT_MIN_POST_S = 18.0
+EVENT_TIER_BONUS_S = 4.0
+LEN_SCALE = {"short": 0.6, "normal": 1.0, "long": 1.8}
 RENDER_TIMEOUT_S = 240.0
+
+
+def event_window(ev: dict, scale: float = 1.0) -> Tuple[float, float]:
+    """(pre_s, post_s) for an event clip: never tighter than the minimums,
+    wider when the detector's own window is wider, longer tails for
+    bigger streaks, then scaled by ?len=."""
+    pre = max(float(ev.get("pre_s") or 0), EVENT_MIN_PRE_S)
+    post = max(float(ev.get("post_s") or 0), EVENT_MIN_POST_S)
+    tier = int(ev.get("tier") or 0)
+    if tier >= 2:
+        post += EVENT_TIER_BONUS_S * (tier - 1)
+    return pre * scale, post * scale
 
 
 def _fmt_clock(seconds: float) -> str:
@@ -158,10 +179,14 @@ class VodWeb:
                 d.pop("path", None)
                 d.pop("visibility", None)
                 d.pop("hidden", None)
-            if d.get("segment_id"):
-                key = f"s{int(d['segment_id'])}"
-            elif d.get("event_id"):
+            # Event moments (browse view) clip around the EVENT, even when a
+            # spoken line sits nearby; only pure transcript hits use the
+            # segment window. (Before 2026-09-05 a multikill card cut its
+            # clip around the nearest sentence instead of the kill.)
+            if d.get("event_id"):
                 key = f"e{int(d['event_id'])}"
+            elif d.get("segment_id"):
+                key = f"s{int(d['segment_id'])}"
             else:
                 key = None
             d["key"] = key
@@ -353,8 +378,11 @@ class VodWeb:
                            ) -> Optional[Tuple[int, str, float, float, float]]:
         """-> (recording_id, source_path, start_s, end_s, mid_s) or None.
         With `request`, a private recording resolves to None for anyone
-        who is not the local browser."""
-        resolved = await self._resolve_key_raw(key)
+        who is not the local browser, and ?len= scales the window."""
+        scale = 1.0
+        if request is not None:
+            scale = LEN_SCALE.get((request.query.get("len") or "normal").lower(), 1.0)
+        resolved = await self._resolve_key_raw(key, scale)
         if resolved is None:
             return None
         rec_id, src, start, end, mid, visibility = resolved
@@ -362,7 +390,7 @@ class VodWeb:
             return None
         return rec_id, src, start, end, mid
 
-    async def _resolve_key_raw(self, key: str):
+    async def _resolve_key_raw(self, key: str, scale: float = 1.0):
         m = _KEY_RE.match(key or "")
         if not m:
             return None
@@ -375,8 +403,8 @@ class VodWeb:
                     return None
                 dur = float(seg.get("duration_s") or 0)
                 start, end = clips_mod.clip_window(float(seg["start_s"]), float(seg["end_s"]),
-                                                   dur, SEGMENT_PRE_S, SEGMENT_POST_S,
-                                                   max_len=SEGMENT_MAX_S)
+                                                   dur, SEGMENT_PRE_S * scale, SEGMENT_POST_S * scale,
+                                                   max_len=min(clips_mod.MAX_CLIP_S, SEGMENT_MAX_S * scale))
                 mid = (float(seg["start_s"]) + float(seg["end_s"])) / 2.0
                 return (int(seg["recording_id"]), seg["path"], start, end, mid,
                         seg.get("visibility") or "private")
@@ -384,8 +412,7 @@ class VodWeb:
             if not ev:
                 return None
             dur = float(ev.get("duration_s") or 0)
-            pre = float(ev.get("pre_s") or 0) or clips_mod.DEFAULT_PRE_S
-            post = (float(ev.get("post_s") or 0) or clips_mod.DEFAULT_POST_S) + EVENT_EXTRA_POST_S
+            pre, post = event_window(ev, scale)
             ts = float(ev["ts_s"])
             start, end = clips_mod.clip_window(ts, None, dur, pre, post)
             return (int(ev["recording_id"]), ev["path"], start, end, ts,

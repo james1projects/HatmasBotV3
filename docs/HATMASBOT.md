@@ -2484,8 +2484,12 @@ streamers; HatmasBot wires it in through two thin shims.
    `split_sentences` -> FTS rows labelled `hatmaster` (track 1) or `friends` (tracks 2-3).
 3. The public site opens `data/vod/vod_index.db` read-only per request (in
    `asyncio.to_thread`). A clip request resolves its key (`s<segment_id>` or
-   `e<event_id>`) to a window (segments: -5 s / +8 s, max 40 s; events: the detector's
-   pre/post + 3 s), renders once with ffmpeg as an asyncio subprocess (2 concurrent,
+   `e<event_id>`) to a window (spoken lines: -8 s / +15 s, max 60 s; events: at least 12 s before and
+   18 s after, wider if the detector's own window is wider, +4 s per extra kill in a
+   streak; `?len=short|normal|long` scales the window 0.6x / 1x / 1.8x, page select
+   "Clip: normal/long/short", ceiling 120 s. Browse/event cards always clip around the
+   event, transcript hits around the line. Lengths were doubled 2026-09-05 at James's
+   request: a triple kill in a full-length recording is ~43 s normal, ~77 s long), renders once with ffmpeg as an asyncio subprocess (2 concurrent,
    shared future per key), caches under `data/vod/clips/` (LRU-evicted past
    `VOD_CLIP_CACHE_MAX_MB`), and serves it with `Cache-Control: public`.
 
