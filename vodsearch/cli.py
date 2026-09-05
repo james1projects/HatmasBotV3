@@ -2,7 +2,8 @@
 vodsearch command line.
 
     python -m vodsearch.cli index  --recordings <dir> --db <file> [--model large-v3] [--force] [--limit N] [--dry-run]
-    python -m vodsearch.cli search "<words>" [--god Ymir] [--event kill|multikill|death|any] [--limit 20]
+    python -m vodsearch.cli search "<words>" [--god Ymir] [--event kill|multikill|death|any] [--limit 20] [--semantic]
+    python -m vodsearch.cli embed                  # vectors for semantic search (local Ollama, incremental)
     python -m vodsearch.cli browse [--god Ymir] [--event kill]
     python -m vodsearch.cli clip   --segment ID | --event ID | --recording ID --start S [--end E]  [--out DIR]
     python -m vodsearch.cli stats
@@ -23,7 +24,8 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from . import clips as clips_mod
-from .indexer import DEFAULT_TRACKS, IndexOptions, fmt_hms, refresh_events, run as run_index
+from .indexer import (DEFAULT_TRACKS, IndexOptions, embed_pending, fmt_hms, refresh_events,
+                      run as run_index)
 from .transcribe import DEFAULT_INITIAL_PROMPT
 from .store import Store
 
@@ -78,6 +80,9 @@ def build_parser(defaults: Optional[dict] = None) -> argparse.ArgumentParser:
     ix.add_argument("--include-root", action="store_true",
                     help="also index unsorted files in the recordings root")
     ix.add_argument("--no-prune", action="store_true", help="keep rows whose file is gone")
+    ix.add_argument("--no-embed", action="store_true", help="skip semantic embeddings after indexing")
+    ix.add_argument("--embed-host", default=d.get("embed_host", "http://localhost:11434"))
+    ix.add_argument("--embed-model", default=d.get("embed_model", "nomic-embed-text"))
     ix.add_argument("--dry-run", action="store_true")
 
     se = sub.add_parser("search", help="full-text search over the transcript")
@@ -87,6 +92,14 @@ def build_parser(defaults: Optional[dict] = None) -> argparse.ArgumentParser:
     se.add_argument("--event", choices=["any", "kill", "multikill", "death", "assist"])
     se.add_argument("--speaker")
     se.add_argument("--limit", type=int, default=20)
+    se.add_argument("--semantic", action="store_true", help="rank by meaning (needs embeddings)")
+    se.add_argument("--embed-host", default=d.get("embed_host", "http://localhost:11434"))
+    se.add_argument("--embed-model", default=d.get("embed_model", "nomic-embed-text"))
+
+    em = sub.add_parser("embed", help="embed transcript lines for semantic search (incremental)")
+    add_db(em)
+    em.add_argument("--embed-host", default=d.get("embed_host", "http://localhost:11434"))
+    em.add_argument("--embed-model", default=d.get("embed_model", "nomic-embed-text"))
 
     br = sub.add_parser("browse", help="newest detector events with nearby speech")
     add_db(br)
@@ -134,6 +147,8 @@ def _print_moments(result: dict) -> None:
     print(f"{result.get('total', len(moments))} result(s) [{result.get('mode')}]")
     for m in moments:
         ev = ",".join(e["kind"] for e in m.get("events") or []) or "-"
+        if m.get("score") is not None:
+            ev += f" {m['score']:.2f}"
         when = (m.get("recorded_at") or "")[:10]
         seg = m.get("segment_id")
         text = (m.get("text") or "").replace("\n", " ")
@@ -149,16 +164,41 @@ def cmd_index(a) -> int:
         initial_prompt=(DEFAULT_INITIAL_PROMPT if a.prompt is None else (a.prompt or None)),
         min_duration_s=a.min_duration, min_speech_frac=a.min_speech,
         ffmpeg=a.ffmpeg, ffprobe=a.ffprobe, force=a.force, limit=a.limit,
-        include_root=a.include_root, dry_run=a.dry_run, prune_missing=not a.no_prune)
+        include_root=a.include_root, dry_run=a.dry_run, prune_missing=not a.no_prune,
+        embed=not a.no_embed, embed_host=a.embed_host, embed_model=a.embed_model)
     counters = run_index(opts)
     return 1 if counters["errors"] and not counters["indexed"] else 0
 
 
 def cmd_search(a) -> int:
+    q = " ".join(a.query)
     with Store(a.db) as store:
-        res = store.search(" ".join(a.query), god=a.god, event=a.event,
-                           speaker=a.speaker, limit=a.limit)
+        if a.semantic:
+            from .embed import OllamaEmbedder, top_k
+            emb = OllamaEmbedder(a.embed_host, a.embed_model)
+            ids, mat = store.load_embeddings(emb.model)
+            if ids.size == 0:
+                print("no embeddings yet: run `embed` first", file=sys.stderr)
+                return 2
+            scored = top_k(emb.embed_query(q), ids, mat, k=a.limit * 4)
+            moments = store.moments_for_segments(scored, god=a.god, event=a.event,
+                                                 speaker=a.speaker, limit=a.limit)
+            res = {"mode": "semantic", "total": len(moments), "moments": moments}
+        else:
+            res = store.search(q, god=a.god, event=a.event, speaker=a.speaker, limit=a.limit)
     _print_moments(res)
+    return 0
+
+
+def cmd_embed(a) -> int:
+    from .embed import OllamaEmbedder
+    emb = OllamaEmbedder(a.embed_host, a.embed_model)
+    if not emb.available():
+        print(f"Ollama not reachable at {a.embed_host} (model {a.embed_model})", file=sys.stderr)
+        return 2
+    with Store(a.db) as store:
+        n = embed_pending(store, emb)
+        print(f"{n} embedded, {store.embedding_count(emb.model)} total")
     return 0
 
 
@@ -249,7 +289,7 @@ def main(argv: Optional[List[str]] = None, defaults: Optional[dict] = None) -> i
     a = build_parser(defaults).parse_args(argv)
     handler = {"index": cmd_index, "search": cmd_search, "browse": cmd_browse,
                "clip": cmd_clip, "stats": cmd_stats, "events": cmd_events,
-               "publish": cmd_visibility, "unpublish": cmd_visibility}[a.cmd]
+               "publish": cmd_visibility, "unpublish": cmd_visibility, "embed": cmd_embed}[a.cmd]
     try:
         return handler(a)
     except KeyboardInterrupt:

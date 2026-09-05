@@ -592,6 +592,90 @@ def test_migration_adds_visibility_to_old_index():
     s.close()
 
 
+# ── semantic search (embeddings) ──────────────────────────────────────
+
+class _FakeEmbedder:
+    """Deterministic 8-dim vectors: a bag of hashed word buckets, so
+    lines sharing words land close together. No network."""
+    name = "fake"
+    model = "fake-embed"
+
+    def _vec(self, text):
+        v = np.zeros(32, dtype=np.float32)
+        for w in text.lower().replace(":", " ").replace(",", "").split():
+            v[sum(ord(c) * (i + 1) for i, c in enumerate(w)) % 32] += 1.0   # stable, unlike hash()
+        return v
+
+    def embed_documents(self, texts):
+        from vodsearch.embed import normalize
+        return normalize(np.stack([self._vec(t) for t in texts]))
+
+    def embed_query(self, text):
+        from vodsearch.embed import normalize
+        return normalize(self._vec(text))[0]
+
+    def available(self):
+        return True
+
+
+def test_embed_helpers_normalize_topk_and_blobs():
+    from vodsearch.embed import blob_to_vec, normalize, top_k, vec_to_blob
+    m = normalize(np.array([[3.0, 4.0], [0.0, 0.0]]))
+    assert abs(np.linalg.norm(m[0]) - 1.0) < 1e-6 and m[1].tolist() == [0.0, 0.0]
+    ids = np.array([10, 11, 12], dtype=np.int64)
+    mat = normalize(np.array([[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]))
+    got = top_k(np.array([1.0, 0.0]), ids, mat, k=2)
+    assert [g[0] for g in got] == [10, 12] and abs(got[0][1] - 1.0) < 1e-6
+    assert top_k(np.array([1.0, 0.0]), ids, mat, k=3, min_score=0.9) == [(10, 1.0)]
+    assert top_k(np.array([1.0, 0.0]), np.zeros(0, dtype=np.int64), np.zeros((0, 0)), k=3) == []
+    v = np.array([0.25, -1.0, 3.5], dtype=np.float32)
+    assert blob_to_vec(vec_to_blob(v), 3).tolist() == v.tolist()
+
+
+def test_store_embeddings_roundtrip_and_pending():
+    from vodsearch.indexer import embed_pending
+    s = _store()
+    y, lk = _seed(s)
+    emb = _FakeEmbedder()
+    assert len(s.segments_without_embeddings(emb.model)) == 4
+    assert embed_pending(s, emb, batch=3, log=lambda *_: None) == 4
+    assert s.segments_without_embeddings(emb.model) == []
+    assert s.embedding_count(emb.model) == 4 and s.embedding_version(emb.model)[0] == 4
+    ids, mat = s.load_embeddings(emb.model)
+    assert ids.tolist() == [1, 2, 3, 4] and mat.shape == (4, 32)
+    # replacing a recording's segments drops their vectors; re-embed picks them up
+    s.replace_segments(lk, [dict(track_index=1, speaker="hatmaster", start_s=1, end_s=2, text="new line")])
+    assert s.embedding_count(emb.model) == 3
+    assert embed_pending(s, emb, log=lambda *_: None) == 1
+    s.delete_recording(lk)
+    assert s.embedding_count(emb.model) == 3 and s.load_embeddings("other-model")[0].size == 0
+    s.close()
+
+
+def test_moments_for_segments_filters_and_orders():
+    from vodsearch.embed import top_k
+    from vodsearch.indexer import embed_pending
+    s = _store()
+    y, lk = _seed(s)
+    emb = _FakeEmbedder()
+    embed_pending(s, emb, log=lambda *_: None)
+    ids, mat = s.load_embeddings(emb.model)
+    scored = top_k(emb.embed_query("nice trap"), ids, mat, k=4)
+    assert scored[-1][0] == 2                                   # "double kill let's go" shares no words
+    moments = s.moments_for_segments(scored, limit=10)
+    assert [m["segment_id"] for m in moments] == [i for i, _ in scored]
+    assert all(m["via"] == "meaning" and "score" in m for m in moments)
+    assert [m["segment_id"] for m in s.moments_for_segments(scored, god="Loki")] == [4]
+    assert s.moments_for_segments(scored, public_only=True) == []
+    s.set_visibility([y], "public")
+    assert {m["god"] for m in s.moments_for_segments(scored, public_only=True)} == {"Ymir"}
+    # segments 2 and 3 both sit within 20 s of the multikill at 1302.7
+    assert {m["segment_id"] for m in s.moments_for_segments(scored, event="multikill")} == {2, 3}
+    assert s.moments_for_segments([], limit=5) == []
+    assert s.search("trap")["moments"][0]["via"] == "keyword"
+    s.close()
+
+
 # ── harness ───────────────────────────────────────────────────────────
 
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

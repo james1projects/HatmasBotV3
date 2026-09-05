@@ -118,6 +118,8 @@
   .badge.speaker { background: var(--panel-hi); color: var(--text); }
   .badge.vis-private { background: var(--bg-2); color: var(--text-fade); border: 1px dashed var(--border-hi); }
   .badge.vis-public { background: var(--green-bg); color: var(--green); }
+  .badge.via { background: transparent; color: var(--text-fade); border: 1px solid var(--border); font-weight: 600; }
+  .modes { display: inline-flex; gap: 6px; }
   .line { margin: 8px 0 0; font-size: 15px; line-height: 1.45; }
   .line mark { background: var(--accent); color: var(--bg); padding: 0 2px; border-radius: 2px; }
   .line.quiet { color: var(--text-fade); font-style: italic; }
@@ -177,6 +179,11 @@
         <button type="button" class="chip small" data-event="quadra" aria-pressed="false">Quadra</button>
         <button type="button" class="chip small" data-event="penta" aria-pressed="false">Penta</button>
       </span>
+      <span class="modes" id="modes">
+        <button type="button" class="chip small" data-mode="hybrid" aria-pressed="true" title="Exact words first, then lines that mean the same">Words + meaning</button>
+        <button type="button" class="chip small" data-mode="keyword" aria-pressed="false" title="Exact words only">Words</button>
+        <button type="button" class="chip small" data-mode="meaning" aria-pressed="false" title="Rank every line by meaning">Meaning</button>
+      </span>
       <select id="god" aria-label="Filter by god"><option value="">All gods</option></select>
     </div>
 
@@ -188,7 +195,7 @@
 <script>
 (function () {
   const $ = (id) => document.getElementById(id);
-  const state = { q: "", god: "", event: "", offset: 0, limit: 20, total: 0, key: "" };
+  const state = { q: "", god: "", event: "", offset: 0, limit: 20, total: 0, key: "", mode: "hybrid" };
   let activeVideo = null;
 
   function esc(s) {
@@ -240,6 +247,7 @@
           '<span class="mono">' + esc(m.date || "") + "</span>" +
           '<span class="mono">' + esc(m.clock || "") + "</span>" +
           speakerChip(m.speaker) + badges +
+          (m.via === "meaning" ? '<span class="badge via" title="Matched by meaning, not exact words' + (m.score != null ? ", similarity " + m.score : "") + '">meaning</span>' : "") +
           (m.visibility ? '<span class="badge vis-' + esc(m.visibility) + '" title="Only public recordings are shown to viewers">' + (m.visibility === "public" ? "Public" : "Private") + "</span>" : "") +
         "</div>" + line +
         '<div class="actions">' +
@@ -321,6 +329,7 @@
       if (state.q) p.set("q", state.q);
       if (state.god) p.set("god", state.god);
       if (state.event) p.set("event", state.event);
+      if (state.mode && state.mode !== "hybrid") p.set("mode", state.mode);
     }
     const qs = p.toString();
     history.replaceState(null, "", location.pathname + (qs ? "?" + qs : ""));
@@ -370,6 +379,7 @@
       if (state.q) p.set("q", state.q);
       if (state.god) p.set("god", state.god);
       if (state.event) p.set("event", state.event);
+      if (state.mode && state.mode !== "hybrid") p.set("mode", state.mode);
     }
     let res;
     try {
@@ -390,7 +400,9 @@
               multi ? "Sorted by streak size, then newest" : (state.event ? "" : "Newest kills and deaths first"));
     } else {
       setHead(state.total + (state.total === 1 ? " result for " : " results for ") + '"' + state.q + '"',
-              res.mode === "or" ? "No exact match, showing lines with any of those words." : "");
+              res.mode === "or" ? "No exact match, showing lines with any of those words." :
+              res.mode === "hybrid" ? "Exact matches first, then lines that mean the same." :
+              res.mode === "meaning" ? "Ranked by meaning." : "");
     }
     if (!moments.length && !append) {
       $("results").innerHTML = '<div class="empty">' +
@@ -418,6 +430,7 @@
     const ev = state.event;
     const mainVal = TIERS.includes(ev) ? "multikill" : ev;
     document.querySelectorAll(".chip").forEach((c) => {
+      if (c.dataset.mode) return;
       const v = c.dataset.event || "";
       const on = c.classList.contains("small") ? v === ev : v === mainVal;
       c.setAttribute("aria-pressed", on ? "true" : "false");
@@ -426,7 +439,7 @@
   }
   $("filters").addEventListener("click", (e) => {
     const b = e.target.closest(".chip");
-    if (!b) return;
+    if (!b || b.dataset.mode) return;
     const v = b.dataset.event || "";
     // clicking the active tier chip goes back to all multikills
     state.event = (b.classList.contains("small") && state.event === v) ? "multikill" : v;
@@ -435,6 +448,14 @@
     search(false);
   });
   $("god").addEventListener("change", () => { state.god = $("god").value; state.key = ""; search(false); });
+  $("modes").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-mode]");
+    if (!b) return;
+    state.mode = b.dataset.mode;
+    document.querySelectorAll("[data-mode]").forEach((c) => c.setAttribute("aria-pressed", c === b ? "true" : "false"));
+    state.key = "";
+    if (state.q) search(false);
+  });
   $("more").addEventListener("click", () => search(true));
 
   // ── boot ──
@@ -443,6 +464,8 @@
   state.god = params.get("god") || "";
   state.event = params.get("event") || "";
   state.key = (params.get("clip") || "").trim();
+  state.mode = ["hybrid", "keyword", "meaning"].includes(params.get("mode")) ? params.get("mode") : "hybrid";
+  document.querySelectorAll("[data-mode]").forEach((c) => c.setAttribute("aria-pressed", c.dataset.mode === state.mode ? "true" : "false"));
   $("q").value = state.q;
   applyChips();
   if (window.matchMedia && !window.matchMedia("(max-width: 640px)").matches && !state.key) { $("q").focus(); }

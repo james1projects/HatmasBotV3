@@ -32,7 +32,9 @@ import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+
+import numpy as np
 
 EVENT_WINDOW_S = 20.0          # events this close to a segment count as "at" it
 MULTIKILL_WORDS = ("double", "triple", "quadra", "penta")
@@ -115,6 +117,13 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS idx_events_rec ON events(recording_id, ts_s);
 CREATE INDEX IF NOT EXISTS idx_events_kind ON events(kind);
+
+CREATE TABLE IF NOT EXISTS embeddings (
+    segment_id INTEGER PRIMARY KEY,   -- rows vanish with their segment (see replace_segments)
+    model      TEXT NOT NULL,
+    dim        INTEGER NOT NULL,
+    vec        BLOB NOT NULL          -- float32, unit-normalized
+);
 """
 
 
@@ -354,8 +363,13 @@ class Store:
         """Replace this recording's segments (all of them, or just one
         track's when `track_index` is given). Returns the count inserted."""
         if track_index is None:
+            self.conn.execute("DELETE FROM embeddings WHERE segment_id IN"
+                              " (SELECT id FROM segments WHERE recording_id=?)", (rec_id,))
             self.conn.execute("DELETE FROM segments WHERE recording_id=?", (rec_id,))
         else:
+            self.conn.execute("DELETE FROM embeddings WHERE segment_id IN"
+                              " (SELECT id FROM segments WHERE recording_id=? AND track_index=?)",
+                              (rec_id, track_index))
             self.conn.execute("DELETE FROM segments WHERE recording_id=? AND track_index=?",
                               (rec_id, track_index))
         rows = [(rec_id, s.get("track_index", track_index), s.get("speaker"),
@@ -395,6 +409,8 @@ class Store:
         return len(rows)
 
     def delete_recording(self, rec_id: int) -> None:
+        self.conn.execute("DELETE FROM embeddings WHERE segment_id IN"
+                          " (SELECT id FROM segments WHERE recording_id=?)", (rec_id,))
         for table in ("segments", "events", "tracks"):
             self.conn.execute(f"DELETE FROM {table} WHERE recording_id=?", (rec_id,))
         self.conn.execute("DELETE FROM recordings WHERE id=?", (rec_id,))
@@ -513,6 +529,89 @@ class Store:
             "gods": self.gods(public_only),
         }
 
+    # ── embeddings (semantic search) ──────────────────────────────────
+
+    def segments_without_embeddings(self, model: str, limit: int = 5000) -> List[dict]:
+        rows = self.conn.execute(
+            "SELECT s.id, s.text FROM segments s LEFT JOIN embeddings e"
+            " ON e.segment_id = s.id AND e.model = ? WHERE e.segment_id IS NULL"
+            " ORDER BY s.id LIMIT ?", (model, int(limit))).fetchall()
+        return [dict(r) for r in rows]
+
+    def put_embeddings(self, model: str, rows: Iterable[Tuple[int, np.ndarray]]) -> int:
+        data = []
+        for seg_id, vec in rows:
+            vec = np.asarray(vec, dtype=np.float32)
+            data.append((int(seg_id), model, int(vec.shape[-1]), vec.tobytes()))
+        if not data:
+            return 0
+        self.conn.executemany(
+            "INSERT OR REPLACE INTO embeddings (segment_id, model, dim, vec) VALUES (?,?,?,?)", data)
+        self.conn.commit()
+        return len(data)
+
+    def embedding_count(self, model: Optional[str] = None) -> int:
+        if model:
+            return int(self.conn.execute("SELECT COUNT(*) FROM embeddings WHERE model=?", (model,)).fetchone()[0])
+        return int(self.conn.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0])
+
+    def embedding_version(self, model: str) -> Tuple[int, int]:
+        """(count, max segment id) - cheap change detector for caches."""
+        row = self.conn.execute(
+            "SELECT COUNT(*), COALESCE(MAX(segment_id), 0) FROM embeddings WHERE model=?", (model,)).fetchone()
+        return int(row[0]), int(row[1])
+
+    def load_embeddings(self, model: str) -> Tuple[np.ndarray, np.ndarray]:
+        """-> (ids int64[n], matrix float32[n, dim]) for the whole index.
+        Visibility/god/event filtering happens afterwards in SQL on the
+        candidate ids, so this stays a plain cacheable matrix."""
+        rows = self.conn.execute(
+            "SELECT segment_id, dim, vec FROM embeddings WHERE model=? ORDER BY segment_id",
+            (model,)).fetchall()
+        if not rows:
+            return np.zeros(0, dtype=np.int64), np.zeros((0, 0), dtype=np.float32)
+        dim = int(rows[0]["dim"])
+        ids = np.fromiter((r["segment_id"] for r in rows), dtype=np.int64, count=len(rows))
+        mat = np.empty((len(rows), dim), dtype=np.float32)
+        for i, r in enumerate(rows):
+            mat[i] = np.frombuffer(r["vec"], dtype=np.float32, count=dim)
+        return ids, mat
+
+    def moments_for_segments(self, scored: Sequence[Tuple[int, float]], god: Optional[str] = None,
+                             event: Optional[str] = None, speaker: Optional[str] = None,
+                             public_only: bool = False, limit: int = 20) -> List[dict]:
+        """Turn (segment_id, score) candidates into moments, applying the
+        same god/event/speaker/visibility filters as search(). Keeps the
+        candidates' order."""
+        if not scored:
+            return []
+        ids = [int(i) for i, _ in scored]
+        score_of = {int(i): float(sc) for i, sc in scored}
+        where = f" WHERE s.id IN ({','.join('?' * len(ids))})" + self._vis_sql(public_only)
+        params: List[Any] = list(ids)
+        if god:
+            where += " AND r.god = ?"; params.append(god)
+        if speaker:
+            where += " AND s.speaker = ?"; params.append(speaker)
+        where += self._event_filter_sql(event)
+        rows = self.conn.execute(
+            "SELECT s.*, r.god AS god, r.recorded_at AS recorded_at, r.duration_s AS duration_s,"
+            " r.visibility AS visibility FROM segments s JOIN recordings r ON r.id = s.recording_id"
+            + where, params).fetchall()
+        by_id = {int(r["id"]): r for r in rows}
+        out = []
+        for seg_id in ids:
+            r = by_id.get(seg_id)
+            if r is None:
+                continue
+            m = self._moment_from_segment_row(r, None)
+            m["score"] = round(score_of.get(seg_id, 0.0), 3)
+            m["via"] = "meaning"
+            out.append(m)
+            if len(out) >= limit:
+                break
+        return out
+
     # ── search ────────────────────────────────────────────────────────
 
     @staticmethod
@@ -603,6 +702,8 @@ class Store:
                 " ORDER BY" + self._tier_order_sql(event) + " rank, r.recorded_at DESC LIMIT ? OFFSET ?",
                 params + [limit, offset]).fetchall()
             moments = [self._moment_from_segment_row(r, r["snip"]) for r in rows]
+            for m in moments:
+                m["via"] = "keyword"
             return {"mode": mode, "total": total, "moments": moments}
         return {"mode": "or", "total": 0, "moments": []}
 

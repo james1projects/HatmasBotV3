@@ -57,6 +57,9 @@ class IndexOptions:
     skip_dirs: Tuple[str, ...] = (".tiktok_bg", "processed", "replays")
     dry_run: bool = False
     prune_missing: bool = True
+    embed: bool = True                     # embed new lines after indexing (needs Ollama)
+    embed_host: str = "http://localhost:11434"
+    embed_model: str = "nomic-embed-text"
 
 
 def discover(recordings_dir: Path, include_root: bool = False,
@@ -239,6 +242,28 @@ def refresh_events(store: Store, recordings_dir: Path, log: Logger = print) -> d
     return counters
 
 
+def embed_pending(store: Store, embedder, batch: int = 256, log: Logger = print,
+                  max_segments: Optional[int] = None) -> int:
+    """Embed every transcript line that has no vector for embedder.model
+    yet. Incremental and restartable; returns the number embedded."""
+    done = 0
+    while True:
+        rows = store.segments_without_embeddings(embedder.model, limit=batch)
+        if not rows:
+            break
+        vecs = embedder.embed_documents([r["text"] for r in rows])
+        store.put_embeddings(embedder.model, zip((r["id"] for r in rows), vecs))
+        done += len(rows)
+        if done % (batch * 8) == 0:
+            log(f"    embedded {done} lines...")
+        if max_segments and done >= max_segments:
+            break
+    if done:
+        log(f"[vodsearch] embedded {done} new line(s) with {embedder.model}"
+            f" ({store.embedding_count(embedder.model)} total)")
+    return done
+
+
 def prune_missing(store: Store, log: Logger = print) -> int:
     gone = 0
     for rec in store.list_recordings():
@@ -309,6 +334,16 @@ def run(opts: IndexOptions, log: Logger = print) -> dict:
             log(f"{label}: {res['god'] or '?'} {fmt_hms(res['duration_s'])}, "
                 f"{res['segments']} segments, {res['events']} events, "
                 f"{res['elapsed_s']:.0f}s ({speed:.1f}x realtime)")
+        if opts.embed and not opts.dry_run:
+            try:
+                from .embed import OllamaEmbedder
+                emb = OllamaEmbedder(opts.embed_host, opts.embed_model)
+                if emb.available():
+                    counters["embedded"] = embed_pending(store, emb, log=log)
+                else:
+                    log(f"[vodsearch] embeddings skipped: Ollama not reachable at {opts.embed_host}")
+            except Exception as e:  # semantic search is a bonus, never a failure
+                log(f"[vodsearch] embeddings skipped: {type(e).__name__}: {e}")
     finally:
         store.close()
     counters["elapsed_s"] = time.time() - t_run

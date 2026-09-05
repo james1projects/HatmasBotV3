@@ -36,6 +36,8 @@ def defaults() -> dict:
         "clips_dir": Path(config.VOD_CLIPS_DIR),
         "model": config.VOD_WHISPER_MODEL,
         "initial_prompt": getattr(config, "VOD_WHISPER_PROMPT", None),
+        "embed_host": getattr(config, "VOD_EMBED_HOST", "http://localhost:11434"),
+        "embed_model": getattr(config, "VOD_EMBED_MODEL", "nomic-embed-text"),
         "tracks": config.VOD_TRACKS,
         "audio_tracks": ",".join(str(t) for t in config.VOD_CLIP_AUDIO_TRACKS),
         "clip_height": config.VOD_CLIP_HEIGHT,

@@ -51,9 +51,11 @@ from aiohttp import web
 from core.config import (
     VOD_CLIPS_DIR, VOD_CLIP_AUDIO_TRACKS, VOD_CLIP_CACHE_MAX_MB,
     VOD_CLIP_ENCODER, VOD_CLIP_HEIGHT, VOD_CLIP_MAX_CONCURRENT, VOD_DB_PATH,
-    VOD_FFMPEG, VOD_STREAM_MAX_CONCURRENT, VOD_STREAM_MAX_S,
+    VOD_EMBED_HOST, VOD_EMBED_MODEL, VOD_FFMPEG, VOD_SEMANTIC_MIN_SCORE,
+    VOD_STREAM_MAX_CONCURRENT, VOD_STREAM_MAX_S,
 )
 from vodsearch import clips as clips_mod
+from vodsearch.embed import OllamaEmbedder, top_k
 from vodsearch.store import Store
 
 PUBLIC_DIR = Path(__file__).resolve().parent.parent / "public"
@@ -83,6 +85,13 @@ class VodWeb:
         self._stream_sem = asyncio.Semaphore(max(1, int(VOD_STREAM_MAX_CONCURRENT)))
         self._inflight: Dict[str, asyncio.Future] = {}
         self._last_evict = 0.0
+        # Semantic search: the whole embedding matrix cached in memory,
+        # reloaded when the (count, max id) version changes.
+        self._embedder = OllamaEmbedder(VOD_EMBED_HOST, VOD_EMBED_MODEL)
+        self._emb_version: Tuple[int, int] = (-1, -1)
+        self._emb_ids = None
+        self._emb_mat = None
+        self._emb_lock = asyncio.Lock()
 
     # ── wiring ────────────────────────────────────────────────────────
 
@@ -211,6 +220,10 @@ class VodWeb:
                                       "moments": self._decorate([moment], local)},
                                      headers={"Cache-Control": "public, max-age=300"})
 
+        mode = (request.query.get("mode") or "hybrid").lower()
+        if mode not in ("hybrid", "keyword", "meaning"):
+            mode = "hybrid"
+
         def _query(store: Store) -> dict:
             if q:
                 return store.search(q, god=god, event=event, limit=limit, offset=offset,
@@ -219,6 +232,29 @@ class VodWeb:
                                 public_only=not local)
 
         res = await self._with_store(_query)
+        if q and mode != "keyword" and offset == 0:
+            # Fill (or replace) with meaning matches: hybrid adds them when
+            # the exact AND query came up short; "meaning" ranks by them only.
+            need = limit if mode == "meaning" else max(0, limit - (
+                len(res.get("moments") or []) if res.get("mode") == "and" else 0))
+            if need > 0:
+                extra = await self._semantic(q, god, event, not local, k=need + len(res.get("moments") or []))
+                if extra:
+                    seen = {m.get("segment_id") for m in res.get("moments") or []}
+                    if mode == "meaning":
+                        res["moments"] = extra[:limit]
+                        res["total"] = len(res["moments"])
+                        res["mode"] = "meaning"
+                    else:
+                        fresh = [m for m in extra if m.get("segment_id") not in seen][:need]
+                        if res.get("mode") == "and":
+                            res["moments"] = (res.get("moments") or []) + fresh
+                        else:
+                            res["moments"] = fresh + [m for m in (res.get("moments") or [])
+                                                      if m.get("segment_id") not in {x["segment_id"] for x in fresh}]
+                            res["moments"] = res["moments"][:limit]
+                        res["total"] = max(int(res.get("total") or 0), len(res["moments"]))
+                        res["mode"] = "hybrid" if fresh else res.get("mode")
         if local:
             # Editing workflow: the source file + offset, only for the
             # loopback browser. Never leaves the PC through the tunnel.
@@ -239,6 +275,30 @@ class VodWeb:
         res["limit"] = limit
         res["offset"] = offset
         return web.json_response(res, headers={"Cache-Control": "no-cache"})
+
+    async def _semantic(self, q: str, god: Optional[str], event: Optional[str],
+                        public_only: bool, k: int) -> List[dict]:
+        """Meaning matches for q, filtered like search(). Empty when the
+        embedder is unreachable or nothing is embedded; never raises."""
+        try:
+            async with self._emb_lock:
+                version = await self._with_store(lambda s: s.embedding_version(self._embedder.model))
+                if version[0] == 0:
+                    return []
+                if version != self._emb_version:
+                    ids, mat = await self._with_store(lambda s: s.load_embeddings(self._embedder.model))
+                    self._emb_ids, self._emb_mat, self._emb_version = ids, mat, version
+            qvec = await asyncio.to_thread(self._embedder.embed_query, q)
+            scored = top_k(qvec, self._emb_ids, self._emb_mat, k=max(k * 4, 40),
+                           min_score=float(VOD_SEMANTIC_MIN_SCORE))
+            if not scored:
+                return []
+            return await self._with_store(
+                lambda s: s.moments_for_segments(scored, god=god, event=event,
+                                                 public_only=public_only, limit=k))
+        except Exception as e:
+            print(f"[VodWeb] semantic search unavailable: {type(e).__name__}: {e}")
+            return []
 
     @staticmethod
     def _moment_for_key(store: Store, key: str) -> Optional[dict]:
