@@ -317,6 +317,32 @@ def test_persona_and_backend_selection_are_safe_without_config():
         plugin_mod.config.COCASTER_LLM_BACKEND = "claude"
 
 
+# ── chat stats tool ───────────────────────────────────────────────────
+
+def test_chat_stats_summarize_and_load():
+    sys.path.insert(0, str(REPO_ROOT / "tools"))
+    import chat_stats
+    d = _tmp()
+    log = ChatLog(d / "chat.db")
+    base = time.time() - 3600
+    for i in range(6):
+        log.add("dyna", "Dyna", f"msg {i}", ts=base + i)
+    log.add("bob", "Bob", "!sr song", is_command=True, ts=base + 10)
+    log.add("bob", "Bob", "!SR again", is_command=True, ts=base + 11)
+    log.add("cat", "Cat", "hi", ts=base + 12)
+    log.add("old", "Old", "ancient", ts=base - 40 * 86400)
+    log.close()
+    rows = chat_stats.load_rows(d / "chat.db", time.time() - 30 * 86400)
+    assert len(rows) == 9                                   # the 40-day-old row is excluded
+    s = chat_stats.summarize(rows, top=2)
+    assert s["messages"] == 9 and s["users"] == 3 and s["days"] == 1
+    assert s["commands"] == {"!sr": 2}
+    assert s["top_users"] == [("dyna", 6), ("bob", 2)]
+    assert s["users_5plus"] == 1 and s["one_message_users"] == 1
+    assert abs(s["command_share"] - 2 / 9) < 1e-6 and abs(s["lurker_share"] - 1 / 3) < 1e-6
+    assert chat_stats.summarize([])["messages"] == 0
+
+
 # ── harness ───────────────────────────────────────────────────────────
 
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
