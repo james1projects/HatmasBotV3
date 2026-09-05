@@ -2614,11 +2614,34 @@ system default).
 - Indexer now stores absolute paths (6 duplicate relative rows from the first
   test run were merged out of the live index on 9/5).
 
+### Semantic search (local embeddings) and per-line redaction
+
+Added later the same night.
+
+- **Embeddings** (`vodsearch/embed.py`, table `embeddings`): every transcript line is
+  a unit-normalized 768-dim vector from Ollama's `nomic-embed-text` (pulled once,
+  ~270 MB, GPU, about 30 lines/s). `python tools\vod_index.py embed` backfills; a
+  normal `index` run embeds new lines automatically when Ollama is reachable and
+  silently skips when it is not. Vectors are deleted with their segment and never
+  leave the PC. `VOD_EMBED_HOST`, `VOD_EMBED_MODEL`, `VOD_SEMANTIC_MIN_SCORE` (0.55).
+- **Hybrid results**: `/api/vod/search` defaults to `mode=hybrid`: exact-word (AND)
+  matches first, then lines that mean the same fill the page (`via: "meaning"`,
+  `score`). `mode=keyword` is the old behaviour; `mode=meaning` ranks every line by
+  similarity. The page has Words + meaning / Words / Meaning chips and a "meaning"
+  badge on those cards. The web layer keeps the whole matrix in memory (14k × 768
+  floats = 42 MB) and reloads it when the `(count, max id)` version changes; a query
+  is one embed call (~50 ms) plus a numpy dot product.
+- **Redaction**: `segments.hidden`. "Hide line" on a local card (`POST /api/vod/hide`,
+  loopback only) removes that line from every visitor view (search, browse text,
+  meaning matches, key lookups, stats) while keeping it searchable locally, struck
+  through with a Hidden badge. Per-moment privacy on top of per-recording visibility.
+
 ### Still open after this run
 
 - The co-caster is stage 1: no on-stream voice by default. `overlays/cocaster.html`
   (OBS source `http://localhost:8069/overlays/cocaster.html`) shows each line as a
   lower-third for 9 s via rule `cocaster` in core/overlay_rules.json.
-- Whisper punctuation in batched mode stays sparse (see the v2.11 limits).
+- Whisper punctuation: fixed by the neutral initial prompt (98% of lines now end
+  with punctuation after the 9/5 re-index).
 - `!clip <words>` in chat is deliberately not built while the archive is
   private.
