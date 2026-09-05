@@ -200,6 +200,32 @@ def event_kind(ev_type: str, note: str = "", merged: Optional[Sequence[dict]] = 
 
 
 _TOKEN_RE = re.compile(r'"[^"]*"|[^\s"]+')
+_DEDUPE_RE = re.compile(r"[^a-z0-9]+")
+DEDUPE_WINDOW_S = 6.0
+
+
+def dedupe_moments(moments: List[dict], window_s: float = DEDUPE_WINDOW_S) -> List[dict]:
+    """Collapse the same words spoken at the same time in the same
+    recording. The Discord/"friends" track often carries a bleed of the
+    streamer's own voice, so one sentence can be transcribed twice a few
+    hundred ms apart; showing both is noise. Keeps the first (best
+    ranked) occurrence."""
+    out: List[dict] = []
+    seen: List[tuple] = []
+    for m in moments:
+        key_text = _DEDUPE_RE.sub("", (m.get("text") or "").lower())
+        rec = m.get("recording_id")
+        t = float(m.get("start_s") or 0.0)
+        dup = False
+        for r2, k2, t2 in seen:
+            if r2 == rec and k2 == key_text and key_text and abs(t2 - t) <= window_s:
+                dup = True
+                break
+        if dup:
+            continue
+        seen.append((rec, key_text, t))
+        out.append(m)
+    return out
 _WORD_RE = re.compile(r"[^\w']+", re.UNICODE)
 
 
@@ -631,9 +657,7 @@ class Store:
             m["score"] = round(score_of.get(seg_id, 0.0), 3)
             m["via"] = "meaning"
             out.append(m)
-            if len(out) >= limit:
-                break
-        return out
+        return dedupe_moments(out)[:limit]
 
     # ── search ────────────────────────────────────────────────────────
 
@@ -725,7 +749,7 @@ class Store:
                 " bm25(segments_fts) AS rank" + base +
                 " ORDER BY" + self._tier_order_sql(event) + " rank, r.recorded_at DESC LIMIT ? OFFSET ?",
                 params + [limit, offset]).fetchall()
-            moments = [self._moment_from_segment_row(r, r["snip"]) for r in rows]
+            moments = dedupe_moments([self._moment_from_segment_row(r, r["snip"]) for r in rows])
             for m in moments:
                 m["via"] = "keyword"
             return {"mode": mode, "total": total, "moments": moments}

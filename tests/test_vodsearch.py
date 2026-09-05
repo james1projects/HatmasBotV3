@@ -704,6 +704,31 @@ def test_hidden_lines_are_local_only():
     s.close()
 
 
+# ── cross-track duplicate collapse ────────────────────────────────────
+
+def test_dedupe_moments_collapses_voice_bleed():
+    from vodsearch.store import dedupe_moments
+    s = _store()
+    rid = s.upsert_recording("bleed.mp4", god="Atlas", status="done", duration_s=500,
+                             recorded_at="2026-07-01T10:00:00")
+    s.replace_segments(rid, [
+        dict(track_index=1, speaker="hatmaster", start_s=100.0, end_s=102.0, text="Oh, Morgan was behind me!"),
+        dict(track_index=3, speaker="friends", start_s=100.4, end_s=102.3, text="oh morgan was behind me"),
+        dict(track_index=1, speaker="hatmaster", start_s=300.0, end_s=302.0, text="Oh, Morgan was behind me!"),
+    ])
+    r = s.search("morgan behind")
+    assert r["total"] == 3                                      # count is the raw FTS hit count
+    assert [m["start_s"] for m in r["moments"]] == [100.0, 300.0]   # the 100.4 bleed is collapsed
+    assert r["moments"][0]["speaker"] == "hatmaster"
+    ms = [{"recording_id": 1, "text": "Same words.", "start_s": 10.0},
+          {"recording_id": 1, "text": "same words", "start_s": 12.0},
+          {"recording_id": 2, "text": "same words", "start_s": 12.0},
+          {"recording_id": 1, "text": "", "start_s": 12.0}, {"recording_id": 1, "text": "", "start_s": 13.0}]
+    out = dedupe_moments(ms)
+    assert [(m["recording_id"], m["start_s"]) for m in out] == [(1, 10.0), (2, 12.0), (1, 12.0), (1, 13.0)]
+    s.close()
+
+
 # ── harness ───────────────────────────────────────────────────────────
 
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
