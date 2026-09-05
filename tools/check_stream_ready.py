@@ -44,6 +44,10 @@ from typing import Awaitable, Callable, Optional
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
+# Windows' lazily-populated root-CA store may lack the roots Spotify chains
+# to; the shim points OpenSSL at certifi's bundle (see core/tls_trust.py).
+from core import tls_trust  # noqa: E402,F401
+
 # Force unbuffered output so the .bat wrapper shows results in real time.
 try:
     sys.stdout.reconfigure(line_buffering=True)

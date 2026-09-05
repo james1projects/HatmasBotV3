@@ -16,6 +16,10 @@ import threading
 
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
 
+# Must stay above every other core/plugin import: aiohttp caches its default
+# SSL context at import time, and tls_trust has to set SSL_CERT_FILE first.
+from core import tls_trust  # noqa: F401
+
 from core.bot import HatmasBot
 from core.log_quiet import quiet_known_connection_errors
 from core.webserver import WebServer
