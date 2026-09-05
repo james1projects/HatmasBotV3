@@ -89,6 +89,7 @@ Add these from the dashboard server on port **8069**:
 - **Voice Lines**: `http://localhost:8069/overlay/voicelines`
 - **Death Counter**: `http://localhost:8069/overlay/deaths`
 - **Spin Wheel**: `http://localhost:8069/overlay/spin`
+- **Co-caster line** (lower-third caption on multikills/deaths): `http://localhost:8069/overlays/cocaster.html`
 - **Economy** (ticker, live, match-end, dividend, leaderboard, tradefeed, portfolio): `http://localhost:8069/overlay/economy_*`
 - **Control Panel**: open `http://localhost:8069/` on your second monitor.
 

@@ -2616,8 +2616,9 @@ system default).
 
 ### Still open after this run
 
-- The co-caster is stage 1: no on-stream voice by default, no overlay HTML for
-  `cocaster_line` yet (the event is emitted; an overlay can subscribe).
+- The co-caster is stage 1: no on-stream voice by default. `overlays/cocaster.html`
+  (OBS source `http://localhost:8069/overlays/cocaster.html`) shows each line as a
+  lower-third for 9 s via rule `cocaster` in core/overlay_rules.json.
 - Whisper punctuation in batched mode stays sparse (see the v2.11 limits).
 - `!clip <words>` in chat is deliberately not built while the archive is
   private.

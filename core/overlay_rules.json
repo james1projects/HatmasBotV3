@@ -121,5 +121,11 @@
       "god_pool_spin"
     ],
     "hide_after": 14
+  },
+  "cocaster": {
+    "show_on": [
+      "cocaster_line"
+    ],
+    "hide_after": 9
   }
 }

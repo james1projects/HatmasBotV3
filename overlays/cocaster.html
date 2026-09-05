@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Co-caster line</title>
+<link rel="stylesheet" href="/overlays/hatmas_theme.css">
+<style>
+  html, body {
+    background: transparent;
+    margin: 0;
+    font-family: 'Inter', 'Segoe UI', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+  }
+  /* Lower-third caption: a flat panel in the overlay palette, the same
+     construction as the economy overlays (no glow, no gradients). */
+  #wrap {
+    position: fixed;
+    left: 40px;
+    bottom: 60px;
+    max-width: 62vw;
+    display: flex;
+    align-items: stretch;
+    opacity: 0;
+    transform: translateY(12px);
+    transition: opacity 0.25s ease, transform 0.25s ease;
+  }
+  #wrap.visible { opacity: 1; transform: translateY(0); }
+  #tag {
+    font-family: 'BigNoodleTitling', 'Bebas Neue', 'Inter', sans-serif;
+    font-size: 22px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 12px 14px;
+    background: var(--accent, #E5A26B);
+    color: var(--bg, #202C39);
+    border-radius: 6px 0 0 6px;
+    display: flex;
+    align-items: center;
+  }
+  #line {
+    font-size: 24px;
+    line-height: 1.3;
+    padding: 12px 18px;
+    background: var(--panel, rgba(26, 35, 46, 0.94));
+    color: var(--text, #F2F4F7);
+    border-radius: 0 6px 6px 0;
+    display: flex;
+    align-items: center;
+  }
+  #tag.multikill { background: var(--green, #4CC38A); }
+  #tag.death { background: var(--red, #E0605E); color: #fff; }
+</style>
+</head>
+<body>
+  <div id="wrap">
+    <div id="tag">Co-caster</div>
+    <div id="line"></div>
+  </div>
+  <script src="/overlays/overlay_client.js"></script>
+  <script>
+    const tagEl = document.getElementById('tag');
+    const lineEl = document.getElementById('line');
+    // Shown by the rules engine on the "cocaster_line" event
+    // (core/overlay_rules.json, hide_after 9 s). data = {text, event}.
+    HatmasOverlay.connect('cocaster', {
+      container: '#wrap',
+      onShow(data) {
+        const text = (data && data.text) || '';
+        const kind = (data && data.event && data.event.kind) || '';
+        lineEl.textContent = text;
+        tagEl.className = kind === 'multikill' ? 'multikill' : (kind === 'death' ? 'death' : '');
+        tagEl.textContent = kind === 'multikill' ? 'Multikill' : (kind === 'death' ? 'Death' : 'Co-caster');
+      },
+      onUpdate(data) {
+        if (data && data.text) lineEl.textContent = data.text;
+      }
+    });
+  </script>
+</body>
+</html>
