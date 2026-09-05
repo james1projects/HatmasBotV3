@@ -57,6 +57,7 @@ from plugins.streamloots import StreamlootsPlugin
 from plugins.factorio import FactorioPlugin
 from plugins.discord_bridge import DiscordBridgePlugin
 from plugins.custom_commands import CustomCommandsPlugin
+from plugins.cocaster import CoCasterPlugin
 
 
 async def main():
@@ -249,6 +250,16 @@ async def main():
     stream_status = StreamStatusPlugin(token_manager=token_mgr,
                                         web_server=web)
     bot.register_plugin("stream_status", stream_status)
+
+    # ── Co-caster (plugins/cocaster/) ──
+    # Private earpiece chat summaries + persona lines on detector events.
+    # Feature toggle "cocaster" defaults OFF; the chat log it keeps
+    # (data/chat_log.db) records regardless. Needs stream_status for
+    # live/viewer context and the kill detector for events.
+    cocaster = CoCasterPlugin(stream_status=stream_status, web_server=web,
+                              overlay_manager=web.overlay)
+    cocaster.attach_detector(kd)
+    bot.register_plugin("cocaster", cocaster)
 
     # ── YouTube LIVE thumbnail badge automation ──
     # Listens for stream_live / stream_offline events from StreamStatusPlugin.

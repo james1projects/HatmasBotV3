@@ -502,6 +502,42 @@ VOD_STREAM_MAX_CONCURRENT = 2            # simultaneous live transcodes (each ho
 VOD_FFMPEG = "ffmpeg"
 VOD_FFPROBE = "ffprobe"
 
+# === CO-CASTER (plugins/cocaster/) ===
+# Stage 1 of the AI co-caster. Two channels, both gated by the "cocaster"
+# feature toggle (default OFF):
+#   EAR    private earpiece: every COCASTER_EAR_INTERVAL_S, one spoken
+#          sentence summarizing new chat, played on COCASTER_EAR_DEVICE
+#          (a substring of the output device name; "Headphones" = the
+#          Elgato XLR Dock headphone jack, which is NOT in the stream mix).
+#   LINES  persona one-liners on multikills/deaths, written to
+#          data/cocaster/lines.jsonl + emitted as the "cocaster_line"
+#          overlay event. Spoken on COCASTER_STREAM_DEVICE only when
+#          COCASTER_STREAM_VOICE is True (default: text only).
+# Independent of the toggle, every chat message is logged to CHAT_LOG_DB
+# (local telemetry; never leaves data/).
+# Privacy: the LLM sees chat text + match state only. "claude" = Anthropic
+# API (default); "ollama" = fully local, shares the GPU with Smite.
+COCASTER_LLM_BACKEND = "claude"
+COCASTER_MODEL = "claude-opus-5"
+COCASTER_EFFORT = "low"                   # fast, short summaries
+COCASTER_OLLAMA_HOST = "http://localhost:11434"
+COCASTER_OLLAMA_MODEL = "qwen3.6:27b"
+COCASTER_EAR_DEVICE = "Headphones"        # output device substring for the private channel
+COCASTER_EAR_VOICE = "Microsoft Zira Desktop"   # any installed SAPI voice; "" = default
+COCASTER_EAR_RATE = 1                     # SAPI rate -10..10
+COCASTER_EAR_INTERVAL_S = 75
+COCASTER_EAR_MIN_MSGS = 3                 # fewer new messages than this = stay quiet
+COCASTER_EAR_MAX_WORDS = 35
+COCASTER_STREAM_VOICE = False             # speak caster lines on stream (text-only until tuned)
+COCASTER_STREAM_DEVICE = "SFX"            # Wave Link virtual input that IS in the stream mix
+COCASTER_STREAM_VOICE_NAME = "Microsoft David Desktop"
+COCASTER_STREAM_RATE = 0
+COCASTER_LINE_COOLDOWN_S = 45
+COCASTER_LINE_MAX_WORDS = 22
+COCASTER_PERSONA_FILE = BASE_DIR / "plugins" / "cocaster" / "persona.md"
+COCASTER_DIR = DATA_DIR / "cocaster"
+CHAT_LOG_DB = DATA_DIR / "chat_log.db"
+
 # === FEATURE TOGGLES ===
 # Defaults only. The dashboard's features card flips these live, and
 # flips persist across restarts in data/feature_overrides.json (sparse:
@@ -525,6 +561,7 @@ DEFAULT_FEATURES = {
     "factorio": True,      # gates card handling + chat announcements
     "spacegame": False,    # off = commands silent + hidden from /mod, game page 404s
     "findit": False,       # off = hatmaster.tv/FindIt 404s + no GPU worker runs
+    "cocaster": False,     # off = no earpiece summaries, no caster lines (chat log still records)
 }
 
 # === FINDIT (plugins/findit/ — hatmaster.tv/FindIt, early development) ===

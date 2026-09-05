@@ -118,6 +118,9 @@ class WebServer:
         self.app.router.add_get("/api/kill_events", self.handle_kill_event_queue)
         self.app.router.add_get("/api/kill_stats", self.handle_kill_stats)
         self.app.router.add_get("/api/death_count", self.handle_death_count)
+        self.app.router.add_get("/api/cocaster/status", self.handle_cocaster_status)
+        self.app.router.add_post("/api/cocaster/test", self.handle_cocaster_test)
+        self.app.router.add_get("/api/cocaster/test", self.handle_cocaster_test)
         self.app.router.add_get("/overlay/deaths", self.handle_deaths_overlay)
         self.app.router.add_get("/api/voiceline_events", self.handle_voiceline_event_queue)
         self.app.router.add_get("/api/voiceline_audio/{god}/{folder}/{filename}", self.handle_voiceline_audio)
@@ -534,6 +537,36 @@ class WebServer:
         })
 
     # === DEATH COUNTER HANDLERS ===
+
+    # ── co-caster (plugins/cocaster/) ──
+    def _cocaster(self):
+        plugins = getattr(self.bot, "plugins", {}) if self.bot else {}
+        return plugins.get("cocaster")
+
+    async def handle_cocaster_status(self, request):
+        """GET /api/cocaster/status — toggle state, backend, devices, counters."""
+        cc = self._cocaster()
+        if cc is None:
+            return web.json_response({"error": "cocaster plugin not loaded"}, status=404)
+        return web.json_response(cc.status())
+
+    async def handle_cocaster_test(self, request):
+        """GET/POST /api/cocaster/test?text=... — speak a line in the
+        earpiece (Stream Deck-friendly). ?now=1 runs a real chat summary
+        instead. Works even when the toggle is off, so the device routing
+        can be checked before going live."""
+        cc = self._cocaster()
+        if cc is None:
+            return web.json_response({"error": "cocaster plugin not loaded"}, status=404)
+        if request.query.get("now"):
+            text = await cc.ear_tick(force=True)
+            return web.json_response({"ok": True, "spoken": text})
+        text = (request.query.get("text") or "Earpiece check. This is the co-caster.").strip()[:300]
+        if cc.ear_voice is None:
+            return web.json_response({"ok": False, "error": "voice not ready"}, status=503)
+        ok = await asyncio.to_thread(cc.ear_voice.speak, text)
+        return web.json_response({"ok": bool(ok), "spoken": text if ok else None,
+                                  "device": cc.ear_voice.resolve_device()})
 
     async def handle_death_count(self, request):
         """Return the daily death count for the overlay."""
