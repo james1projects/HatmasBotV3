@@ -1,4 +1,4 @@
-"""
+r"""
 tools/vod_devserver.py — run hatmaster.tv/vod against the real index
 without starting the bot.
 

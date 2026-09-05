@@ -1,4 +1,4 @@
-"""
+r"""
 tools/vod_index.py — "Ask the VOD" indexer with HatmasBot's defaults.
 
 Thin shim over the standalone `vodsearch` package: fills in the repo's

@@ -1,4 +1,4 @@
-"""
+r"""
 tools/chat_stats.py — what does chat actually do? (reads data/chat_log.db)
 
 The 2026-09-04 audit could not answer "which features get used" because

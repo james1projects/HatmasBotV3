@@ -339,7 +339,7 @@ def test_chat_stats_summarize_and_load():
     assert s["commands"] == {"!sr": 2}
     assert s["top_users"] == [("dyna", 6), ("bob", 2)]
     assert s["users_5plus"] == 1 and s["one_message_users"] == 1
-    assert abs(s["command_share"] - 2 / 9) < 1e-6 and abs(s["lurker_share"] - 1 / 3) < 1e-6
+    assert abs(s["command_share"] - 2 / 9) < 1e-3 and abs(s["lurker_share"] - 1 / 3) < 1e-3  # rounded to 3 dp
     assert chat_stats.summarize([])["messages"] == 0
 
 
