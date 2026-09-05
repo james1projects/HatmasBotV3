@@ -676,6 +676,34 @@ def test_moments_for_segments_filters_and_orders():
     s.close()
 
 
+# ── redaction (hidden lines) ──────────────────────────────────────────
+
+def test_hidden_lines_are_local_only():
+    s = _store()
+    y, lk = _seed(s)
+    s.set_visibility([y, lk], "public")
+    assert s.search("trap", public_only=True)["total"] == 2
+    assert s.set_hidden([1], True) == 1                         # Ymir's "nice trap" line
+    # visitors: gone from search, browse text, stats, semantic candidates
+    assert s.search("trap", public_only=True)["total"] == 1
+    assert s.search("trap", public_only=True)["moments"][0]["god"] == "Loki"
+    assert s.stats(public_only=True)["segments"] == 3
+    assert s.segments_near(y, 100.0, window_s=5, public_only=True) == []
+    assert s.moments_for_segments([(1, 0.9), (4, 0.8)], public_only=True) == [
+        m for m in s.moments_for_segments([(1, 0.9), (4, 0.8)], public_only=True)] and \
+        [m["segment_id"] for m in s.moments_for_segments([(1, 0.9), (4, 0.8)], public_only=True)] == [4]
+    # local: still there, flagged
+    loc = s.search("trap")
+    assert loc["total"] == 2 and any(m["hidden"] for m in loc["moments"])
+    assert s.segments_near(y, 100.0, window_s=5)[0]["hidden"] == 1
+    assert s.stats()["segments"] == 4
+    # restore
+    assert s.set_hidden([1], False) == 1
+    assert s.search("trap", public_only=True)["total"] == 2
+    assert s.set_hidden([], True) == 0
+    s.close()
+
+
 # ── harness ───────────────────────────────────────────────────────────
 
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

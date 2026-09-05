@@ -83,7 +83,8 @@ CREATE TABLE IF NOT EXISTS segments (
     end_s          REAL NOT NULL,
     text           TEXT NOT NULL,
     no_speech_prob REAL,
-    avg_logprob    REAL
+    avg_logprob    REAL,
+    hidden         INTEGER DEFAULT 0      -- 1 = redacted: never shown to visitors
 );
 CREATE INDEX IF NOT EXISTS idx_segments_rec ON segments(recording_id, start_s);
 
@@ -238,6 +239,10 @@ class Store:
     def _migrate(self) -> None:
         """Bring an older index up to the current schema. Cheap enough
         to run on every open (the site opens a Store per request)."""
+        scols = {r[1] for r in self.conn.execute("PRAGMA table_info(segments)")}
+        if "hidden" not in scols:
+            self.conn.execute("ALTER TABLE segments ADD COLUMN hidden INTEGER DEFAULT 0")
+            self.conn.commit()
         rcols = {r[1] for r in self.conn.execute("PRAGMA table_info(recordings)")}
         if "visibility" not in rcols:
             self.conn.execute("ALTER TABLE recordings ADD COLUMN visibility TEXT DEFAULT 'private'")
@@ -317,6 +322,18 @@ class Store:
         cur = self.conn.execute(
             f"UPDATE recordings SET visibility=? WHERE id IN ({','.join('?' * len(ids))})",
             [visibility] + ids)
+        self.conn.commit()
+        return int(cur.rowcount or 0)
+
+    def set_hidden(self, seg_ids: Iterable[int], hidden: bool) -> int:
+        """Redact (or restore) transcript lines. Hidden lines stay
+        searchable locally but never reach visitors, in any view."""
+        ids = [int(i) for i in seg_ids]
+        if not ids:
+            return 0
+        cur = self.conn.execute(
+            f"UPDATE segments SET hidden=? WHERE id IN ({','.join('?' * len(ids))})",
+            [1 if hidden else 0] + ids)
         self.conn.commit()
         return int(cur.rowcount or 0)
 
@@ -478,16 +495,21 @@ class Store:
             {"death": "Death", "assist": "Assist"}.get(d["kind"], d["kind"].title()))
         return d
 
-    def segments_near(self, rec_id: int, t_s: float, window_s: float = 15.0) -> List[dict]:
+    def segments_near(self, rec_id: int, t_s: float, window_s: float = 15.0,
+                      public_only: bool = False) -> List[dict]:
         rows = self.conn.execute(
-            "SELECT id, start_s, end_s, speaker, text FROM segments WHERE recording_id=?"
-            " AND end_s >= ? AND start_s <= ? ORDER BY start_s",
+            "SELECT id, start_s, end_s, speaker, text, hidden FROM segments s WHERE recording_id=?"
+            " AND end_s >= ? AND start_s <= ?" + self._hidden_sql(public_only) + " ORDER BY start_s",
             (rec_id, t_s - window_s, t_s + window_s)).fetchall()
         return [dict(r) for r in rows]
 
     @staticmethod
     def _vis_sql(public_only: bool, alias: str = "r") -> str:
         return f" AND {alias}.visibility = 'public'" if public_only else ""
+
+    @staticmethod
+    def _hidden_sql(public_only: bool, alias: str = "s") -> str:
+        return f" AND {alias}.hidden = 0" if public_only else ""
 
     def gods(self, public_only: bool = False) -> List[dict]:
         rows = self.conn.execute(
@@ -503,7 +525,7 @@ class Store:
         rec = c.execute("SELECT COUNT(*) AS n, COALESCE(SUM(duration_s),0) AS secs"
                         " FROM recordings r WHERE status='done'" + vis).fetchone()
         segs = c.execute("SELECT COUNT(*) FROM segments s JOIN recordings r ON r.id = s.recording_id"
-                         " WHERE 1=1" + vis).fetchone()[0]
+                         " WHERE 1=1" + vis + self._hidden_sql(public_only)).fetchone()[0]
         words = c.execute("SELECT COALESCE(SUM(LENGTH(s.text) - LENGTH(REPLACE(s.text,' ',''))+1),0)"
                           " FROM segments s JOIN recordings r ON r.id = s.recording_id WHERE 1=1" + vis).fetchone()[0]
         kinds = {r[0]: r[1] for r in c.execute(
@@ -587,7 +609,8 @@ class Store:
             return []
         ids = [int(i) for i, _ in scored]
         score_of = {int(i): float(sc) for i, sc in scored}
-        where = f" WHERE s.id IN ({','.join('?' * len(ids))})" + self._vis_sql(public_only)
+        where = (f" WHERE s.id IN ({','.join('?' * len(ids))})" + self._vis_sql(public_only)
+                 + self._hidden_sql(public_only))
         params: List[Any] = list(ids)
         if god:
             where += " AND r.god = ?"; params.append(god)
@@ -662,6 +685,7 @@ class Store:
             "events": self.events_near(rec_id, mid),
             "duration_s": float(d.get("duration_s") or 0),
             "visibility": d.get("visibility") or "private",
+            "hidden": bool(d.get("hidden") or 0),
         }
 
     def search(self, query: str, god: Optional[str] = None, event: Optional[str] = None,
@@ -676,7 +700,7 @@ class Store:
             match = build_match(query, mode)
             if not match:
                 return {"mode": mode, "total": 0, "moments": []}
-            where = " WHERE segments_fts MATCH ?" + self._vis_sql(public_only)
+            where = " WHERE segments_fts MATCH ?" + self._vis_sql(public_only) + self._hidden_sql(public_only)
             params: List[Any] = [match]
             if god:
                 where += " AND r.god = ?"
@@ -741,7 +765,7 @@ class Store:
             d = dict(r)
             rec_id = int(d["recording_id"])
             ts = float(d["ts_s"])
-            near = self.segments_near(rec_id, ts, window_s=12.0)
+            near = self.segments_near(rec_id, ts, window_s=12.0, public_only=public_only)
             text = " ".join(s["text"] for s in near)
             seg_id = near[0]["id"] if near else None
             moments.append({

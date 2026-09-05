@@ -119,6 +119,8 @@
   .badge.vis-private { background: var(--bg-2); color: var(--text-fade); border: 1px dashed var(--border-hi); }
   .badge.vis-public { background: var(--green-bg); color: var(--green); }
   .badge.via { background: transparent; color: var(--text-fade); border: 1px solid var(--border); font-weight: 600; }
+  .badge.hidden { background: var(--red-bg); color: var(--red); }
+  .line.redacted { opacity: 0.55; text-decoration: line-through; }
   .modes { display: inline-flex; gap: 6px; }
   .line { margin: 8px 0 0; font-size: 15px; line-height: 1.45; }
   .line mark { background: var(--accent); color: var(--bg); padding: 0 2px; border-radius: 2px; }
@@ -235,7 +237,7 @@
       : '<span class="god">Unknown god</span>';
     const badges = (m.events || []).map(badgeFor).join("");
     const line = m.snippet
-      ? '<p class="line">' + snippetHtml(m.snippet) + "</p>"
+      ? '<p class="line' + (m.hidden ? " redacted" : "") + '">' + snippetHtml(m.snippet) + "</p>"
       : '<p class="line quiet">(no speech near this moment)</p>';
     card.innerHTML =
       '<div class="thumb" role="button" tabindex="0" aria-label="Play clip">' +
@@ -247,6 +249,7 @@
           '<span class="mono">' + esc(m.date || "") + "</span>" +
           '<span class="mono">' + esc(m.clock || "") + "</span>" +
           speakerChip(m.speaker) + badges +
+          (m.hidden ? '<span class="badge hidden" title="Redacted: visitors never see this line">Hidden</span>' : "") +
           (m.via === "meaning" ? '<span class="badge via" title="Matched by meaning, not exact words' + (m.score != null ? ", similarity " + m.score : "") + '">meaning</span>' : "") +
           (m.visibility ? '<span class="badge vis-' + esc(m.visibility) + '" title="Only public recordings are shown to viewers">' + (m.visibility === "public" ? "Public" : "Private") + "</span>" : "") +
         "</div>" + line +
@@ -254,6 +257,7 @@
           '<button type="button" class="full" title="Play the whole recording from this moment">Full recording from ' + esc(m.clock || "") + "</button>" +
           '<button type="button" class="copy">Copy link</button>' +
           (m.path ? '<button type="button" class="copypath" title="Copy the source file path for the editor">Copy file path</button>' : "") +
+          (m.path && m.segment_id ? '<button type="button" class="hide" title="Redact this line from every visitor view">' + (m.hidden ? "Unhide line" : "Hide line") + "</button>" : "") +
         "</div>" +
         (m.path ? '<div class="source"><b>Source</b> ' + esc(fileName(m.path)) + " at " + esc(m.clock || "") + "</div>" : "") +
       "</div>";
@@ -265,6 +269,21 @@
     card.querySelector(".full").addEventListener("click", () => playStream(thumb, m));
     const cp = card.querySelector(".copypath");
     if (cp) cp.addEventListener("click", (e) => copyText(e.currentTarget, m.path, "Copy file path"));
+    const hb = card.querySelector(".hide");
+    if (hb) hb.addEventListener("click", async (e) => {
+      const want = !m.hidden;
+      try {
+        const r = await fetch("/api/vod/hide", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ segment_id: m.segment_id, hidden: want }) });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        m.hidden = want;
+        e.currentTarget.textContent = want ? "Unhide line" : "Hide line";
+        const p = card.querySelector(".line"); if (p) p.classList.toggle("redacted", want);
+        let b = card.querySelector(".badge.hidden");
+        if (want && !b) { b = document.createElement("span"); b.className = "badge hidden"; b.textContent = "Hidden"; card.querySelector(".meta").appendChild(b); }
+        if (!want && b) b.remove();
+      } catch (err) { alert("Could not update: " + err.message); }
+    });
     return card;
   }
 

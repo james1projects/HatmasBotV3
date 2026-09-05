@@ -22,6 +22,8 @@ Routes
     GET /vod/review                 LOCAL ONLY: per-recording publish/unpublish page
     GET /api/vod/review             LOCAL ONLY: every recording + counts + visibility
     POST /api/vod/review            LOCAL ONLY: {"ids": [..], "visibility": "public"|"private"}
+    POST /api/vod/hide              LOCAL ONLY: {"segment_id": N, "hidden": true|false}
+                                    redact one transcript line from every visitor view
 
 Access model (2026-09-05, James's privacy call):
   * A loopback browser (James at localhost) always gets the whole
@@ -106,6 +108,7 @@ class VodWeb:
         r.add_get("/vod/review", self.handle_review_page)
         r.add_get("/api/vod/review", self.handle_review_list)
         r.add_post("/api/vod/review", self.handle_review_set)
+        r.add_post("/api/vod/hide", self.handle_hide)
 
     def _toggle_on(self) -> bool:
         try:
@@ -154,6 +157,7 @@ class VodWeb:
             if not local:
                 d.pop("path", None)
                 d.pop("visibility", None)
+                d.pop("hidden", None)
             if d.get("segment_id"):
                 key = f"s{int(d['segment_id'])}"
             elif d.get("event_id"):
@@ -213,8 +217,9 @@ class VodWeb:
             # Shared link: exactly one moment by its clip key.
             if not _KEY_RE.match(key):
                 return web.json_response({"error": "bad key"}, status=400)
-            moment = await self._with_store(lambda s: self._moment_for_key(s, key))
-            if moment is None or (not local and moment.get("visibility") != "public"):
+            moment = await self._with_store(lambda s: self._moment_for_key(s, key, local))
+            if moment is None or (not local and (moment.get("visibility") != "public"
+                                                 or moment.get("hidden"))):
                 return web.json_response({"mode": "key", "total": 0, "moments": [], "q": ""})
             return web.json_response({"mode": "key", "total": 1, "q": "",
                                       "moments": self._decorate([moment], local)},
@@ -301,7 +306,7 @@ class VodWeb:
             return []
 
     @staticmethod
-    def _moment_for_key(store: Store, key: str) -> Optional[dict]:
+    def _moment_for_key(store: Store, key: str, local: bool = True) -> Optional[dict]:
         m = _KEY_RE.match(key)
         if not m:
             return None
@@ -314,6 +319,7 @@ class VodWeb:
             return {
                 "segment_id": int(seg["id"]), "recording_id": int(seg["recording_id"]),
                 "path": seg.get("path"), "visibility": seg.get("visibility") or "private",
+                "hidden": bool(seg.get("hidden") or 0),
                 "god": seg.get("god"), "recorded_at": seg.get("recorded_at"),
                 "start_s": float(seg["start_s"]), "end_s": float(seg["end_s"]),
                 "speaker": seg.get("speaker"), "text": seg.get("text"),
@@ -325,7 +331,8 @@ class VodWeb:
         if not ev:
             return None
         ts = float(ev["ts_s"])
-        near = store.segments_near(int(ev["recording_id"]), ts, window_s=12.0)
+        near = store.segments_near(int(ev["recording_id"]), ts, window_s=12.0,
+                                   public_only=not local)
         text = " ".join(x["text"] for x in near)
         return {
             "segment_id": None, "event_id": int(ev["id"]),
@@ -620,6 +627,18 @@ class VodWeb:
         res["ok"] = True
         res["visibility"] = vis
         return web.json_response(res)
+
+    async def handle_hide(self, request: web.Request):
+        if not self._is_local(request):
+            raise web.HTTPNotFound()
+        try:
+            body = await request.json()
+            seg_id = int(body.get("segment_id"))
+            hidden = bool(body.get("hidden", True))
+        except Exception:
+            return web.json_response({"error": "need segment_id and hidden"}, status=400)
+        n = await self._with_store(lambda s: s.set_hidden([seg_id], hidden))
+        return web.json_response({"ok": n > 0, "segment_id": seg_id, "hidden": hidden})
 
     async def handle_thumb(self, request: web.Request):
         if not self._enabled(request) or not self._index_ready():
