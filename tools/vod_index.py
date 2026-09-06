@@ -12,11 +12,11 @@ no flags.
     python tools\vod_index.py browse --event multikill
     python tools\vod_index.py clip --segment 123
     python tools\vod_index.py stats --errors
-    python toolsod_index.py publish --god Ymir      # make recordings public (default: private)
-    python toolsod_index.py unpublish --all
-    python toolsod_index.py embed                   # semantic-search vectors (local Ollama)
-    python toolsod_index.py relabel                 # streamer/friends labels from speech levels
-    python toolsod_index.py events                  # re-read detector sidecars only
+    python tools\vod_index.py publish --god Ymir      # make recordings public (default: private)
+    python tools\vod_index.py unpublish --all
+    python tools\vod_index.py embed                   # semantic-search vectors (local Ollama)
+    python tools\vod_index.py relabel                 # streamer/friends labels from speech levels
+    python tools\vod_index.py events                  # re-read detector sidecars only
 
 Any `vodsearch.cli` flag still works; the defaults here only fill gaps.
 """

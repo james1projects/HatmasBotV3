@@ -37,7 +37,9 @@ Rows are stream phases, colored by the icon's top bar:
 | 3,2 | PROCESS RECS | System: Open | `C:\Projects\HatmasBot\streamdeck\process_recordings.bat` | `process_recordings.png` |
 | 3,3 | SORT UNKNOWNS | System: Open | `C:\Projects\HatmasBot\streamdeck\sort_unknowns.bat` | `sort_unknowns.png` |
 | 3,4 | THUMB STUDIO | System: Open | `C:\Projects\HatmasBot\streamdeck\thumbnail_studio.bat` | `thumbnail_studio.png` |
-| 4,1 | EARPIECE | System: Open | `C:\Projects\HatmasBot\streamdeck\earpiece_test.bat` | (none yet) |
+| 4,2 | EARPIECE | System: Open | `C:\Projects\HatmasBot\streamdeck\earpiece_test.bat` | (none yet) |
+| 4,3 | VOD REVIEW | System: Open | `C:\Projects\HatmasBot\streamdeck\vod_review.bat` | (none yet) |
+| 4,4 | VOD SEARCH | System: Open | `C:\Projects\HatmasBot\streamdeck\vod_search.bat` | (none yet) |
 | 3,5 | RESOLVE IMPORT | System: Open | `C:\Projects\HatmasBot\streamdeck\resolve_import.bat` | `resolve_import.png` |
 | 3,6 | RESOLVE TIKTOK | System: Open | `C:\Projects\HatmasBot\streamdeck\resolve_tiktok.bat` | `resolve_tiktok.png` |
 | 4,1 | DISCORD TEST | System: Open | `C:\Projects\HatmasBot\streamdeck\discord_test.bat` | `discord_test.png` |
@@ -97,6 +99,11 @@ RESOLVE TIKTOK to cut the VOD in DaVinci.
 Optional refinement once the basics feel good: an END STREAM Multi
 Action that fires `go_offline.bat` then `process_recordings.bat` in
 one press.
+
+VOD REVIEW / VOD SEARCH open the Ask the VOD pages in the default browser:
+from the bot's public server (localhost:8070) when the bot is up, otherwise
+from the standalone dev host, which the button starts on localhost:8078 the
+first time and leaves running. Both pages are local-only.
 
 EARPIECE speaks a canned line through the co-caster's private headphone
 channel (works with the toggle off) so the routing can be checked before
