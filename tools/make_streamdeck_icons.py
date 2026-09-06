@@ -55,6 +55,9 @@ ICONS = {
     "resolve_tiktok": (["RESOLVE", "TIKTOK"], "end"),
     "bot_stop": (["BOT", "STOP"], "util"),
     "discord_test": (["DISCORD", "TEST"], "util"),
+    "earpiece": (["EAR", "PIECE"], "util"),
+    "vod_review": (["VOD", "REVIEW"], "end"),
+    "vod_search": (["VOD", "SEARCH"], "end"),
 }
 
 

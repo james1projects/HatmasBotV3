@@ -37,9 +37,9 @@ Rows are stream phases, colored by the icon's top bar:
 | 3,2 | PROCESS RECS | System: Open | `C:\Projects\HatmasBot\streamdeck\process_recordings.bat` | `process_recordings.png` |
 | 3,3 | SORT UNKNOWNS | System: Open | `C:\Projects\HatmasBot\streamdeck\sort_unknowns.bat` | `sort_unknowns.png` |
 | 3,4 | THUMB STUDIO | System: Open | `C:\Projects\HatmasBot\streamdeck\thumbnail_studio.bat` | `thumbnail_studio.png` |
-| 4,2 | EARPIECE | System: Open | `C:\Projects\HatmasBot\streamdeck\earpiece_test.bat` | (none yet) |
-| 4,3 | VOD REVIEW | System: Open | `C:\Projects\HatmasBot\streamdeck\vod_review.bat` | (none yet) |
-| 4,4 | VOD SEARCH | System: Open | `C:\Projects\HatmasBot\streamdeck\vod_search.bat` | (none yet) |
+| 4,2 | EARPIECE | System: Open | `C:\Projects\HatmasBot\streamdeck\earpiece_test.bat` | `earpiece.png` |
+| 4,3 | VOD REVIEW | System: Open | `C:\Projects\HatmasBot\streamdeck\vod_review.bat` | `vod_review.png` |
+| 4,4 | VOD SEARCH | System: Open | `C:\Projects\HatmasBot\streamdeck\vod_search.bat` | `vod_search.png` |
 | 3,5 | RESOLVE IMPORT | System: Open | `C:\Projects\HatmasBot\streamdeck\resolve_import.bat` | `resolve_import.png` |
 | 3,6 | RESOLVE TIKTOK | System: Open | `C:\Projects\HatmasBot\streamdeck\resolve_tiktok.bat` | `resolve_tiktok.png` |
 | 4,1 | DISCORD TEST | System: Open | `C:\Projects\HatmasBot\streamdeck\discord_test.bat` | `discord_test.png` |
