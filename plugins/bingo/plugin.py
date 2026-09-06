@@ -286,13 +286,21 @@ class BingoPlugin:
                 "next_price": next_card_price(seq + 1, self.prices()) if seq + 1 <= self.max_cards() else None}
 
     def my_cards(self, login: str) -> dict:
-        r = self.current() if self.store else None
-        if not r or not login:
-            return {"round": None, "cards": [], "next_price": None, "can_claim": False}
+        """The viewer's cards for the open round, or, once it has closed,
+        for the last round (so a winning line stays on screen until the
+        next round opens). Claiming is only possible while open."""
+        if not self.store or not login:
+            return {"round": None, "open": False, "cards": [], "next_price": None, "can_claim": False}
+        r = self.current()
+        is_open = r is not None
+        if r is None:
+            r = self.store.last_round()
+        if r is None:
+            return {"round": None, "open": False, "cards": [], "next_price": None, "can_claim": False}
         cards = self.store.cards_for(r["id"], login.lower())
         seq = len(cards) + 1
-        nxt = next_card_price(seq, self.prices()) if seq <= self.max_cards() else None
-        return {"round": r["id"], "cards": [render_card(c, self.pool) for c in cards],
+        nxt = next_card_price(seq, self.prices()) if (is_open and seq <= self.max_cards()) else None
+        return {"round": r["id"], "open": is_open, "cards": [render_card(c, self.pool) for c in cards],
                 "next_price": nxt, "can_claim": nxt is not None}
 
     def public_state(self) -> dict:

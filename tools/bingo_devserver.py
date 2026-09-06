@@ -1,0 +1,184 @@
+r"""
+tools/bingo_devserver.py — play a Stream Bingo round without the bot.
+
+Mounts the real BingoPlugin and core/bingo_web.py routes on a bare
+aiohttp app, plus the dashboard's control routes and admin page, with a
+fake economy (every viewer has Hats) and a fake Twitch login, so the
+whole loop can be tried from a browser: open a round, grab cards, call
+squares, watch the marks land live, hit bingo.
+
+    python tools\bingo_devserver.py [--port 8088] [--as devviewer] [--no-open]
+
+Pages:  http://localhost:8088/bingo          the viewer page (logged in as --as)
+        http://localhost:8088/bingo/admin    start / end / call squares
+Data:   data\bingo_dev.db + data\bingo\pool.json (the real pool file)
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import sys
+import webbrowser
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from aiohttp import web  # noqa: E402
+
+from core import config  # noqa: E402
+from core.bingo_web import BingoWeb  # noqa: E402
+from plugins.bingo import BingoPlugin  # noqa: E402
+
+PUBLIC = REPO_ROOT / "public"
+OVERLAYS = REPO_ROOT / "overlays"
+STATIC = ("theme.css", "auth.js", "hat.png", "favicon-32.png", "favicon.ico",
+          "apple-touch-icon.png", "og-image.png", "404.html")
+
+
+class _Economy:
+    """Fake MixItUp balances: everyone starts with 1000 Hats."""
+    _connected = True
+
+    def __init__(self):
+        self.balances = {}
+        self.log = []
+
+    async def _get_balance(self, login):
+        return self.balances.setdefault(login, 1000)
+
+    async def _adjust_balance(self, login, amount):
+        self.balances[login] = self.balances.setdefault(login, 1000) + int(amount)
+        self.log.append((login, int(amount)))
+        print(f"[dev-economy] {login} {amount:+d} -> {self.balances[login]}")
+        return True
+
+
+class _Overlay:
+    def __init__(self):
+        self.listeners = []
+
+    def add_event_listener(self, fn):
+        self.listeners.append(fn)
+
+    async def emit(self, name, data=None):
+        print(f"[dev-overlay] {name}: cards={data.get('cards') if isinstance(data, dict) else data}")
+
+
+class _Bot:
+    def __init__(self):
+        self.plugins = {"economy": _Economy()}
+        self.features = {"bingo": True}
+        self.commands = {}
+
+    def is_feature_enabled(self, name):
+        return self.features.get(name, True)
+
+    def register_command(self, name, handler, mod_only=False, **kw):
+        self.commands[name] = handler
+
+    async def send_chat(self, text):
+        print(f"[dev-chat] {text}")
+
+    async def send_reply(self, message, text, whisper=False):
+        print(f"[dev-chat] {text}")
+
+
+class _Server:
+    """Just enough of PublicWebServer for BingoWeb."""
+
+    def __init__(self, bot, login):
+        self.app = web.Application()
+        self.bot = bot
+        self.login = login
+
+    def _feature_on(self, name):
+        return True
+
+    def _session_identity(self, request):
+        if not self.login:
+            return None
+        return {"uid": "0", "login": self.login, "name": self.login.title(), "prov": "tw"}
+
+    def _origin_ok(self, request):
+        return True
+
+    def _ip_rate_ok(self, request):
+        return True
+
+
+def _static(path: Path):
+    async def handler(request):
+        if not path.exists():
+            raise web.HTTPNotFound()
+        return web.FileResponse(path, headers={"Cache-Control": "no-cache"})
+    return handler
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--port", type=int, default=8088)
+    ap.add_argument("--as", dest="login", default="devviewer", help="fake Twitch login ('' = logged out)")
+    ap.add_argument("--no-open", action="store_true")
+    args = ap.parse_args()
+
+    config.BINGO_DB = config.DATA_DIR / "bingo_dev.db"
+    bot = _Bot()
+    overlay = _Overlay()
+    plugin = BingoPlugin(overlay_manager=overlay)
+    plugin.setup(bot)
+    bot.plugins["bingo"] = plugin
+
+    server = _Server(bot, args.login)
+    BingoWeb(server).register()
+    for name in STATIC:
+        server.app.router.add_get(f"/{name}", _static(PUBLIC / name))
+    server.app.router.add_get("/bingo/admin", _static(OVERLAYS / "bingo_admin.html"))
+    server.app.router.add_get("/overlays/bingo.html", _static(OVERLAYS / "bingo.html"))
+    server.app.router.add_get("/overlays/hatmas_theme.css", _static(OVERLAYS / "hatmas_theme.css"))
+    server.app.router.add_get("/overlays/overlay_client.js", _static(OVERLAYS / "overlay_client.js"))
+
+    async def me(request):
+        return web.json_response({"logged_in": bool(args.login), "login": args.login,
+                                  "display_name": args.login.title(), "login_available": True})
+
+    async def stream(request):
+        return web.json_response({"is_live": False})
+
+    async def status(request):
+        return web.json_response(plugin.status())
+
+    async def start(request):
+        return web.json_response(await plugin.start_round())
+
+    async def end(request):
+        return web.json_response(await plugin.end_round("manual") or {"ok": False, "error": "no open round"})
+
+    async def fire(request):
+        event = (request.query.get("event") or "").strip().lower()
+        res = await plugin.fire(event, source="deck")
+        return web.json_response(res, status=200 if res.get("ok") else 400)
+
+    server.app.router.add_get("/api/me", me)
+    server.app.router.add_get("/api/stream-status", stream)
+    server.app.router.add_get("/api/bingo/status", status)
+    for path, h in (("/api/bingo/start", start), ("/api/bingo/end", end), ("/api/bingo/fire", fire)):
+        server.app.router.add_get(path, h)
+        server.app.router.add_post(path, h)
+
+    async def on_startup(app):
+        await plugin.on_ready()
+
+    server.app.on_startup.append(on_startup)
+    url = f"http://localhost:{args.port}/bingo"
+    print(f"[bingo-dev] {url}  admin: {url}/admin  logged in as: {args.login or '(nobody)'}")
+    if not args.no_open:
+        webbrowser.open(url)
+    web.run_app(server.app, host="127.0.0.1", port=args.port, print=None)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

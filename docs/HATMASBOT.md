@@ -2666,3 +2666,48 @@ Added later the same night.
   with punctuation after the 9/5 re-index).
 - `!clip <words>` in chat is deliberately not built while the archive is
   private.
+
+
+## v2.13 Update — Stream Bingo (2026-09-05)
+
+`plugins/bingo/`, `core/bingo_web.py`, `public/bingo.html`, `overlays/bingo.html`,
+`overlays/bingo_admin.html`, `streamdeck/bingo_*.bat`, `tools/bingo_devserver.py`,
+`tests/test_bingo.py` (8 tests). Feature toggle `bingo` (on; nothing happens until a
+round opens).
+
+### The game
+
+- **Round** = one stream. BINGO START (deck) / dashboard `/bingo` / `!bingostart` opens
+  it; it closes by itself on the first bingo, or with BINGO END / `!bingoend`.
+- **Cards** are 5x5 with a free centre, generated from a seed `(round, login, seq)` so
+  they survive restarts and are unique per viewer. First card free (Twitch login);
+  cards 2–4 cost `BINGO_CARD_PRICES` (50 / 100 / 200 Hats) through the economy's
+  MixItUp balance (`_get_balance` / `_adjust_balance`). A late card starts with the
+  squares already called.
+- **Pool** (`data/bingo/pool.json`, created with 36 defaults, edit freely): each square
+  has `id`, `label`, `source` (`auto` | `manual`), `weight` (higher = on more cards).
+  Auto squares fire from the kill detector (`kill`, `death`, `assist`, `double`…
+  `penta`, `first_blood`, `kills_10`, `deaths_5`, `deathless`) and the economy's
+  match settle via overlay events (`match_win`, `match_loss`, `new_god`). Manual
+  squares fire from `streamdeck\bingo_call.bat <id>`, the dashboard button page
+  (`http://localhost:8069/bingo`), or `!bingocall <id>` (mods).
+- **Marking**: every call marks every card holding that square (a square called twice
+  is a no-op the second time). The first card with 5 in a row wins the **pot** =
+  `BINGO_BASE_PRIZE` (500) + `BINGO_POT_SHARE` (50%) of card sales, paid with
+  `_adjust_balance` like a dividend (chat says "owed" if MixItUp is down). The round
+  closes; winning cards stay on the page until the next round opens.
+
+### Surfaces
+
+| Where | What |
+| --- | --- |
+| `hatmaster.tv/bingo` | cards, buy button, live marks (`/ws/bingo`), leaders, calls, winner banner. `/auth/login?next=/bingo` returns the viewer to the page after Twitch login (new `hm_next` cookie, same-site paths only). |
+| `/api/bingo/round`, `/api/bingo/me`, `POST /api/bingo/card` | public API (origin + rate checks on the buy) |
+| dashboard `/bingo` + `/api/bingo/status|start|end|fire` (localhost:8069) | control page with one button per manual square, Stream Deck endpoints |
+| `overlays/bingo.html` | OBS source: pot, cards, last call, closest player, winner (rule `bingo`: show on open/call/win/card_added, hide on close) |
+| `!bingo` | round status + your cards |
+| `tools/bingo_devserver.py` | the whole loop without the bot: fake economy (1000 Hats each), fake login (`--as name`), `/bingo` + `/bingo/admin` on :8088 |
+
+Verified 9/5 on the dev host from a browser: open round → free card → bought card
+(50 Hats, pot 525) → four calls marked live via the socket → fifth call: winner
+banner, round closed, 525 Hats credited to the fake balance.

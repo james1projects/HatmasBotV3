@@ -231,6 +231,10 @@ def test_fire_marks_pays_and_closes():
     assert ov.events[-1][0] == "bingo_win" and ov.events[-1][1]["winner"]["paid"] is True
     assert any("BINGO! Dyna wins" in t for t in bot.chat)
     assert p.current() is None and p.public_state()["last"]["winner"]["login"] == "dyna"
+    # the winning card stays visible after the round closes, nothing to claim
+    after = p.my_cards("dyna")
+    assert after["open"] is False and after["cards"][0]["bingo"] and after["cards"][0]["line"] == [0, 1, 2, 3, 4]
+    assert after["can_claim"] is False and after["next_price"] is None
     # after the round: firing is refused, ending is a no-op
     assert asyncio.run(p.fire("kill"))["error"] == "no open round"
     assert asyncio.run(p.end_round()) is None
