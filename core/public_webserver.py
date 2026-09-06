@@ -60,6 +60,7 @@ from core import account_linking as _links
 from core import aspect_roster
 from core.aspect_roster import display_god
 from core.vod_web import VodWeb
+from core.bingo_web import BingoWeb
 from core import web_session as _ws
 from core import events_store as _events
 from core import config as _config
@@ -358,6 +359,8 @@ class PublicWebServer:
         self.app.router.add_get("/live", self._handle_live_page)
         # "Ask the VOD" archive search (core/vod_web.py) — page + /api/vod/*
         VodWeb(self).register()
+        # Stream Bingo (core/bingo_web.py) — page, API, /ws/bingo
+        BingoWeb(self).register()
         self.app.router.add_get(
             "/Live",
             lambda r: web.HTTPMovedPermanently("/live"))
@@ -2269,6 +2272,12 @@ class PublicWebServer:
         resp.set_cookie(
             _ws.OAUTH_STATE_COOKIE, state, max_age=600, httponly=True,
             secure=self._cookie_secure, samesite="Lax", path="/")
+        # ?next=/bingo — come back to that page after login. Same-site
+        # paths only (must start with a single "/"), never a full URL.
+        nxt = (request.query.get("next") or "").strip()
+        if nxt.startswith("/") and not nxt.startswith("//") and len(nxt) <= 200:
+            resp.set_cookie("hm_next", nxt, max_age=600, httponly=True,
+                            secure=self._cookie_secure, samesite="Lax", path="/")
         return resp
 
     async def _handle_auth_callback(self, request: web.Request):
@@ -2332,9 +2341,13 @@ class PublicWebServer:
             u.get("id", ""), u.get("login", ""),
             u.get("display_name", ""), u.get("profile_image_url", ""),
             secret=WEB_SESSION_SECRET)
-        resp = web.HTTPFound(f"/twitch/{u.get('login', '')}")
+        nxt = (request.cookies.get("hm_next") or "").strip()
+        if not (nxt.startswith("/") and not nxt.startswith("//")):
+            nxt = f"/twitch/{u.get('login', '')}"
+        resp = web.HTTPFound(nxt)
         self._set_session_cookie(resp, token)
         resp.del_cookie(_ws.OAUTH_STATE_COOKIE, path="/")
+        resp.del_cookie("hm_next", path="/")
         print(f"[PublicWebServer] website login: {u.get('login')}")
         return resp
 

@@ -127,5 +127,16 @@
       "cocaster_line"
     ],
     "hide_after": 9
+  },
+  "bingo": {
+    "show_on": [
+      "bingo_open",
+      "bingo_call",
+      "bingo_win",
+      "card_added"
+    ],
+    "hide_on": [
+      "bingo_closed"
+    ]
   }
 }

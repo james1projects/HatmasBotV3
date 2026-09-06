@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Bingo control</title>
+<link rel="stylesheet" href="/overlays/hatmas_theme.css">
+<style>
+  body { margin: 0; padding: 18px; background: var(--bg, #202C39); color: var(--text, #F2F4F7);
+    font-family: 'Inter', 'Segoe UI', sans-serif; }
+  h1 { font-family: 'BigNoodleTitling', 'Bebas Neue', 'Inter', sans-serif; text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 10px; font-size: 32px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+  .btn { font: inherit; font-weight: 700; padding: 10px 14px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.12);
+    background: var(--panel, #1a232e); color: var(--text, #F2F4F7); cursor: pointer; }
+  .btn:hover { border-color: rgba(255,255,255,0.3); }
+  .btn.start { background: var(--green, #4CC38A); color: #102; border-color: transparent; }
+  .btn.end { background: var(--red, #E0605E); color: #fff; border-color: transparent; }
+  .status { font-family: 'JetBrains Mono', Consolas, monospace; font-size: 13px; color: var(--text-dim, #A9B4C0); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+  .sq { font: inherit; text-align: left; padding: 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1);
+    background: var(--panel, #1a232e); color: var(--text, #F2F4F7); cursor: pointer; }
+  .sq:hover { border-color: var(--accent, #E5A26B); }
+  .sq.called { opacity: 0.45; border-style: dashed; }
+  .sq small { display: block; font-size: 11px; color: var(--text-dim, #A9B4C0); margin-top: 4px; font-family: Consolas, monospace; }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim, #A9B4C0); margin: 18px 0 8px; }
+  .auto { color: var(--text-dim, #A9B4C0); font-size: 13px; }
+  .log { margin-top: 14px; font-size: 13px; color: var(--text-dim, #A9B4C0); max-height: 160px; overflow: auto; }
+  .flash { color: var(--green, #4CC38A); }
+</style>
+</head>
+<body>
+  <h1>Stream Bingo</h1>
+  <div class="bar">
+    <button type="button" class="btn start" id="start">Start round</button>
+    <button type="button" class="btn end" id="end">End round (no winner)</button>
+    <span class="status" id="status">loading</span>
+  </div>
+  <h2>Manual squares (press when it happens)</h2>
+  <div class="grid" id="manual"></div>
+  <h2>Automatic squares</h2>
+  <div class="auto" id="auto"></div>
+  <div class="log" id="log"></div>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let state = null;
+    function esc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
+    async function api(path, method) {
+      const r = await fetch(path, { method: method || "GET" });
+      return r.json();
+    }
+    function log(text, good) {
+      const d = document.createElement("div"); d.textContent = new Date().toLocaleTimeString() + "  " + text;
+      if (good) d.className = "flash";
+      $("log").prepend(d);
+    }
+    function render() {
+      const r = state.round;
+      $("status").textContent = r
+        ? `round ${r.round_id} open: ${r.cards} cards, ${r.players} players, pot ${r.pot} Hats, ${r.calls.length} calls`
+        : (state.last && state.last.winner ? `no open round (last won by ${state.last.winner.display})` : "no open round");
+      const called = new Set(r ? r.called_ids : []);
+      $("manual").innerHTML = (state.manual_squares || []).map((sq) =>
+        `<button type="button" class="sq ${called.has(sq.id) ? "called" : ""}" data-id="${esc(sq.id)}">${esc(sq.label)}<small>${esc(sq.id)}${called.has(sq.id) ? " (called)" : ""}</small></button>`).join("");
+      $("auto").textContent = (state.auto_squares || []).map((sq) => sq.label + (called.has(sq.id) ? " (called)" : "")).join("  |  ");
+    }
+    async function refresh() { try { state = await api("/api/bingo/status"); render(); } catch (e) { $("status").textContent = "bot unreachable"; } }
+    $("start").addEventListener("click", async () => { const r = await api("/api/bingo/start", "POST"); log("round started, pot " + (r.pot || 0)); refresh(); });
+    $("end").addEventListener("click", async () => { if (confirm("Close the round with no winner?")) { await api("/api/bingo/end", "POST"); log("round closed"); refresh(); } });
+    $("manual").addEventListener("click", async (e) => {
+      const b = e.target.closest("[data-id]"); if (!b) return;
+      const r = await api("/api/bingo/fire?event=" + encodeURIComponent(b.dataset.id), "POST");
+      if (r.ok) log(`${r.label}: ${r.changed} cards marked` + (r.already ? " (already called)" : "") + (r.winners && r.winners.length ? "  BINGO " + r.winners[0].display : ""), r.winners && r.winners.length);
+      else log("error: " + r.error);
+      refresh();
+    });
+    refresh(); setInterval(refresh, 5000);
+  </script>
+</body>
+</html>

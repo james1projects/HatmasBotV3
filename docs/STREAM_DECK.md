@@ -40,6 +40,9 @@ Rows are stream phases, colored by the icon's top bar:
 | 4,2 | EARPIECE | System: Open | `C:\Projects\HatmasBot\streamdeck\earpiece_test.bat` | `earpiece.png` |
 | 4,3 | VOD REVIEW | System: Open | `C:\Projects\HatmasBot\streamdeck\vod_review.bat` | `vod_review.png` |
 | 4,4 | VOD SEARCH | System: Open | `C:\Projects\HatmasBot\streamdeck\vod_search.bat` | `vod_search.png` |
+| 4,5 | BINGO START | System: Open | `C:\Projects\HatmasBot\streamdeck\bingo_start.bat` | `bingo_start.png` |
+| 4,6 | BINGO END | System: Open | `C:\Projects\HatmasBot\streamdeck\bingo_end.bat` | `bingo_end.png` |
+| 4,7 | BINGO: NO MANA | System: Open | `C:\Projects\HatmasBot\streamdeck\bingo_call.bat no_mana` (add the argument in the Open action) | `bingo_call.png` |
 | 3,5 | RESOLVE IMPORT | System: Open | `C:\Projects\HatmasBot\streamdeck\resolve_import.bat` | `resolve_import.png` |
 | 3,6 | RESOLVE TIKTOK | System: Open | `C:\Projects\HatmasBot\streamdeck\resolve_tiktok.bat` | `resolve_tiktok.png` |
 | 4,1 | DISCORD TEST | System: Open | `C:\Projects\HatmasBot\streamdeck\discord_test.bat` | `discord_test.png` |
@@ -99,6 +102,12 @@ RESOLVE TIKTOK to cut the VOD in DaVinci.
 Optional refinement once the basics feel good: an END STREAM Multi
 Action that fires `go_offline.bat` then `process_recordings.bat` in
 one press.
+
+BINGO START / BINGO END open and close a Stream Bingo round. Manual squares are
+called with `bingo_call.bat <square_id>`: make one key per square you call
+often (no_mana, blames_jungle, water, ...) by putting the id in the Open
+action's arguments; the full list with buttons lives on the dashboard at
+`http://localhost:8069/bingo`, handy on the second monitor.
 
 VOD REVIEW / VOD SEARCH open the Ask the VOD pages in the default browser:
 from the bot's public server (localhost:8070) when the bot is up, otherwise

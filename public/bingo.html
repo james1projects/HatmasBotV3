@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#202C39">
+<title>Stream Bingo: Hatmaster.tv</title>
+<meta name="description" content="Stream Bingo: get a card, watch the squares fill as Hatmaster plays, first line wins the Hats pot.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Hatmas Market">
+<meta property="og:url" content="https://hatmaster.tv/bingo">
+<meta property="og:title" content="Stream Bingo: Hatmaster.tv">
+<meta property="og:description" content="Get a card, watch the squares fill as Hatmaster plays, first line wins the Hats pot.">
+<meta property="og:image" content="https://hatmaster.tv/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="stylesheet" href="/theme.css">
+<style>
+  .wrap { max-width: 900px; margin: 0 auto; padding: 16px 14px 80px; }
+  .brand-band {
+    display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 1px solid var(--border); padding: 8px 0 12px; margin-bottom: 20px;
+    font-family: var(--font-sans); font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim);
+  }
+  .brand-band a.left { color: var(--accent); font-weight: 700; }
+  .brand-hat { height: 16px; vertical-align: -3px; margin-right: 6px; }
+  .right-cluster { display: flex; gap: 10px; }
+  .status { display: inline-flex; align-items: center; gap: 6px; }
+  .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--text-fade); }
+  .dot.connected { background: var(--green); }
+  h1 { font-family: var(--font-display); text-transform: uppercase; font-size: 44px; line-height: 1; letter-spacing: 0.02em; margin: 0 0 6px; }
+  .sub { color: var(--text-dim); font-size: 15px; margin: 0 0 14px; max-width: 620px; }
+
+  .round { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 18px; }
+  .stat { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
+  .stat .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); }
+  .stat .v { font-family: var(--font-mono); font-size: 22px; margin-top: 2px; }
+  .stat.pot .v { color: var(--accent); }
+  .closed { padding: 14px; border: 1px dashed var(--border-hi); border-radius: var(--radius); color: var(--text-dim); margin-bottom: 18px; }
+  .winner { padding: 14px; background: var(--green-bg); color: var(--green); border-radius: var(--radius); margin-bottom: 18px; font-weight: 700; }
+
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 18px; }
+  .btn { font: inherit; font-weight: 700; padding: 10px 16px; cursor: pointer; border-radius: var(--radius);
+    background: var(--accent); color: var(--bg); border: 0; }
+  .btn:hover { background: var(--accent-hi); }
+  .btn.ghost { background: var(--panel); color: var(--text); border: 1px solid var(--border); }
+  .btn[disabled] { opacity: 0.5; cursor: default; }
+  .hint { color: var(--text-dim); font-size: 13px; }
+  .err { color: var(--red); font-size: 13px; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 12px; }
+  .card.bingo { border-color: var(--green); box-shadow: 0 0 0 2px var(--green-bg); }
+  .card h3 { margin: 0 0 8px; font-family: var(--font-display); text-transform: uppercase; font-size: 16px; letter-spacing: 0.04em; display: flex; justify-content: space-between; }
+  .card h3 span { font-family: var(--font-mono); font-size: 12px; color: var(--text-dim); text-transform: none; }
+  .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+  .sq { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; text-align: center;
+    padding: 4px; font-size: 10px; line-height: 1.15; border-radius: var(--radius-sm);
+    background: var(--bg-2); color: var(--text-dim); border: 1px solid var(--border); }
+  .sq.marked { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 700; }
+  .sq.free { background: var(--panel-hi); color: var(--text); font-weight: 700; }
+  .sq.free.marked { background: var(--accent); color: var(--bg); }
+  .sq.line { outline: 2px solid var(--green); outline-offset: -2px; }
+  .sq.flash { animation: flash 0.9s ease; }
+  @keyframes flash { 0% { transform: scale(1.12); } 100% { transform: scale(1); } }
+
+  .side { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 22px; }
+  .box { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 12px; }
+  .box h2 { margin: 0 0 8px; font-family: var(--font-display); text-transform: uppercase; font-size: 16px; letter-spacing: 0.04em; }
+  .box ol, .box ul { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.6; }
+  .box li b { color: var(--text); }
+  .calls li { color: var(--text-dim); }
+  .calls li:first-child { color: var(--text); }
+  @media (max-width: 640px) { .side { grid-template-columns: 1fr; } h1 { font-size: 36px; } }
+</style>
+</head>
+<body>
+  <a class="skip-link" href="#maincontent">Skip to content</a>
+  <div class="wrap" id="maincontent" role="main" tabindex="-1">
+    <div class="brand-band" role="banner">
+      <a class="left" href="/"><img class="brand-hat" src="/hat.png" alt="">HATMASTER.TV</a>
+      <div class="right-cluster">
+        <span class="status"><span class="dot" id="ws-dot"></span><span id="ws-label">connecting</span></span>
+        <a href="/market" class="icon-toggle" style="text-decoration: none;">Market</a>
+        <a href="/live" class="icon-toggle" style="text-decoration: none;">Live</a>
+        <a href="/me" class="icon-toggle" style="text-decoration: none;">Profile</a>
+      </div>
+    </div>
+
+    <h1>Stream Bingo</h1>
+    <p class="sub">Every card is different. Squares fill in as Hatmaster plays: kills, deaths, multikills, and the things he says. First line wins the Hats pot.</p>
+
+    <div id="round"></div>
+    <div class="actions" id="actions"></div>
+    <div class="cards" id="cards"></div>
+
+    <div class="side">
+      <div class="box"><h2>Closest to bingo</h2><ol id="leaders"><li class="hint">No cards yet.</li></ol></div>
+      <div class="box"><h2>Calls</h2><ul class="calls" id="calls"><li class="hint">Nothing called yet.</li></ul></div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const LINES = [[0,1,2,3,4],[5,6,7,8,9],[10,11,12,13,14],[15,16,17,18,19],[20,21,22,23,24],
+                 [0,5,10,15,20],[1,6,11,16,21],[2,7,12,17,22],[3,8,13,18,23],[4,9,14,19,24],[0,6,12,18,24],[4,8,12,16,20]];
+  let state = null, me = null, myCards = [];
+  function esc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+  async function getJson(url) { const r = await fetch(url, { cache: "no-store" }); return r.json(); }
+
+  function renderRound() {
+    const r = state && state.round;
+    const el = $("round");
+    if (!state) { el.innerHTML = '<div class="closed">Loading</div>'; return; }
+    if (!r) {
+      const last = state.last;
+      el.innerHTML = '<div class="closed">No round is open right now. Hatmaster starts one on stream.' +
+        (last && last.winner ? ' Last round: <b>' + esc(last.winner.display) + '</b> won ' + esc(last.winner.prize) + ' Hats.' : '') + '</div>';
+      return;
+    }
+    el.innerHTML =
+      (r.winner ? '<div class="winner">BINGO! ' + esc(r.winner.display) + ' won ' + esc(r.winner.prize) + ' Hats.</div>' : '') +
+      '<div class="round">' +
+        '<div class="stat pot"><div class="k">Pot</div><div class="v">' + esc(r.pot) + ' Hats</div></div>' +
+        '<div class="stat"><div class="k">Cards</div><div class="v">' + esc(r.cards) + '</div></div>' +
+        '<div class="stat"><div class="k">Players</div><div class="v">' + esc(r.players) + '</div></div>' +
+        '<div class="stat"><div class="k">Calls</div><div class="v">' + esc((r.calls || []).length) + '</div></div>' +
+      '</div>';
+    $("leaders").innerHTML = (r.leaders || []).length
+      ? r.leaders.map((l) => '<li><b>' + esc(l.display) + '</b> needs ' + l.to_bingo + (l.cards > 1 ? ' (' + l.cards + ' cards)' : '') + '</li>').join('')
+      : '<li class="hint">No cards yet.</li>';
+    const calls = (r.calls || []).slice().reverse();
+    $("calls").innerHTML = calls.length ? calls.map((c) => '<li>' + esc(c.label) + '</li>').join('') : '<li class="hint">Nothing called yet.</li>';
+  }
+
+  function renderActions() {
+    const el = $("actions");
+    const open = state && state.round && !state.round.winner;
+    if (!me || !me.logged_in) {
+      el.innerHTML = open
+        ? '<a class="btn" href="/auth/login?next=/bingo">Log in with Twitch for a free card</a>'
+        : '<span class="hint">Log in with Twitch when a round opens to get a card.</span>';
+      return;
+    }
+    if (!me.twitch) { el.innerHTML = '<span class="err">Bingo cards need a Twitch login.</span>'; return; }
+    if (!open) { el.innerHTML = '<span class="hint">Your cards appear here when a round opens.</span>'; return; }
+    if (me.can_claim) {
+      const price = me.next_price || 0;
+      el.innerHTML = '<button type="button" class="btn" id="claim">' + (price ? 'Buy another card for ' + price + ' Hats' : 'Get your free card') + '</button>' +
+        '<span class="hint">' + (myCards.length ? myCards.length + ' of ' + state.max_cards + ' cards' : 'One free card per round, up to ' + state.max_cards + ' with Hats') + '</span><span class="err" id="claim-err"></span>';
+      $("claim").addEventListener("click", claim);
+    } else {
+      el.innerHTML = '<span class="hint">You have all ' + myCards.length + ' cards for this round. Good luck.</span>';
+    }
+  }
+
+  function cardHtml(c) {
+    const line = new Set(c.line || []);
+    return '<div class="card' + (c.bingo ? ' bingo' : '') + '" data-id="' + c.id + '">' +
+      '<h3>Card ' + c.seq + (c.bingo ? ' BINGO' : '') + '<span>' + (c.to_bingo === 0 ? 'won' : c.to_bingo + ' to go') + '</span></h3>' +
+      '<div class="grid">' + c.squares.map((s, i) =>
+        '<div class="sq' + (s.marked ? ' marked' : '') + (s.free ? ' free' : '') + (line.has(i) ? ' line' : '') + '" data-sq="' + esc(s.id) + '">' + esc(s.label) + '</div>').join('') +
+      '</div></div>';
+  }
+  function renderCards() { $("cards").innerHTML = myCards.map(cardHtml).join(''); }
+
+  async function claim() {
+    const btn = $("claim"); if (btn) btn.disabled = true;
+    try {
+      const r = await fetch("/api/bingo/card", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const j = await r.json();
+      if (!j.ok) { const e = $("claim-err"); if (e) e.textContent = j.error || "Could not get a card."; if (btn) btn.disabled = false; return; }
+      await loadMe();
+    } catch (_) { if (btn) btn.disabled = false; }
+  }
+
+  async function loadRound() { try { state = await getJson("/api/bingo/round"); } catch (_) { state = null; } renderRound(); renderActions(); }
+  async function loadMe() { try { me = await getJson("/api/bingo/me"); myCards = me.cards || []; } catch (_) { me = null; myCards = []; } renderCards(); renderActions(); }
+
+  // ── live updates ──
+  let retryMs = 1000;
+  function connect() {
+    const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws/bingo");
+    ws.onopen = () => { $("ws-dot").className = "dot connected"; $("ws-label").textContent = "live"; retryMs = 1000; };
+    ws.onmessage = (e) => {
+      let msg; try { msg = JSON.parse(e.data); } catch (_) { return; }
+      const d = msg.data || {};
+      if (msg.event === "bingo_open") { state = Object.assign(state || {}, { open: true, round: d, last: null }); renderRound(); loadMe(); }
+      else if (msg.event === "bingo_call") {
+        if (state) { state.round = d; }
+        renderRound();
+        const called = d.call && d.call.event_id;
+        if (called) {
+          document.querySelectorAll('.sq[data-sq="' + called + '"]').forEach((el) => { el.classList.add("marked", "flash"); });
+          const touched = new Set(d.changed_cards || []);
+          if (myCards.some((c) => touched.has(c.id))) loadMe();
+        }
+      }
+      else if (msg.event === "bingo_win") { if (state) state.round = d; renderRound(); loadMe(); }
+      else if (msg.event === "bingo_closed") { if (state) { state.round = null; state.last = d; } renderRound(); loadMe(); }
+      else if (msg.event === "card_added") { if (state) state.round = d; renderRound(); }
+    };
+    ws.onclose = () => { $("ws-dot").className = "dot"; $("ws-label").textContent = "reconnecting"; setTimeout(connect, retryMs); retryMs = Math.min(30000, retryMs * 1.6); };
+    ws.onerror = () => { try { ws.close(); } catch (_) {} };
+  }
+
+  loadRound().then(loadMe).then(connect);
+  setInterval(loadRound, 60000);
+})();
+</script>
+<script src="/auth.js"></script>
+</body>
+</html>

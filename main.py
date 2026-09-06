@@ -58,6 +58,7 @@ from plugins.factorio import FactorioPlugin
 from plugins.discord_bridge import DiscordBridgePlugin
 from plugins.custom_commands import CustomCommandsPlugin
 from plugins.cocaster import CoCasterPlugin
+from plugins.bingo import BingoPlugin
 
 
 async def main():
@@ -260,6 +261,14 @@ async def main():
                               overlay_manager=web.overlay)
     cocaster.attach_detector(kd)
     bot.register_plugin("cocaster", cocaster)
+
+    # ── Stream Bingo (plugins/bingo/) ──
+    # Viewer cards on hatmaster.tv/bingo, squares marked by the detector
+    # and the economy (auto) or by James (manual). Needs the overlay
+    # manager for match boundaries + the bingo overlay; kd for kills.
+    bingo = BingoPlugin(overlay_manager=web.overlay)
+    bingo.attach_detector(kd)
+    bot.register_plugin("bingo", bingo)
 
     # ── YouTube LIVE thumbnail badge automation ──
     # Listens for stream_live / stream_offline events from StreamStatusPlugin.

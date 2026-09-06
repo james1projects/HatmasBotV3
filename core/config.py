@@ -544,6 +544,21 @@ COCASTER_PERSONA_FILE = BASE_DIR / "plugins" / "cocaster" / "persona.md"
 COCASTER_DIR = DATA_DIR / "cocaster"
 CHAT_LOG_DB = DATA_DIR / "chat_log.db"
 
+# === STREAM BINGO (plugins/bingo/ — hatmaster.tv/bingo) ===
+# One round per stream (BINGO START on the deck / dashboard). Viewers get
+# a free 5x5 card with a Twitch login and can buy up to BINGO_MAX_CARDS
+# at BINGO_CARD_PRICES (Hats via the economy plugin). Squares are marked
+# by the kill detector / economy (auto) or by James (manual: deck keys,
+# the dashboard /bingo page, !bingocall). First line wins the pot =
+# BINGO_BASE_PRIZE + BINGO_POT_SHARE of the Hats spent on extra cards.
+# Edit the square pool in data/bingo/pool.json (created with defaults).
+BINGO_BASE_PRIZE = 500
+BINGO_CARD_PRICES = (50, 100, 200)      # 2nd, 3rd, 4th card; the first is free
+BINGO_MAX_CARDS = 4
+BINGO_POT_SHARE = 0.5
+BINGO_POOL_FILE = DATA_DIR / "bingo" / "pool.json"
+BINGO_DB = DATA_DIR / "bingo.db"
+
 # === FEATURE TOGGLES ===
 # Defaults only. The dashboard's features card flips these live, and
 # flips persist across restarts in data/feature_overrides.json (sparse:
@@ -568,6 +583,7 @@ DEFAULT_FEATURES = {
     "spacegame": False,    # off = commands silent + hidden from /mod, game page 404s
     "findit": False,       # off = hatmaster.tv/FindIt 404s + no GPU worker runs
     "cocaster": False,     # off = no earpiece summaries, no caster lines (chat log still records)
+    "bingo": True,         # off = hatmaster.tv/bingo 404s and no squares get marked
 }
 
 # === FINDIT (plugins/findit/ — hatmaster.tv/FindIt, early development) ===

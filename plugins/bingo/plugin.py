@@ -1,0 +1,405 @@
+"""
+plugins/bingo/plugin.py — Stream Bingo.
+
+One round per stream (James presses BINGO START on the deck or the
+dashboard). Viewers get a free 5x5 card on hatmaster.tv/bingo (Twitch
+login) and can buy up to BINGO_MAX_CARDS with Hats at rising prices.
+Squares get marked two ways:
+
+  auto    kill detector (kill / death / assist / double..penta / first
+          blood / 10 kills / 5 deaths / deathless) and the economy's
+          match settle (win / loss / new god this stream)
+  manual  James: deck button, dashboard button, or !bingocall <id>
+
+First card with five in a row wins the pot (BINGO_BASE_PRIZE + half of
+the Hats spent on extra cards), paid through the economy's MixItUp
+balance like a dividend; the round closes and a new one can start.
+
+Feature toggle "bingo" (default on) gates the site page and the API;
+nothing happens anyway until a round is open.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import time
+from pathlib import Path
+from typing import Any, Awaitable, Callable, Dict, List, Optional
+
+from core import config
+
+from .pool import (FREE, label_of, load_pool, make_card, card_seed, next_card_price,
+                   marked_indexes, winning_lines)
+from .store import BingoStore
+
+Listener = Callable[[str, dict], Awaitable[None]]
+
+MULTIKILL_TYPES = {"double_kill": "double", "triple_kill": "triple",
+                   "quadra_kill": "quadra", "penta_kill": "penta"}
+
+
+def _cfg(name: str, default: Any) -> Any:
+    return getattr(config, name, default)
+
+
+def render_card(card: dict, pool: List[dict]) -> dict:
+    """Card as the page renders it: labels, marks, winning line."""
+    marks = set(card.get("marks") or [])
+    lines = winning_lines(marks)
+    return {
+        "id": int(card["id"]), "seq": int(card["seq"]), "price": int(card.get("price") or 0),
+        "login": card.get("login"), "display": card.get("display"),
+        "squares": [{"id": sid, "label": label_of(pool, sid), "marked": i in marks,
+                     "free": sid == FREE} for i, sid in enumerate(card["squares"])],
+        "to_bingo": int(card.get("to_bingo", 5)),
+        "bingo": bool(lines), "line": list(lines[0]) if lines else None,
+        "created_at": card.get("created_at"), "bingo_at": card.get("bingo_at"),
+    }
+
+
+class BingoPlugin:
+    def __init__(self, overlay_manager=None):
+        self.bot = None
+        self.overlay_manager = overlay_manager
+        self.store: Optional[BingoStore] = None
+        self.pool: List[dict] = []
+        self._listeners: List[Listener] = []
+        self._lock = asyncio.Lock()
+        # per-match counters for the threshold squares
+        self._match_kills = 0
+        self._match_deaths = 0
+        self._match_open = False
+        self._gods_this_round: set = set()
+        self.stats = {"calls": 0, "errors": 0, "last_error": ""}
+
+    # ── lifecycle ─────────────────────────────────────────────────────
+
+    def setup(self, bot):
+        self.bot = bot
+        bot.register_command("bingo", self.cmd_bingo)
+        bot.register_command("bingocall", self.cmd_bingocall, mod_only=True)
+        bot.register_command("bingostart", self.cmd_bingostart, mod_only=True)
+        bot.register_command("bingoend", self.cmd_bingoend, mod_only=True)
+
+    async def on_ready(self):
+        self.pool = load_pool(Path(_cfg("BINGO_POOL_FILE", config.DATA_DIR / "bingo" / "pool.json")))
+        self.store = BingoStore(_cfg("BINGO_DB", config.DATA_DIR / "bingo.db"))
+        if self.overlay_manager is not None:
+            try:
+                self.overlay_manager.add_event_listener(self._on_overlay_event)
+            except Exception as e:
+                self._error(f"overlay listener: {e}")
+        r = self.store.current_round()
+        print(f"[Bingo] ready: {len(self.pool)} squares in the pool, "
+              f"{'round ' + str(r['id']) + ' open' if r else 'no open round'}, "
+              f"toggle {'on' if self._enabled() else 'off'}")
+
+    async def cleanup(self):
+        if self.store:
+            self.store.close()
+
+    def attach_detector(self, kd) -> None:
+        kd.add_kill_listener(self._on_kill)
+        kd.add_multikill_listener(self._on_multikill)
+        kd.add_death_listener(self._on_death)
+        kd.add_assist_listener(self._on_assist)
+
+    def add_listener(self, coro: Listener) -> None:
+        """coro(event, data) for bingo_open / bingo_call / bingo_win /
+        bingo_closed / card_added. The public server pushes these to
+        /ws/bingo."""
+        self._listeners.append(coro)
+
+    # ── helpers ───────────────────────────────────────────────────────
+
+    def _enabled(self) -> bool:
+        if self.bot is None or not hasattr(self.bot, "is_feature_enabled"):
+            return True
+        return bool(self.bot.is_feature_enabled("bingo"))
+
+    def _economy(self):
+        plugins = getattr(self.bot, "plugins", {}) if self.bot else {}
+        return plugins.get("economy")
+
+    def _error(self, msg: str) -> None:
+        self.stats["errors"] += 1
+        self.stats["last_error"] = msg
+        print(f"[Bingo] {msg}")
+
+    async def _notify(self, event: str, data: dict) -> None:
+        if self.overlay_manager is not None:
+            try:
+                await self.overlay_manager.emit(event, data)
+            except Exception as e:
+                self._error(f"overlay emit {event}: {e}")
+        for fn in list(self._listeners):
+            try:
+                await fn(event, data)
+            except Exception as e:
+                self._error(f"listener {event}: {e}")
+
+    async def _say(self, text: str) -> None:
+        if self.bot is None:
+            return
+        try:
+            await self.bot.send_chat(text)
+        except Exception as e:
+            self._error(f"chat: {e}")
+
+    def prices(self) -> List[int]:
+        return [int(p) for p in _cfg("BINGO_CARD_PRICES", (50, 100, 200))]
+
+    def max_cards(self) -> int:
+        return int(_cfg("BINGO_MAX_CARDS", 4))
+
+    def manual_squares(self) -> List[dict]:
+        return [sq for sq in self.pool if sq["source"] == "manual"]
+
+    # ── round control ─────────────────────────────────────────────────
+
+    def current(self) -> Optional[dict]:
+        return self.store.current_round() if self.store else None
+
+    async def start_round(self) -> dict:
+        async with self._lock:
+            r = self.store.open_round(int(_cfg("BINGO_BASE_PRIZE", 500)), float(_cfg("BINGO_POT_SHARE", 0.5)))
+            self._gods_this_round = set()
+            self._match_kills = self._match_deaths = 0
+            summary = self.store.summary(r["id"])
+        await self._notify("bingo_open", summary)
+        await self._say(f"BINGO is open! Grab your free card at hatmaster.tv/bingo and watch the board fill. "
+                        f"Pot: {summary['pot']} Hats.")
+        return summary
+
+    async def end_round(self, reason: str = "manual") -> Optional[dict]:
+        async with self._lock:
+            r = self.store.current_round()
+            if not r:
+                return None
+            self.store.close_round(r["id"])
+            summary = self.store.summary(r["id"])
+        summary["reason"] = reason
+        await self._notify("bingo_closed", summary)
+        if reason == "manual":
+            await self._say("Bingo round closed with no winner. Cards reset next round.")
+        return summary
+
+    # ── calls ─────────────────────────────────────────────────────────
+
+    def known_event(self, event_id: str) -> Optional[dict]:
+        for sq in self.pool:
+            if sq["id"] == event_id:
+                return sq
+        return None
+
+    async def fire(self, event_id: str, source: str = "manual") -> dict:
+        """Call a square. Marks every card, pays and closes on a win."""
+        sq = self.known_event(event_id)
+        if not sq:
+            return {"ok": False, "error": f"unknown square '{event_id}'"}
+        if not self._enabled() or not self.store:
+            return {"ok": False, "error": "bingo is off"}
+        async with self._lock:
+            r = self.store.current_round()
+            if not r:
+                return {"ok": False, "error": "no open round"}
+            res = self.store.mark_event(r["id"], event_id, sq["label"], source)
+            self.stats["calls"] += 1
+            summary = self.store.summary(r["id"])
+            winners = res["winners"]
+            payout = None
+            if winners:
+                payout = await self._pay_winner(r, winners[0], summary["pot"])
+                self.store.close_round(r["id"], winner={"login": winners[0]["login"],
+                                                        "display": winners[0]["display"],
+                                                        "card_id": winners[0]["id"]},
+                                       prize_paid=summary["pot"], prize_ok=payout)
+                summary = self.store.summary(r["id"])
+        out = {"ok": True, "round_id": r["id"], "event_id": event_id, "label": sq["label"],
+               "source": source, "already": res["already"], "changed": len(res["changed"]),
+               "winners": [{"login": w["login"], "display": w["display"], "card_id": w["id"]} for w in winners],
+               "summary": summary}
+        await self._notify("bingo_call", {**summary, "call": {"event_id": event_id, "label": sq["label"],
+                                                             "source": source, "already": res["already"]},
+                                          "changed_cards": [c["id"] for c in res["changed"]]})
+        if winners:
+            w = winners[0]
+            await self._notify("bingo_win", {**summary, "winner": {"login": w["login"], "display": w["display"],
+                                                                  "card_id": w["id"], "prize": summary["pot"],
+                                                                  "paid": bool(payout)}})
+            paid = f"{summary['pot']} Hats paid out" if payout else f"{summary['pot']} Hats owed (balance service unavailable)"
+            await self._say(f"BINGO! {w['display']} wins the round on \"{sq['label']}\". {paid}. "
+                            f"Next round opens when Hatmaster starts it.")
+        elif not res["already"] and res["changed"]:
+            lead = summary["leaders"][0] if summary["leaders"] else None
+            tail = f" Closest: {lead['display']} needs {lead['to_bingo']}." if lead and lead["to_bingo"] <= 1 else ""
+            await self._say(f"Bingo call: {sq['label']} ({len(res['changed'])} cards marked).{tail}")
+        return out
+
+    async def _pay_winner(self, round_row: dict, card: dict, prize: int) -> bool:
+        eco = self._economy()
+        if eco is None or not getattr(eco, "_connected", False) or prize <= 0:
+            return False
+        try:
+            return bool(await eco._adjust_balance(card["login"], int(prize)))
+        except Exception as e:
+            self._error(f"payout: {e}")
+            return False
+
+    # ── cards ─────────────────────────────────────────────────────────
+
+    async def claim_card(self, login: str, display: str) -> dict:
+        """Free card first, then bought ones at rising prices (Hats via
+        the economy plugin). -> {"ok", "card"|"error", "price"}"""
+        if not self._enabled() or not self.store:
+            return {"ok": False, "error": "Bingo is off right now."}
+        login = (login or "").lower().strip()
+        if not login:
+            return {"ok": False, "error": "Log in with Twitch first."}
+        async with self._lock:
+            r = self.store.current_round()
+            if not r:
+                return {"ok": False, "error": "No bingo round is open. Wait for Hatmaster to start one."}
+            mine = self.store.cards_for(r["id"], login)
+            seq = len(mine) + 1
+            if seq > self.max_cards():
+                return {"ok": False, "error": f"You already have the maximum of {self.max_cards()} cards."}
+            price = next_card_price(seq, self.prices())
+            if price is None:
+                return {"ok": False, "error": "No more cards for sale this round."}
+            if price > 0:
+                eco = self._economy()
+                if eco is None or not getattr(eco, "_connected", False):
+                    return {"ok": False, "error": "Hats are unavailable right now, so extra cards are off."}
+                bal = await eco._get_balance(login)
+                if bal is None or bal < price:
+                    return {"ok": False, "error": f"That card costs {price} Hats; you have {bal or 0}."}
+                if not await eco._adjust_balance(login, -int(price)):
+                    return {"ok": False, "error": "Could not take the Hats. Try again."}
+            squares = make_card(self.pool, card_seed(r["id"], login, seq))
+            card = self.store.add_card(r["id"], login, display, seq, price, squares,
+                                       self.store.called_ids(r["id"]))
+            summary = self.store.summary(r["id"])
+        await self._notify("card_added", {**summary, "login": login, "display": display, "seq": seq,
+                                          "price": price})
+        return {"ok": True, "card": render_card(card, self.pool), "price": price,
+                "next_price": next_card_price(seq + 1, self.prices()) if seq + 1 <= self.max_cards() else None}
+
+    def my_cards(self, login: str) -> dict:
+        r = self.current() if self.store else None
+        if not r or not login:
+            return {"round": None, "cards": [], "next_price": None, "can_claim": False}
+        cards = self.store.cards_for(r["id"], login.lower())
+        seq = len(cards) + 1
+        nxt = next_card_price(seq, self.prices()) if seq <= self.max_cards() else None
+        return {"round": r["id"], "cards": [render_card(c, self.pool) for c in cards],
+                "next_price": nxt, "can_claim": nxt is not None}
+
+    def public_state(self) -> dict:
+        r = self.current() if self.store else None
+        last = self.store.last_round() if self.store else None
+        state = {"enabled": self._enabled(), "open": bool(r), "prices": self.prices(),
+                 "max_cards": self.max_cards(), "round": None, "last": None}
+        if r:
+            state["round"] = self.store.summary(r["id"])
+        elif last:
+            state["last"] = self.store.summary(last["id"])
+        return state
+
+    def status(self) -> dict:
+        s = self.public_state()
+        s["manual_squares"] = self.manual_squares()
+        s["auto_squares"] = [sq for sq in self.pool if sq["source"] == "auto"]
+        s["match"] = {"open": self._match_open, "kills": self._match_kills, "deaths": self._match_deaths,
+                      "gods_this_round": sorted(self._gods_this_round)}
+        s.update(self.stats)
+        return s
+
+    # ── automatic squares ─────────────────────────────────────────────
+
+    async def _auto(self, event_id: str) -> None:
+        if not self.store or not self.store.current_round():
+            return
+        try:
+            await self.fire(event_id, source="auto")
+        except Exception as e:
+            self._error(f"auto {event_id}: {e}")
+
+    async def _on_kill(self, kill_type: str, count: int = 1) -> None:
+        first = self._match_kills == 0
+        self._match_kills += int(count or 1)
+        await self._auto("kill")
+        if first:
+            await self._auto("first_blood")
+        if self._match_kills >= 10:
+            await self._auto("kills_10")
+
+    async def _on_multikill(self, kill_type: str) -> None:
+        sq = MULTIKILL_TYPES.get(str(kill_type))
+        if sq:
+            await self._auto(sq)
+
+    async def _on_death(self, count: int = 1) -> None:
+        self._match_deaths += int(count or 1)
+        await self._auto("death")
+        if self._match_deaths >= 5:
+            await self._auto("deaths_5")
+
+    async def _on_assist(self, count: int = 1) -> None:
+        await self._auto("assist")
+
+    async def _on_overlay_event(self, event_name: str, data: Any) -> None:
+        if event_name == "economy_god_detected":
+            god = (data or {}).get("god") if isinstance(data, dict) else None
+            self._match_open = True
+            self._match_kills = self._match_deaths = 0
+            if god and self.store and self.store.current_round():
+                if god not in self._gods_this_round:
+                    self._gods_this_round.add(god)
+                    if len(self._gods_this_round) > 1:
+                        await self._auto("new_god")
+                else:
+                    pass
+        elif event_name == "match_end_economy":
+            outcome = str((data or {}).get("outcome") or "").lower() if isinstance(data, dict) else ""
+            if outcome in ("win", "won", "victory"):
+                await self._auto("match_win")
+            elif outcome in ("loss", "lost", "defeat"):
+                await self._auto("match_loss")
+            if self._match_open and self._match_deaths == 0:
+                await self._auto("deathless")
+            self._match_open = False
+            self._match_kills = self._match_deaths = 0
+
+    # ── chat commands ─────────────────────────────────────────────────
+
+    async def cmd_bingo(self, message, args: str) -> None:
+        state = self.public_state()
+        if not state["open"]:
+            await self.bot.send_reply(message, "No bingo round is open right now.")
+            return
+        s = state["round"]
+        login = (getattr(getattr(message, "chatter", None), "name", "") or "").lower()
+        mine = self.store.cards_for(s["round_id"], login) if login else []
+        best = min((c["to_bingo"] for c in mine), default=None)
+        you = f" You: {len(mine)} card(s), {best} to go." if mine else " Grab a free card at hatmaster.tv/bingo."
+        await self.bot.send_reply(message, f"Bingo round open: {s['cards']} cards, {s['players']} players, "
+                                           f"pot {s['pot']} Hats, {len(s['calls'])} calls so far.{you}")
+
+    async def cmd_bingocall(self, message, args: str) -> None:
+        event_id = (args or "").strip().lower().split(" ")[0]
+        if not event_id:
+            ids = ", ".join(sq["id"] for sq in self.manual_squares())
+            await self.bot.send_reply(message, f"Usage: !bingocall <square>. Manual squares: {ids}")
+            return
+        res = await self.fire(event_id, source="chat")
+        if not res.get("ok"):
+            await self.bot.send_reply(message, f"bingo: {res.get('error')}")
+
+    async def cmd_bingostart(self, message, args: str) -> None:
+        await self.start_round()
+
+    async def cmd_bingoend(self, message, args: str) -> None:
+        out = await self.end_round("manual")
+        if out is None:
+            await self.bot.send_reply(message, "No open round.")

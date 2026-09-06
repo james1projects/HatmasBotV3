@@ -58,6 +58,9 @@ ICONS = {
     "earpiece": (["EAR", "PIECE"], "util"),
     "vod_review": (["VOD", "REVIEW"], "end"),
     "vod_search": (["VOD", "SEARCH"], "end"),
+    "bingo_start": (["BINGO", "START"], "live"),
+    "bingo_end": (["BINGO", "END"], "live"),
+    "bingo_call": (["BINGO", "CALL"], "live"),
 }
 
 
