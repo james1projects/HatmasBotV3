@@ -111,6 +111,30 @@ Shipping: work is not done while it only exists on disk. `streamdeck/
 ship_it.bat` = test -> commit -> push -> restart the bot; plain
 `restart_bot.bat` reloads committed changes without touching git.
 
+### Someday: other channels (decision of 2026-09-12)
+
+HatmasBot is built for one channel today and that is the priority. But
+someday it may be offered to other Smite 2 streamers, so every new feature
+should be *configurable for another channel* even though nothing is
+generalized yet:
+
+- Read the channel name, owner id, bot name, and site URL from config —
+  never a literal `hatmaster` / `hatmaster.tv` in code or templates.
+- New per-channel state goes behind a config path or channel key, not
+  another global file in `data/` that assumes one broadcaster.
+- Default Hatmaster-only features OFF through the feature toggle system.
+- Flag any new "works for James only" dependency in the feature's docs:
+  MixItUp, local GPU (vodsearch, FindIt, Ollama), unofficial APIs like
+  tracker.gg, Spotify/Google apps still in dev or Testing mode. These are
+  the real blockers to shipping, not the code.
+- Do not refactor existing code for multi-tenancy unless asked.
+
+Context: the 2026-09-12 audit found only ~26 Hatmaster literals in Python
+and the toggles/config already centralized; the site half
+(`public_webserver.py`, one owner id, global `data/`) would need a rewrite
+for per-channel URLs, and the sellable core is the Smite-specific bucket
+(kill/KDA detector, god portrait, god requests, detector profiles).
+
 ---
 
 ## Tone and Style
