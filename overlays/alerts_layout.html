@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Alert box layout</title>
+<link rel="stylesheet" href="/overlays/hatmas_theme.css">
+<link rel="stylesheet" href="/overlays/alerts/alerts.css">
+<style>
+  /* Dashboard page (localhost:8069/alerts/layout): the 1920x1080 scene drawn
+     to scale, one draggable / resizable box per alert kind with a live
+     preview of that kind inside it, and the per-kind settings beside it.
+     Save writes data/alerts.json; the running alert boxes pick it up. */
+  :root { --bg: #202C39; --panel: #1a232e; --panel-hi: #243040; --border: rgba(255,255,255,0.08); --text: #fff; --dim: #AFC2C9; --muted: #8FA6AF;
+    --accent: #DFA06E; --green: #4CC38A; --red: #DF2935; --mono: 'JetBrains Mono', Consolas, monospace; }
+  body { margin: 0; padding: 16px 20px 40px; background: var(--bg); color: var(--text); font-family: 'Inter', 'Segoe UI', sans-serif; font-size: 13px; }
+  h1 { font-family: 'BigNoodleTitling', 'Bebas Neue', 'Inter', sans-serif; text-transform: uppercase; letter-spacing: 0.04em; margin: 0; font-size: 30px; }
+  .top { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-bottom: 12px; }
+  .top .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .btn { font: inherit; font-weight: 600; padding: 7px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text); cursor: pointer; }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); color: #202C39; border-color: transparent; }
+  .btn.small { padding: 4px 8px; font-size: 12px; }
+  .btn.ghost { background: transparent; }
+  .btn[disabled] { opacity: 0.4; cursor: default; }
+  input, select { font: inherit; font-size: 13px; padding: 5px 7px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+  input[type=number] { width: 70px; font-family: var(--mono); text-align: right; }
+  input[type=range] { width: 140px; vertical-align: middle; }
+  .status { color: var(--dim); font-family: var(--mono); font-size: 12px; }
+  .status.dirty { color: var(--accent); }
+  .wrap { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
+  @media (max-width: 1100px) { .wrap { grid-template-columns: 1fr; } }
+  /* the scene */
+  #stage-wrap { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #0d141c; border: 1px solid var(--border); border-radius: 6px; overflow: hidden;
+    background-image: linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px); background-size: 5% 8.888%; }
+  #stage { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; }
+  /* the real alert box, scaled behind the editor boxes, so Test plays in place */
+  #live { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; border: 0; pointer-events: none; background: transparent; }
+  #live.off { display: none; }
+  .kbox { position: absolute; border: 1px dashed rgba(223,160,110,0.6); background: rgba(223,160,110,0.06); cursor: move; display: flex; overflow: hidden; }
+  /* the eye: editor-only show / hide, like the OBS sources list; nothing to do with the stream */
+  .kinds .eye { flex: none; width: 22px; height: 22px; border: 0; background: transparent; color: var(--dim); cursor: pointer; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; }
+  .kinds .eye:hover { background: var(--panel-hi); color: var(--text); }
+  .kinds .eye.closed { color: var(--muted); opacity: 0.6; }
+  .kinds .eye svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .kinds .krow { display: flex; align-items: center; gap: 4px; }
+  .kinds .krow button[data-pick] { flex: 1; min-width: 0; }
+  .kinds .krow.hidden-ed button[data-pick] { opacity: 0.5; }
+  .kbox.off { border-color: rgba(175,194,201,0.35); background: rgba(175,194,201,0.04); }
+  .kbox.off .preview { opacity: 0.35; }
+  .kbox.sel { border: 2px solid var(--accent); background: rgba(223,160,110,0.12); z-index: 5; }
+  .kbox .tag { position: absolute; left: 0; top: 0; font-size: 22px; font-family: var(--mono); padding: 4px 10px; background: rgba(32,44,57,0.9); color: var(--accent); pointer-events: none; z-index: 2; }
+  .kbox.off .tag { color: var(--dim); }
+  .kbox .preview { width: 100%; height: 100%; display: flex; pointer-events: none; }
+  .kbox .grip { position: absolute; right: 0; bottom: 0; width: 36px; height: 36px; cursor: nwse-resize; background: linear-gradient(135deg, transparent 50%, var(--accent) 50%); opacity: 0.8; z-index: 3; }
+  .a-top-left { justify-content: flex-start; align-items: flex-start; } .a-top-center { justify-content: center; align-items: flex-start; } .a-top-right { justify-content: flex-end; align-items: flex-start; }
+  .a-center-left { justify-content: flex-start; align-items: center; } .a-center { justify-content: center; align-items: center; } .a-center-right { justify-content: flex-end; align-items: center; }
+  .a-bottom-left { justify-content: flex-start; align-items: flex-end; } .a-bottom-center { justify-content: center; align-items: flex-end; } .a-bottom-right { justify-content: flex-end; align-items: flex-end; }
+  /* side panel */
+  .side { display: flex; flex-direction: column; gap: 12px; }
+  .box { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+  .box h2 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--dim); }
+  .kinds { display: flex; flex-direction: column; gap: 3px; max-height: 300px; overflow: auto; }
+  .kinds button { text-align: left; font: inherit; padding: 5px 8px; border-radius: 4px; border: 1px solid transparent; background: transparent; color: var(--text); cursor: pointer; display: flex; justify-content: space-between; gap: 8px; }
+  .kinds button:hover { border-color: var(--border); }
+  .kinds button.sel { background: var(--panel-hi); border-color: var(--accent); }
+  .kinds button .lane { color: var(--muted); font-family: var(--mono); font-size: 11px; }
+  .kinds button.off { color: var(--muted); }
+  .field { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 4px 0; }
+  .field label { color: var(--dim); }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; }
+  .row2 .field { padding: 2px 0; }
+  .recent { font-size: 12px; max-height: 220px; overflow: auto; }
+  .recent div { display: flex; justify-content: space-between; gap: 6px; padding: 3px 0; border-bottom: 1px solid var(--border); color: var(--dim); }
+  .recent b { color: var(--text); font-weight: 600; }
+  .recent .t { font-family: var(--mono); color: var(--muted); }
+  .hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+  .toast { position: fixed; right: 18px; bottom: 18px; background: var(--panel-hi); border: 1px solid var(--accent); border-radius: 8px; padding: 10px 14px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.show { opacity: 1; } .toast.bad { border-color: var(--red); }
+</style>
+</head>
+<body>
+  <div class="top">
+    <h1>Alert box layout</h1>
+    <label>Box <select id="box"></select></label>
+    <button type="button" class="btn small ghost" id="add-box">+ box</button>
+    <button type="button" class="btn small ghost" id="del-box" title="remove this box (not main)">remove box</button>
+    <span class="status" id="status">loading</span>
+    <div class="right">
+      <label><input type="checkbox" id="show-off" checked> show disabled kinds</label>
+      <label title="the real alert box, scaled behind the editor, so Test plays in place"><input type="checkbox" id="show-live" checked> live preview</label>
+      <label title="a screenshot of your scene, drawn behind the layout for reference" class="btn small ghost" style="cursor:pointer">scene screenshot<input type="file" id="bg-file" accept="image/png,image/jpeg,image/webp" hidden></label>
+      <button type="button" class="btn small ghost" id="bg-clear" title="remove the scene screenshot">clear</button>
+      <label title="master volume for this box: every kind's slider is scaled by it">box volume <input type="range" id="box-vol" min="0" max="100" value="100" style="width:100px"> <span id="box-vol-val" style="font-family:var(--mono)">100</span></label>
+      <button type="button" class="btn" id="test-all">Test enabled</button>
+      <button type="button" class="btn primary" id="save">Save</button>
+    </div>
+  </div>
+  <div class="wrap">
+    <div>
+      <div id="stage-wrap"><iframe id="live" title="live alert box" src="about:blank"></iframe><div id="stage"></div></div>
+      <p class="hint">Drag a box to move it, the corner to resize. Arrow keys nudge the selected kind (Shift = 10 px). The eye beside a kind hides it here only (handy when two kinds share a spot); the checkbox in Selected is what enables it on stream. Everything is in 1920x1080 scene pixels; the source URL is <code id="src-url"></code></p>
+    </div>
+    <div class="side">
+      <div class="box"><h2>Kinds</h2><div class="kinds" id="kinds"></div></div>
+      <div class="box" id="edit"><h2>Selected</h2><div id="fields" class="hint">Pick a kind.</div></div>
+      <div class="box"><h2>Lanes <span class="hint" style="display:inline">(queues; kinds in one lane play one at a time)</span></h2><div id="lanes"></div></div>
+      <div class="box"><h2>Recent <button type="button" class="btn small ghost" id="refresh-recent">refresh</button></h2><div class="recent" id="recent"></div></div>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <script src="/overlays/alerts/alerts_core.js"></script>
+  <script src="/overlays/alerts/kinds/gamble.js"></script>
+  <script src="/overlays/alerts/kinds/tts.js"></script>
+  <script src="/overlays/alerts/kinds/voiceline.js"></script>
+  <script src="/overlays/alerts/kinds/cocaster.js"></script>
+  <script src="/overlays/alerts/kinds/dividend.js"></script>
+  <script src="/overlays/alerts/kinds/match_end.js"></script>
+  <script src="/overlays/alerts/kinds/leaderboard.js"></script>
+  <script src="/overlays/alerts/kinds/tradefeed.js"></script>
+  <script src="/overlays/alerts/kinds/tradefeed_rolling.js"></script>
+  <script src="/overlays/alerts/kinds/portfolio.js"></script>
+  <script src="/overlays/alerts/kinds/spin.js"></script>
+  <script src="/overlays/alerts/kinds/bingo_open.js"></script>
+  <script src="/overlays/alerts/kinds/bingo_call.js"></script>
+  <script src="/overlays/alerts/kinds/bingo_claim.js"></script>
+  <script src="/overlays/alerts/kinds/bingo_closed.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const CW = 1920, CH = 1080;
+    let config = null, catalog = [], anchors = [], box = new URLSearchParams(location.search).get('box') || 'main';
+    let selected = null, dirty = false, scale = 0.5;
+    const samples = {};
+    const hiddenHere = new Set();     // kinds hidden in the editor only (the eye); never saved
+    const EYE_OPEN = '<svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+    const EYE_SHUT = '<svg viewBox="0 0 24 24"><path d="M17.9 17.9A10.9 10.9 0 0 1 12 19c-7 0-11-7-11-7a20 20 0 0 1 5.1-5.9M9.9 4.2A10.9 10.9 0 0 1 12 5c7 0 11 7 11 7a20 20 0 0 1-3 3.9"/><path d="M1 1l22 22"/></svg>';
+    function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+    let toastTimer;
+    function toast(text, bad) { const t = $('toast'); t.textContent = text; t.className = 'toast show' + (bad ? ' bad' : ''); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = 'toast', 2500); }
+    async function api(path, method, body) {
+      const opts = {method: method || 'GET', cache: 'no-store'};
+      if (body) { opts.headers = {'Content-Type': 'application/json'}; opts.body = JSON.stringify(body); }
+      const r = await fetch(path, opts); let j; try { j = await r.json(); } catch (_) { j = {ok: false, error: 'HTTP ' + r.status}; }
+      return j;
+    }
+    function kcfg(kind) { return config.boxes[box].kinds[kind]; }
+    function setDirty(v) { dirty = v; $('status').textContent = v ? 'unsaved changes' : 'saved'; $('status').className = 'status' + (v ? ' dirty' : ''); }
+
+    // ── stage ──
+    function fitStage() {
+      const wrap = $('stage-wrap'); scale = wrap.clientWidth / CW;
+      $('stage').style.transform = 'scale(' + scale + ')';
+      $('live').style.transform = 'scale(' + scale + ')';
+    }
+    function loadBackground(has) {
+      const wrap = $('stage-wrap');
+      wrap.style.backgroundImage = has ? "url('/api/alerts/background?t=" + Date.now() + "')" : '';
+      wrap.style.backgroundSize = has ? '100% 100%' : '';
+      $('bg-clear').disabled = !has;
+    }
+    function syncBoxVolume() {
+      const v = (config.boxes[box] && config.boxes[box].volume != null) ? config.boxes[box].volume : 100;
+      $('box-vol').value = v; $('box-vol-val').textContent = v;
+    }
+    function loadLive() {
+      const want = '/overlay/alerts?box=' + encodeURIComponent(box);
+      const live = $('live');
+      live.classList.toggle('off', !$('show-live').checked);
+      if ($('show-live').checked && !live.getAttribute('src').endsWith(want)) live.src = want;
+    }
+    function renderStage() {
+      const stage = $('stage'); stage.innerHTML = '';
+      const showOff = $('show-off').checked;
+      for (const k of catalog) {
+        const c = kcfg(k.kind);
+        if (!c.enabled && !showOff) continue;
+        if (hiddenHere.has(k.kind)) continue;
+        const el = document.createElement('div');
+        el.className = 'kbox' + (c.enabled ? '' : ' off') + (selected === k.kind ? ' sel' : '');
+        el.dataset.kind = k.kind;
+        el.style.left = c.x + 'px'; el.style.top = c.y + 'px'; el.style.width = c.w + 'px'; el.style.height = c.h + 'px';
+        el.innerHTML = '<div class="tag">' + esc(k.label) + '</div><div class="preview a-' + c.anchor + '"></div><div class="grip"></div>';
+        stage.appendChild(el);
+        try { HatmasAlerts.preview(k.kind, el.querySelector('.preview'), samples[k.kind], {width: c.w, height: c.h}); } catch (e) { console.warn(e); }
+      }
+    }
+    function renderKinds() {
+      $('kinds').innerHTML = catalog.map((k) => { const c = kcfg(k.kind), hid = hiddenHere.has(k.kind);
+        return `<div class="krow ${hid ? 'hidden-ed' : ''}"><button type="button" class="eye ${hid ? 'closed' : ''}" data-eye="${k.kind}" title="${hid ? 'show in the editor' : 'hide in the editor (not on stream)'}">${hid ? EYE_SHUT : EYE_OPEN}</button>` +
+          `<button type="button" data-pick="${k.kind}" class="${selected === k.kind ? 'sel' : ''} ${c.enabled ? '' : 'off'}"><span>${c.enabled ? '' : '&#9675; '}${esc(k.label)}</span><span class="lane">${esc(c.lane)}</span></button></div>`; }).join('');
+    }
+    function renderFields() {
+      if (!selected) { $('fields').innerHTML = '<span class="hint">Pick a kind.</span>'; return; }
+      const k = catalog.find((x) => x.kind === selected), c = kcfg(selected);
+      const laneList = Object.keys(config.lanes);
+      $('fields').innerHTML = `
+        <div class="field"><b>${esc(k.label)}</b><span class="hint" style="margin:0">${esc(k.events.join(', '))}</span></div>
+        <div class="field"><label>Enabled</label><input type="checkbox" data-f="enabled" ${c.enabled ? 'checked' : ''}></div>
+        <div class="field"><label>Lane</label><input list="lanes-list" data-f="lane" value="${esc(c.lane)}" style="width:120px"><datalist id="lanes-list">${laneList.map((l) => `<option value="${esc(l)}">`).join('')}</datalist></div>
+        <div class="field"><label>Max seconds</label><input type="number" data-f="duration" min="1" max="600" value="${c.duration}"></div>
+        <div class="field"><label>Sound</label><input type="checkbox" data-f="sound" ${c.sound ? 'checked' : ''}></div>
+        <div class="field"><label>Volume</label><span><input type="range" data-f="volume" min="0" max="100" value="${c.volume}"> <span id="vol-val" style="font-family:var(--mono)">${c.volume}</span></span></div>
+        <div class="field"><label>Anchor</label><select data-f="anchor">${anchors.map((a) => `<option ${a === c.anchor ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
+        <div class="row2">
+          <div class="field"><label>x</label><input type="number" data-f="x" min="0" max="${CW}" value="${c.x}"></div>
+          <div class="field"><label>y</label><input type="number" data-f="y" min="0" max="${CH}" value="${c.y}"></div>
+          <div class="field"><label>w</label><input type="number" data-f="w" min="40" max="${CW}" value="${c.w}"></div>
+          <div class="field"><label>h</label><input type="number" data-f="h" min="30" max="${CH}" value="${c.h}"></div>
+        </div>
+        <div class="field" style="margin-top:6px"><button type="button" class="btn small" id="test-one">Test this kind</button><button type="button" class="btn small ghost" id="reset-one">Reset to default</button></div>
+        ${k.legacy ? `<p class="hint">Replaces the legacy source <code>${esc(k.legacy)}</code>: once this is enabled, remove that source in OBS.</p>` : ''}`;
+    }
+    function renderLanes() {
+      $('lanes').innerHTML = Object.entries(config.lanes).map(([name, l]) =>
+        `<div class="field"><label>${esc(name)}</label><span>queue up to <input type="number" data-lane="${esc(name)}" min="1" max="200" value="${l.max_queue}" style="width:56px"></span></div>`).join('') +
+        `<div class="field"><input id="new-lane" placeholder="new lane name" style="width:140px"><button type="button" class="btn small" id="add-lane">Add</button></div>`;
+    }
+    async function renderRecent() {
+      const j = await api('/api/alerts/recent?box=' + encodeURIComponent(box));
+      const rows = (j.recent || []);
+      $('recent').innerHTML = rows.length ? rows.map((a) => `<div><span><b>${esc(a.kind)}</b> ${esc(a.summary)}${a.test ? ' (test)' : ''}</span><span><span class="t">${new Date(a.ts * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}</span> <button type="button" class="btn small ghost" data-replay="${a.id}">replay</button></span></div>`).join('') : '<span class="hint">Nothing yet. Test a kind.</span>';
+    }
+    function renderAll() { renderKinds(); renderStage(); renderFields(); renderLanes(); }
+
+    // ── load / save ──
+    async function load() {
+      const j = await api('/api/alerts/config');
+      if (!j.ok) { $('status').textContent = 'bot unreachable'; return; }
+      config = j.config; catalog = j.kinds; anchors = j.anchors;
+      catalog.forEach((k) => samples[k.kind] = k.sample);
+      if (!config.boxes[box]) box = 'main';
+      $('box').innerHTML = Object.keys(config.boxes).map((b) => `<option ${b === box ? 'selected' : ''}>${esc(b)}</option>`).join('');
+      $('src-url').textContent = location.origin + '/overlay/alerts?box=' + box;
+      fitStage(); loadLive(); loadBackground(!!(j.status && j.status.background)); syncBoxVolume(); renderAll(); renderRecent(); setDirty(false);
+    }
+    $('box-vol').addEventListener('input', () => { config.boxes[box].volume = Number($('box-vol').value); $('box-vol-val').textContent = config.boxes[box].volume; setDirty(true); });
+    $('bg-file').addEventListener('change', async () => {
+      const f = $('bg-file').files[0]; if (!f) return;
+      const fd = new FormData(); fd.append('image', f, f.name);
+      const r = await fetch('/api/alerts/background', {method: 'POST', body: fd}); let j; try { j = await r.json(); } catch (_) { j = {ok: false, error: 'HTTP ' + r.status}; }
+      if (j.ok) { toast('scene screenshot saved'); loadBackground(true); } else toast('upload failed: ' + j.error, true);
+      $('bg-file').value = '';
+    });
+    $('bg-clear').addEventListener('click', async () => { const j = await api('/api/alerts/background/clear', 'POST'); if (j.ok) { toast('scene screenshot removed'); loadBackground(false); } });
+    async function save() {
+      const j = await api('/api/alerts/config', 'POST', {config});
+      if (j.ok) { config = j.config; toast('saved; live alert boxes updated'); setDirty(false); renderAll(); } else toast('save failed: ' + j.error, true);
+    }
+
+    // ── interactions ──
+    $('box').addEventListener('change', () => { box = $('box').value; selected = null; history.replaceState(null, '', '?box=' + box); $('src-url').textContent = location.origin + '/overlay/alerts?box=' + box; loadLive(); syncBoxVolume(); renderAll(); renderRecent(); });
+    $('show-live').addEventListener('change', loadLive);
+    $('del-box').addEventListener('click', () => {
+      if (box === 'main') return toast('main cannot be removed', true);
+      if (!confirm(`Remove box "${box}" from the config? (Save to make it final.)`)) return;
+      delete config.boxes[box]; box = 'main'; selected = null; setDirty(true);
+      $('box').innerHTML = Object.keys(config.boxes).map((b) => `<option ${b === box ? 'selected' : ''}>${esc(b)}</option>`).join('');
+      history.replaceState(null, '', '?box=' + box); $('src-url').textContent = location.origin + '/overlay/alerts?box=' + box; loadLive(); renderAll();
+    });
+    $('add-box').addEventListener('click', () => {
+      const name = (prompt('Name for the new box (letters, digits, - or _):') || '').trim().toLowerCase();
+      if (!name || config.boxes[name]) return;
+      config.boxes[name] = JSON.parse(JSON.stringify(config.boxes.main));
+      Object.values(config.boxes[name].kinds).forEach((k) => k.enabled = false);
+      box = name; selected = null; setDirty(true);
+      $('box').innerHTML = Object.keys(config.boxes).map((b) => `<option ${b === box ? 'selected' : ''}>${esc(b)}</option>`).join('');
+      renderAll();
+    });
+    $('save').addEventListener('click', save);
+    $('show-off').addEventListener('change', renderStage);
+    $('test-all').addEventListener('click', async () => {
+      const on = catalog.filter((k) => kcfg(k.kind).enabled);
+      if (!on.length) return toast('no kinds enabled in this box', true);
+      for (const k of on) await api('/api/alerts/test?kind=' + k.kind + '&box=' + box, 'POST');
+      toast('tested ' + on.length + ' kinds'); renderRecent();
+    });
+    $('refresh-recent').addEventListener('click', renderRecent);
+    document.body.addEventListener('click', async (e) => {
+      const eye = e.target.closest('[data-eye]');
+      if (eye) { const k = eye.dataset.eye; if (hiddenHere.has(k)) hiddenHere.delete(k); else hiddenHere.add(k); renderKinds(); renderStage(); return; }
+      const pick = e.target.closest('[data-pick]'); if (pick) { selected = pick.dataset.pick; hiddenHere.delete(selected); renderAll(); return; }
+      if (e.target.id === 'test-one' && selected) { const r = await api('/api/alerts/test?kind=' + selected + '&box=' + box, 'POST'); toast(r.ok ? 'test sent' + (r.clients ? '' : ' (no alert box connected)') : r.error, !r.ok); renderRecent(); return; }
+      if (e.target.id === 'reset-one' && selected) { Object.assign(kcfg(selected), catalog.find((k) => k.kind === selected).defaults); setDirty(true); renderAll(); return; }
+      if (e.target.id === 'add-lane') { const n = ($('new-lane').value || '').trim().toLowerCase().replace(/[^a-z0-9_]/g, ''); if (n && !config.lanes[n]) { config.lanes[n] = {max_queue: 10}; setDirty(true); renderLanes(); renderFields(); } return; }
+      const rp = e.target.closest('[data-replay]'); if (rp) { const r = await api('/api/alerts/replay?id=' + rp.dataset.replay + '&box=' + box, 'POST'); toast(r.ok ? 'replayed' : r.error, !r.ok); }
+    });
+    $('edit').addEventListener('input', (e) => {
+      const f = e.target.dataset.f; if (!f || !selected) return;
+      const c = kcfg(selected);
+      if (f === 'enabled' || f === 'sound') c[f] = e.target.checked;
+      else if (f === 'lane' || f === 'anchor') c[f] = e.target.value;
+      else { const v = Number(e.target.value); if (Number.isFinite(v)) c[f] = v; }
+      if (f === 'volume') $('vol-val').textContent = c.volume;
+      if (f === 'x' || f === 'y' || f === 'w' || f === 'h') clampBox(c);
+      setDirty(true);
+      if (f === 'enabled' || f === 'lane') renderKinds();
+      renderStage();
+      if (f === 'lane' && c.lane && !config.lanes[c.lane]) { /* lane created on save */ }
+    });
+    $('lanes').addEventListener('input', (e) => { const l = e.target.dataset.lane; if (l) { config.lanes[l].max_queue = Number(e.target.value) || 10; setDirty(true); } });
+    function clampBox(c) { c.w = Math.max(40, Math.min(CW, c.w)); c.h = Math.max(30, Math.min(CH, c.h)); c.x = Math.max(0, Math.min(CW - c.w, c.x)); c.y = Math.max(0, Math.min(CH - c.h, c.y)); }
+    function snap(v) { return Math.round(v / 10) * 10; }
+
+    // drag + resize on the stage (pointer events, scene coordinates = screen / scale)
+    let drag = null;
+    $('stage').addEventListener('pointerdown', (e) => {
+      const kb = e.target.closest('.kbox'); if (!kb) return;
+      selected = kb.dataset.kind; renderKinds(); renderFields();
+      document.querySelectorAll('.kbox.sel').forEach((x) => x.classList.remove('sel')); kb.classList.add('sel');
+      const c = kcfg(selected);
+      drag = {kind: selected, resize: e.target.classList.contains('grip'), sx: e.clientX, sy: e.clientY, x: c.x, y: c.y, w: c.w, h: c.h, el: kb};
+      kb.setPointerCapture(e.pointerId); e.preventDefault();
+    });
+    $('stage').addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      const c = kcfg(drag.kind), dx = (e.clientX - drag.sx) / scale, dy = (e.clientY - drag.sy) / scale;
+      if (drag.resize) { c.w = snap(drag.w + dx); c.h = snap(drag.h + dy); } else { c.x = snap(drag.x + dx); c.y = snap(drag.y + dy); }
+      clampBox(c);
+      drag.el.style.left = c.x + 'px'; drag.el.style.top = c.y + 'px'; drag.el.style.width = c.w + 'px'; drag.el.style.height = c.h + 'px';
+      ['x', 'y', 'w', 'h'].forEach((f) => { const i = $('fields').querySelector(`[data-f="${f}"]`); if (i) i.value = c[f]; });
+      setDirty(true);
+    });
+    const endDrag = () => { if (drag) { drag = null; renderStage(); } };
+    $('stage').addEventListener('pointerup', endDrag); $('stage').addEventListener('pointercancel', endDrag);
+    document.addEventListener('keydown', (e) => {
+      if (!selected || /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;
+      const step = e.shiftKey ? 10 : 1, c = kcfg(selected);
+      if (e.key === 'ArrowLeft') c.x -= step; else if (e.key === 'ArrowRight') c.x += step; else if (e.key === 'ArrowUp') c.y -= step; else if (e.key === 'ArrowDown') c.y += step; else return;
+      e.preventDefault(); clampBox(c); setDirty(true); renderStage(); renderFields();
+    });
+    window.addEventListener('resize', () => { fitStage(); });
+    window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+    load();
+  </script>
+</body>
+</html>

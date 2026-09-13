@@ -55,6 +55,7 @@
      *   - onShow(data) - callback when overlay should be shown
      *   - onUpdate(data) - callback for live data updates
      *   - onHide() - callback when overlay should be hidden
+ *   - onAction(action, data) - any other action pushed with OverlayManager.broadcast
      *   - showClass - CSS class to add for visibility (default: "visible")
      *   - container - CSS selector or element for the container (default: first child of body)
      */
@@ -64,6 +65,7 @@
         onShow: options.onShow || (() => {}),
         onUpdate: options.onUpdate || null,
         onHide: options.onHide || null,
+        onAction: options.onAction || null,   // (action, data) for actions other than show/hide/update
         showClass: options.showClass || 'visible',
         container: options.container || null
       };
@@ -125,7 +127,12 @@
         this.ws = null;
       }
 
-      const wsUrl = `ws://localhost:8069/ws/overlays?name=${encodeURIComponent(this.overlayName)}`;
+      // The dashboard (8069) normally serves the page; a dev host (for
+      // example tools/bingo_devserver.py on 8088) serves the same files,
+      // so connect back to wherever the page came from. file:// falls
+      // back to the dashboard.
+      const host = (location.protocol.startsWith('http') && location.host) ? location.host : 'localhost:8069';
+      const wsUrl = `ws://${host}/ws/overlays?name=${encodeURIComponent(this.overlayName)}`;
 
       try {
         const ws = new WebSocket(wsUrl);
@@ -190,7 +197,12 @@
             this._handleUpdate(data);
             break;
           default:
-            this._log(`Unknown action: ${action}`);
+            if (this.options.onAction) {
+              try { this.options.onAction(action, data); }
+              catch (err) { this._log(`Error in onAction callback: ${err.message}`); }
+            } else {
+              this._log(`Unknown action: ${action}`);
+            }
         }
       } catch (err) {
         this._log(`Error parsing message: ${err.message}`);

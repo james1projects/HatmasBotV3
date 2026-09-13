@@ -579,6 +579,14 @@ BINGO_POT_SHARE = 0.5
 BINGO_POOL_FILE = DATA_DIR / "bingo" / "pool.json"
 BINGO_DB = DATA_DIR / "bingo.db"
 
+# === HATMASTER ALERT BOX (core/alert_box.py — docs/ALERT_BOX.md) ===
+# One full-canvas OBS source (localhost:8069/overlay/alerts?box=main) that
+# plays gamble / TTS / voicelines / economy / spin / bingo alerts as kinds,
+# each with its own place on the 1920x1080 scene, lane (queue), duration,
+# sound and volume. Edited on the dashboard at /alerts/layout; the file is
+# created with defaults (every migrated kind off) on first run.
+ALERTS_FILE = DATA_DIR / "alerts.json"
+
 # === FEATURE TOGGLES ===
 # Defaults only. The dashboard's features card flips these live, and
 # flips persist across restarts in data/feature_overrides.json (sparse:

@@ -1,0 +1,42 @@
+/* Shared styling for Hatmaster Alert Box kinds (overlays/alerts/*.js).
+   Loaded by overlays/alerts.html (the OBS source) and by
+   overlays/alerts_layout.html (the editor's previews), so a kind looks the
+   same in both. Palette and fonts come from hatmas_theme.css (--hm-*). */
+
+.hm-alert-panel {
+  background: var(--hm-bg, rgba(32, 44, 57, 0.94));
+  color: var(--hm-text, #fff);
+  border-radius: 8px;
+  overflow: hidden;
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
+  min-width: 260px;
+}
+.hm-alert-panel .hm-alert-head {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 10px 14px;
+  background: var(--hm-gold, #DFA06E); color: #202C39;
+  font-family: 'BigNoodleTitling', 'Bebas Neue', 'Inter', sans-serif;
+  font-size: 26px; letter-spacing: 0.06em; text-transform: uppercase; line-height: 1;
+}
+.hm-alert-panel .hm-alert-head .hm-alert-sub { font-size: 18px; font-family: 'JetBrains Mono', Consolas, monospace; letter-spacing: 0; text-transform: none; }
+.hm-alert-panel .hm-alert-body { padding: 12px 14px; font-size: 20px; line-height: 1.25; }
+.hm-alert-panel .hm-alert-body small {
+  display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--hm-text-secondary, #AFC2C9); margin-bottom: 4px;
+}
+.hm-alert-panel .hm-alert-body b { color: var(--hm-gold-bright, #E8B583); font-weight: 700; }
+.hm-alert-panel .hm-alert-row {
+  display: flex; justify-content: space-between; padding: 8px 14px; font-size: 15px;
+  border-top: 1px solid var(--hm-border-subtle, rgba(223, 160, 110, 0.08));
+}
+.hm-alert-panel .hm-alert-row .k { color: var(--hm-text-secondary, #AFC2C9); }
+.hm-alert-panel .hm-alert-row .v { font-family: 'JetBrains Mono', Consolas, monospace; }
+.hm-alert-panel.is-win .hm-alert-head { background: var(--hm-gold-bright, #E8B583); }
+.hm-alert-panel.is-big { min-width: 420px; }
+.hm-alert-panel.is-big .hm-alert-head { font-size: 40px; padding: 14px 18px; }
+.hm-alert-panel.is-big .hm-alert-body { font-size: 26px; padding: 16px 18px; }
+
+/* the generic fallback card used when a kind has no renderer yet */
+.hm-alert-fallback { font-family: 'JetBrains Mono', Consolas, monospace; font-size: 13px; white-space: pre-wrap; color: var(--hm-text-secondary, #AFC2C9); }

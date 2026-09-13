@@ -109,7 +109,12 @@ often (no_mana, blames_jungle, water, ...) by putting the id in the Open
 action's arguments; the full list with buttons lives on the dashboard at
 `http://localhost:8069/bingo`, handy on the second monitor. That page also
 undoes a mis-pressed call, forces an auto square the detector missed, edits the
-square pool (add your own, change weights) and shows past rounds.
+square pool (add your own, change weights) and shows past rounds. A completed
+line does not win by itself: the viewer presses Bingo! on hatmaster.tv/bingo.
+
+The Hatmaster Alert Box (`docs/ALERT_BOX.md`) can be tested from a key too:
+`http://localhost:8069/api/alerts/test?kind=gamble&box=main` (POST or GET) fires a
+sample of that kind at the box; `/sources` lists every kind and source.
 
 VOD REVIEW / VOD SEARCH open the Ask the VOD pages in the default browser:
 from the bot's public server (localhost:8070) when the bot is up, otherwise

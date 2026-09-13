@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hatmaster Alert Box</title>
+<link rel="stylesheet" href="/overlays/hatmas_theme.css">
+<link rel="stylesheet" href="/overlays/alerts/alerts.css">
+<style>
+  /* The OBS source: a transparent 1920x1080 canvas. OBS scales the
+     source to the scene, so placements in data/alerts.json are in
+     canvas pixels. Each alert is an absolutely placed box; the anchor
+     decides where the kind's content sits inside it when smaller. */
+  html, body { margin: 0; background: transparent; overflow: hidden; }
+  body { width: 1920px; height: 1080px; position: relative; font-family: 'Inter', 'Segoe UI', sans-serif; user-select: none; }
+  /* overlay_client.js keeps its container at opacity 0 until a "show"; the box is always on */
+  #canvas, #canvas[data-hatmas-overlay] { position: absolute; inset: 0; opacity: 1 !important; display: block !important; }
+  .alert { position: absolute; display: flex; overflow: hidden; opacity: 0; transform: translateY(8px);
+    transition: opacity 0.3s ease, transform 0.3s ease; pointer-events: none; }
+  .alert.in { opacity: 1; transform: translateY(0); }
+  .alert.out { opacity: 0; transform: translateY(-6px); }
+  .alert-body { max-width: 100%; max-height: 100%; }
+  /* anchors */
+  .a-top-left { justify-content: flex-start; align-items: flex-start; }
+  .a-top-center { justify-content: center; align-items: flex-start; }
+  .a-top-right { justify-content: flex-end; align-items: flex-start; }
+  .a-center-left { justify-content: flex-start; align-items: center; }
+  .a-center { justify-content: center; align-items: center; }
+  .a-center-right { justify-content: flex-end; align-items: center; }
+  .a-bottom-left { justify-content: flex-start; align-items: flex-end; }
+  .a-bottom-center { justify-content: center; align-items: flex-end; }
+  .a-bottom-right { justify-content: flex-end; align-items: flex-end; }
+</style>
+</head>
+<body>
+  <div id="canvas"></div>
+  <script src="/overlays/overlay_client.js"></script>
+  <script src="/overlays/alerts/alerts_core.js"></script>
+  <!-- one renderer per kind; a missing file just means that kind shows the fallback card -->
+  <script src="/overlays/alerts/kinds/gamble.js"></script>
+  <script src="/overlays/alerts/kinds/tts.js"></script>
+  <script src="/overlays/alerts/kinds/voiceline.js"></script>
+  <script src="/overlays/alerts/kinds/cocaster.js"></script>
+  <script src="/overlays/alerts/kinds/dividend.js"></script>
+  <script src="/overlays/alerts/kinds/match_end.js"></script>
+  <script src="/overlays/alerts/kinds/leaderboard.js"></script>
+  <script src="/overlays/alerts/kinds/tradefeed.js"></script>
+  <script src="/overlays/alerts/kinds/tradefeed_rolling.js"></script>
+  <script src="/overlays/alerts/kinds/portfolio.js"></script>
+  <script src="/overlays/alerts/kinds/spin.js"></script>
+  <script src="/overlays/alerts/kinds/bingo_open.js"></script>
+  <script src="/overlays/alerts/kinds/bingo_call.js"></script>
+  <script src="/overlays/alerts/kinds/bingo_claim.js"></script>
+  <script src="/overlays/alerts/kinds/bingo_closed.js"></script>
+  <script>
+    // ── the player: lanes are queues, alerts carry their own placement ──
+    (function () {
+      const box = new URLSearchParams(location.search).get('box') || 'main';
+      const canvas = document.getElementById('canvas');
+      const queues = {};      // lane -> [alert]
+      const playing = {};     // lane -> {alert, el, timer, cleanup}
+      let lanes = {};         // lane -> {max_queue}
+
+      function maxQueue(lane) { return (lanes[lane] && lanes[lane].max_queue) || 10; }
+      function ctxFor(alert, p, done) {
+        return {box, kind: alert.kind, duration: alert.duration, sound: !!alert.sound,
+                volume: (alert.volume == null ? 100 : alert.volume) / 100, width: p.w, height: p.h,
+                preview: false, done: done || function () {}};
+      }
+
+      function enqueue(alert) {
+        const lane = alert.lane || 'default';
+        const cur = playing[lane];
+        if (cur && !cur.ended && cur.alert.kind === alert.kind && HatmasAlerts.isSticky(alert.kind)) {
+          // a sticky kind already on screen: feed it the new data and restart its timer
+          try { HatmasAlerts.update(alert.kind, cur.body, alert.data, ctxFor(alert, cur.alert.placement)); } catch (err) { console.error('[alerts] update ' + alert.kind + ' failed', err); }
+          clearTimeout(cur.timer);
+          cur.timer = setTimeout(cur.end, Math.max(1, alert.duration || 8) * 1000);
+          return;
+        }
+        const q = queues[lane] || (queues[lane] = []);
+        q.push(alert);
+        while (q.length > maxQueue(lane)) q.shift();     // drop the oldest waiting alert
+        if (!playing[lane]) next(lane);
+      }
+
+      function next(lane) {
+        const q = queues[lane] || [];
+        const alert = q.shift();
+        if (!alert) { delete playing[lane]; return; }
+        play(alert);
+      }
+
+      function play(alert) {
+        const lane = alert.lane || 'default';
+        const p = alert.placement || {x: 0, y: 0, w: 480, h: 200, anchor: 'top-left'};
+        const el = document.createElement('div');
+        el.className = 'alert a-' + (p.anchor || 'top-left');
+        el.style.left = p.x + 'px'; el.style.top = p.y + 'px';
+        el.style.width = p.w + 'px'; el.style.height = p.h + 'px';
+        const body = document.createElement('div');
+        body.className = 'alert-body';
+        el.appendChild(body);
+        canvas.appendChild(el);
+        const entry = {alert, el, body, timer: null, cleanup: null, ended: false, end: null};
+        playing[lane] = entry;
+        const end = entry.end = () => {
+          if (entry.ended) return;
+          entry.ended = true;
+          clearTimeout(entry.timer);
+          try { if (typeof entry.cleanup === 'function') entry.cleanup(); } catch (_) {}
+          el.classList.remove('in'); el.classList.add('out');
+          setTimeout(() => { el.remove(); next(lane); }, 350);
+        };
+        entry.timer = setTimeout(end, Math.max(1, alert.duration || 8) * 1000);
+        try {
+          entry.cleanup = HatmasAlerts.render(alert.kind, body, alert.data, ctxFor(alert, p, end));
+        } catch (err) {
+          console.error('[alerts] render ' + alert.kind + ' failed', err);
+        }
+        requestAnimationFrame(() => el.classList.add('in'));
+      }
+
+      HatmasOverlay.connect('alerts:' + box, {
+        container: '#canvas',
+        onShow() {}, onHide() {}, onUpdate() {},
+        onAction(action, data) {
+          if (action === 'alert' && data) enqueue(data);
+          else if (action === 'alerts_config' && data) lanes = data.lanes || {};
+        }
+      });
+      // the overlay client hides the container until "show"; the box is always on
+      canvas.style.display = '';
+      const mo = new MutationObserver(() => { if (canvas.style.display === 'none') canvas.style.display = ''; });
+      mo.observe(canvas, {attributes: true, attributeFilter: ['style']});
+      HatmasAlerts.unlockAudio();
+    })();
+  </script>
+</body>
+</html>

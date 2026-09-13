@@ -24,7 +24,10 @@ from aiohttp import web
 from pathlib import Path
 
 from core.bingo_web import BingoControl
+from core.alert_box import AlertBox
+from core.alert_web import AlertWeb
 from core.config import (
+    ALERTS_FILE,
     WEB_HOST, WEB_PORT, OVERLAY_DIR, DATA_DIR, BASE_DIR,
     TITLE_TEMPLATE_GOD, TITLE_TEMPLATE_LOBBY,
     SR_PLAYLIST_AUTO_HIDE_SECONDS,
@@ -66,6 +69,8 @@ class WebServer:
         self.tunnel = None
         self._tunnel_service_cache = None  # (checked_at, running)
         self.overlay = OverlayManager(self)
+        # Hatmaster Alert Box (core/alert_box.py): listens to every emit
+        self.alert_box = AlertBox(self.overlay, ALERTS_FILE)
         self._state = {
             "now_playing": None,
             "queue": [],
@@ -122,6 +127,7 @@ class WebServer:
         self.app.router.add_get("/api/cocaster/status", self.handle_cocaster_status)
         self.app.router.add_get("/bingo", self.handle_bingo_admin)
         BingoControl(self._bingo).register(self.app.router)   # /api/bingo/* control routes
+        AlertWeb(lambda: self.alert_box, lambda: self.overlay).register(self.app.router)   # /sources, /overlay/alerts, /alerts/layout
         self.app.router.add_post("/api/cocaster/test", self.handle_cocaster_test)
         self.app.router.add_get("/api/cocaster/test", self.handle_cocaster_test)
         self.app.router.add_get("/overlay/deaths", self.handle_deaths_overlay)
@@ -1073,6 +1079,9 @@ class WebServer:
 
         self.overlay.register_ws(overlay_name, ws)
         print(f"[Overlay] WS connected: {overlay_name}")
+        if overlay_name.startswith("alerts:"):
+            # an alert box: hand it its placements / lanes / volumes
+            await self.alert_box.on_connect(overlay_name.split(":", 1)[1])
 
         # If this overlay is already marked visible (e.g. always-on overlays
         # like ticker/deaths after an OBS source refresh), re-send the show

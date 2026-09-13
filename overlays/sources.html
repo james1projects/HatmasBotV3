@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>OBS sources</title>
+<link rel="stylesheet" href="/overlays/hatmas_theme.css">
+<style>
+  /* Dashboard page (localhost:8069/sources): every browser source the bot
+     serves, with its URL, size, whether OBS is connected, and a Test button. */
+  :root { --bg: #202C39; --panel: #1a232e; --border: rgba(255,255,255,0.08); --text: #fff; --dim: #AFC2C9; --muted: #8FA6AF;
+    --accent: #DFA06E; --green: #4CC38A; --red: #DF2935; --mono: 'JetBrains Mono', Consolas, monospace; }
+  body { margin: 0; padding: 18px 20px 60px; background: var(--bg); color: var(--text); font-family: 'Inter', 'Segoe UI', sans-serif; font-size: 14px; }
+  h1 { font-family: 'BigNoodleTitling', 'Bebas Neue', 'Inter', sans-serif; text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 4px; font-size: 32px; }
+  .lead { color: var(--dim); margin: 0 0 18px; max-width: 900px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--dim); margin: 24px 0 8px; }
+  h2 .sub { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--muted); margin-left: 10px; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  th { text-align: left; font-weight: 600; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tr:last-child td { border-bottom: 0; }
+  td.name b { display: block; }
+  td.name span { color: var(--muted); font-size: 12px; }
+  td.url { font-family: var(--mono); font-size: 12px; white-space: nowrap; }
+  td.url code { color: var(--dim); }
+  td.size { font-family: var(--mono); font-size: 12px; color: var(--dim); white-space: nowrap; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 6px; vertical-align: middle; }
+  .dot.on { background: var(--green); }
+  .btn { font: inherit; font-size: 12px; font-weight: 600; padding: 5px 10px; border-radius: 5px; border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer; }
+  .btn:hover { border-color: var(--accent); }
+  .btn[disabled] { opacity: 0.35; cursor: default; }
+  a { color: var(--accent); }
+  .toast { position: fixed; right: 18px; bottom: 18px; background: #243040; border: 1px solid var(--accent); border-radius: 8px; padding: 10px 14px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+  .toast.bad { border-color: var(--red); }
+  .replaced { color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+  <h1>OBS browser sources</h1>
+  <p class="lead">Add a source in OBS with the URL and size shown here. The green dot means OBS (or a browser tab) is connected to it right now. Test fires a sample through the real overlay path, so what you see in OBS is what viewers get.</p>
+  <div id="groups"><p style="color:var(--muted)">loading</p></div>
+  <div class="toast" id="toast"></div>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    function esc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+    let toastTimer;
+    function toast(text, bad) { const t = $("toast"); t.textContent = text; t.className = "toast show" + (bad ? " bad" : ""); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = "toast", 2500); }
+    const GROUPS = [
+      ["alert_box", "Hatmaster Alert Box", "one full-scene source; pick what it shows and where in the layout editor"],
+      ["persistent", "Persistent overlays", "sit on screen and update; each is its own source"],
+      ["legacy", "Legacy", "folded into the alert box; still served until every kind is switched on there, then removed"],
+    ];
+    function row(s) {
+      return `<tr>
+        <td class="name"><b>${esc(s.name)}</b><span>${esc(s.what)}</span>${s.replaced_by ? `<div class="replaced">in the alert box as: ${esc(s.replaced_by)}</div>` : ""}</td>
+        <td class="url"><code>${esc(s.url)}</code> <button type="button" class="btn" data-copy="${esc(s.url)}">Copy</button></td>
+        <td class="size">${s.size[0]} x ${s.size[1]}</td>
+        <td><span class="dot ${s.clients ? "on" : ""}"></span>${s.clients ? s.clients + " connected" : "not connected"}</td>
+        <td style="white-space:nowrap;text-align:right">
+          ${s.settings ? `<a class="btn" href="${esc(s.settings)}" style="text-decoration:none">Settings</a> ` : ""}
+          <button type="button" class="btn" data-test="${esc(s.key)}" ${s.test ? "" : "disabled title='no test event'"}>Test</button>
+        </td></tr>`;
+    }
+    async function load() {
+      let j;
+      try { j = await (await fetch("/api/sources", {cache: "no-store"})).json(); } catch (e) { $("groups").innerHTML = "<p>bot unreachable</p>"; return; }
+      $("groups").innerHTML = GROUPS.map(([g, title, sub]) => {
+        const rows = j.sources.filter((s) => s.group === g);
+        return `<h2>${title}<span class="sub">${sub}</span></h2><table><thead><tr><th>Source</th><th>URL</th><th>Size</th><th>OBS</th><th></th></tr></thead><tbody>` +
+          (rows.map(row).join("") || `<tr><td colspan="5" style="color:var(--muted)">none</td></tr>`) + `</tbody></table>`;
+      }).join("");
+    }
+    document.body.addEventListener("click", async (e) => {
+      const c = e.target.closest("[data-copy]");
+      if (c) { try { await navigator.clipboard.writeText(c.dataset.copy); toast("copied " + c.dataset.copy); } catch (_) { toast("copy failed; select the URL and copy it", true); } return; }
+      const t = e.target.closest("[data-test]");
+      if (t) {
+        const r = await (await fetch("/api/sources/test?key=" + encodeURIComponent(t.dataset.test), {method: "POST"})).json();
+        toast(r.ok ? `test sent (${r.event || (r.kinds || []).join(", ")})` + (r.clients === 0 ? " but nothing is connected to that source" : "") : "error: " + r.error, !r.ok);
+        load();
+      }
+    });
+    load(); setInterval(load, 5000);
+  </script>
+</body>
+</html>
