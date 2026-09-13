@@ -50,7 +50,8 @@ CREATE TABLE IF NOT EXISTS users (
     created_at          TEXT NOT NULL DEFAULT (datetime('now')),
     last_seen_at        TEXT,
     merged_into         TEXT,
-    leaderboard_opt_out INTEGER NOT NULL DEFAULT 0
+    leaderboard_opt_out INTEGER NOT NULL DEFAULT 0,
+    watch_minutes       INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_users_merged ON users(merged_into);
 CREATE INDEX IF NOT EXISTS idx_users_display ON users(display_name);
@@ -131,6 +132,15 @@ async def ensure_schema(db) -> None:
     core.db.register_schema() by main.py BEFORE any plugin schema so the
     per-table backfills (attach_user_uuid) can run inside those."""
     await db.executescript(SCHEMA_SQL)
+    # column-add migration for users created before watch time existed
+    cols = set()
+    async with db.execute("PRAGMA table_info(users)") as cur:
+        async for r in cur:
+            cols.add(r[1])
+    if "watch_minutes" not in cols:
+        await db.execute(
+            "ALTER TABLE users ADD COLUMN watch_minutes INTEGER NOT NULL DEFAULT 0")
+        print("[Users] Migration: added users.watch_minutes")
     await db.commit()
 
 
@@ -177,6 +187,57 @@ async def get_user(db, user_uuid: Optional[str]) -> Optional[dict]:
     return {"uuid": row[0], "display_name": row[1], "avatar_url": row[2],
             "created_at": row[3], "last_seen_at": row[4],
             "leaderboard_opt_out": bool(row[5])}
+
+
+async def watch_minutes_of(db, user_uuid: Optional[str]) -> int:
+    live = await resolve(db, user_uuid)
+    if not live:
+        return 0
+    async with db.execute(
+            "SELECT watch_minutes FROM users WHERE uuid = ?", (live,)) as cur:
+        row = await cur.fetchone()
+    return int(row[0] or 0) if row else 0
+
+
+async def add_watch_minutes(db, user_uuid: str, minutes: int,
+                            commit: bool = False) -> None:
+    """Grow a viewer's watch time (the earning tick, while live)."""
+    live = await resolve(db, user_uuid)
+    if not live or minutes <= 0:
+        return
+    await db.execute(
+        "UPDATE users SET watch_minutes = watch_minutes + ? WHERE uuid = ?",
+        (int(minutes), live))
+    if commit:
+        await db.commit()
+
+
+async def floor_watch_minutes(db, user_uuid: str, minutes: int,
+                              commit: bool = False) -> None:
+    """Raise watch time to at least `minutes` (the MixItUp import:
+    replayable, never lowers a count the tick has grown since)."""
+    live = await resolve(db, user_uuid)
+    if not live or minutes <= 0:
+        return
+    await db.execute(
+        "UPDATE users SET watch_minutes = MAX(watch_minutes, ?) WHERE uuid = ?",
+        (int(minutes), live))
+    if commit:
+        await db.commit()
+
+
+def format_watch(minutes: int) -> str:
+    """'3d 4h 5m' / '4h 5m' / '5m'."""
+    minutes = int(minutes or 0)
+    d, rem = divmod(minutes, 1440)
+    h, m = divmod(rem, 60)
+    parts = []
+    if d:
+        parts.append(f"{d}d")
+    if h or d:
+        parts.append(f"{h}h")
+    parts.append(f"{m}m")
+    return " ".join(parts)
 
 
 async def identities(db, user_uuid: Optional[str]) -> List[dict]:
@@ -671,6 +732,10 @@ async def merge(db, absorbed_uuid: str, survivor_uuid: str,
             "WHERE uuid = ?",
             ((ab[0] if ab else None), (ab[1] if ab else None),
              (ab[2] if ab else None), survivor))
+        await db.execute(
+            "UPDATE users SET watch_minutes = watch_minutes + "
+            "COALESCE((SELECT watch_minutes FROM users WHERE uuid = ?), 0) "
+            "WHERE uuid = ?", (absorbed, survivor))
         await db.execute(
             "UPDATE users SET merged_into = ? WHERE uuid = ?",
             (survivor, absorbed))

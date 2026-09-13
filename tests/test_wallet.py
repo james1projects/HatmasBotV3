@@ -180,11 +180,12 @@ async def test_tick_pays_chatters_once_per_window():
         dyna = await U.find_twitch_id(db, "10")
         cat = await U.find_twitch_login(db, "cat")
         assert await W.get(db, dyna) == 25 and await W.get(db, cat) == 25
+        assert await U.watch_minutes_of(db, dyna) == 5      # one 5-minute tick
         assert await U.find_twitch_login(db, "nightbot") is None   # never created
         # a second pass inside half an interval (a restart) pays nobody again
         r2 = await p.tick(chatters=chatters[:2], now=1_700_000_000 + 60)
         assert r2["credited"] == 0 and r2["skipped"] == 2
-        assert await W.get(db, dyna) == 25
+        assert await W.get(db, dyna) == 25 and await U.watch_minutes_of(db, dyna) == 5
         ticks = await W.recent_ticks(db, 5)
         assert len(ticks) == 2 and ticks[1]["credited"] == 3 and ticks[1]["hats_total"] == 75
         assert (await W.history(db, dyna, 1))[0]["reason"] == "watch"

@@ -7,9 +7,9 @@ pages of 100 users), reads each Twitch user's Hats currency amount and
 God Token inventory count, resolves the login to a user_uuid
 (core/users.py) and credits the wallet with reason 'migration' and
 ref 'miu:<mixitup user id>:<asset>' — so running it twice never
-double-credits, and a user MixItUp adds hats to later can be picked up
-by a re-run (the new ref is different only if the id changed, so treat
-a re-run as "import anyone we have not imported yet").
+double-credits (a re-run imports anyone not imported yet). Watch time
+(MixItUp's OnlineViewingMinutes) is applied as a floor on
+users.watch_minutes on every run, so it is safe to re-run just for it.
 
     python tools/import_mixitup.py --dry-run     # report only
     python tools/import_mixitup.py               # import
@@ -112,7 +112,7 @@ async def run(dry_run: bool, base: str) -> int:
         import_id = int(cur.lastrowid)
         await db.commit()
 
-        seen = imported = hats_total = tokens_total = 0
+        seen = imported = hats_total = tokens_total = minutes_total = 0
         notes = []
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as s:
             miu = MixItUp(s, base)
@@ -135,6 +135,7 @@ async def run(dry_run: bool, base: str) -> int:
                 login, tid, display = twitch_login(u)
                 status, detail, uid = "imported", None, None
                 hats = tokens = 0
+                minutes = int(u.get("OnlineViewingMinutes") or 0)
                 try:
                     if not login:
                         status, detail = "skipped_platform", "no Twitch identity"
@@ -146,6 +147,16 @@ async def run(dry_run: bool, base: str) -> int:
                         if inventory_id and item_id:
                             tokens = await miu.amount(
                                 f"/inventory/{inventory_id}/{item_id}/{miu_id}")
+                        if not dry_run and minutes > 0:
+                            # watch time is independent of the balances
+                            if tid:
+                                uid = await _users.get_or_create_twitch(
+                                    db, tid, login, display, commit=False)
+                            else:
+                                uid = await _users.get_or_create_twitch_login(
+                                    db, login, display, commit=False)
+                            await _users.floor_watch_minutes(db, uid, minutes)
+                            minutes_total += minutes
                         if hats <= 0 and tokens <= 0:
                             status = "skipped_zero"
                         elif dry_run:
@@ -192,10 +203,10 @@ async def run(dry_run: bool, base: str) -> int:
                     status, detail = "error", str(e)[:200]
                 await db.execute(
                     "INSERT OR REPLACE INTO wallet_import_rows (import_id, miu_user_id, "
-                    "platform, username, user_uuid, miu_hats, miu_tokens, status, detail) "
-                    "VALUES (?, ?, 'Twitch', ?, ?, ?, ?, ?, ?)",
+                    "platform, username, user_uuid, miu_hats, miu_tokens, miu_minutes, "
+                    "status, detail) VALUES (?, ?, 'Twitch', ?, ?, ?, ?, ?, ?, ?)",
                     (import_id, miu_id or f"row{seen}", login or "?", uid, hats, tokens,
-                     status, detail))
+                     minutes, status, detail))
                 if seen % 100 == 0:
                     print(f"  ... {seen} users seen, {imported} to import")
                     await db.commit()
@@ -213,7 +224,8 @@ async def run(dry_run: bool, base: str) -> int:
         print()
         print(f"{'DRY RUN' if dry_run else 'IMPORT'} #{import_id}: {seen} MixItUp users, "
               f"{imported} {'would be ' if dry_run else ''}imported, "
-              f"{hats_total:,} hats, {tokens_total:,} tokens")
+              f"{hats_total:,} hats, {tokens_total:,} tokens, "
+              f"{minutes_total:,} watch minutes applied")
         for st, n in breakdown:
             print(f"  {st:18s} {n}")
         if dry_run:

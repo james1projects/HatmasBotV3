@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS wallet_import_rows (
     user_uuid   TEXT,
     miu_hats    INTEGER NOT NULL DEFAULT 0,
     miu_tokens  INTEGER NOT NULL DEFAULT 0,
+    miu_minutes INTEGER NOT NULL DEFAULT 0,
     status      TEXT NOT NULL,
     detail      TEXT,
     PRIMARY KEY (import_id, miu_user_id)
@@ -118,6 +119,13 @@ async def ensure_schema(db) -> None:
     """Create the wallet tables. Idempotent; registered with
     core.db.register_schema() by main.py right after core.users."""
     await db.executescript(SCHEMA_SQL)
+    cols = set()
+    async with db.execute("PRAGMA table_info(wallet_import_rows)") as cur:
+        async for r in cur:
+            cols.add(r[1])
+    if "miu_minutes" not in cols:
+        await db.execute("ALTER TABLE wallet_import_rows ADD COLUMN "
+                         "miu_minutes INTEGER NOT NULL DEFAULT 0")
     await db.commit()
 
 

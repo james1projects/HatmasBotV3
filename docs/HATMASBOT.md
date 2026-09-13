@@ -3023,7 +3023,11 @@ Each pass writes a `wallet_earn_ticks` row. Feature toggle
 subs, resubs, gifts (x count) and raids in core/bot.py with the
 EventSub id as the ref.
 
-**Chat:** `!hats` (balance + tokens), `!tophats`, mods `!givehats
+**Watch time:** `users.watch_minutes` (imported from MixItUp's
+OnlineViewingMinutes as a floor, grown by the interval for every viewer a
+tick pays, summed on merges).
+
+**Chat:** `!hats` (balance + tokens + watch time), `!tophats`, mods `!givehats
 <user> <n>` / `!takehats <user> <n>`. `!godtokens` / `!godrequest` /
 `!gamble` unchanged for viewers.
 

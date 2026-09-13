@@ -10,7 +10,10 @@ The viewer-facing side of core/wallet.py (docs/WALLET_PLAN.md):
     get WALLET_EARN_SUB_MULTIPLIER on the tick. Each pass writes a
     wallet_earn_ticks row so "why didn't I get hats" is a query.
   * event bonuses — sub / gift / raid hooks (bot.py) call bonus().
-  * chat — !hats, !tophats, !givehats / !takehats (mods).
+  * chat — !hats (balance, tokens, watch time), !tophats,
+    !givehats / !takehats (mods).
+  * watch time — users.watch_minutes grows by the interval for every
+    viewer a tick pays (imported from MixItUp's OnlineViewingMinutes).
 
 Sub status is only known for viewers who chatted since the last tick
 (it rides on the chat message badges); lurking subs earn the base rate.
@@ -263,6 +266,7 @@ class WalletPlugin:
                 if res is not None:
                     total += chat_bonus
             await _wallet.mark_earned(self._db, uid)
+            await _users.add_watch_minutes(self._db, uid, interval_s // 60)
             credited += 1
         await self._db.execute(
             "UPDATE wallet_earn_ticks SET credited = ?, skipped = ?, "
@@ -323,9 +327,10 @@ class WalletPlugin:
         bal = await _wallet.get_all(self._db, uid)
         cur = _c("ECONOMY_CURRENCY_NAME", "Hats")
         extra = f" and {bal['god_token']} God Token(s)" if bal.get("god_token") else ""
+        watched = _users.format_watch(await _users.watch_minutes_of(self._db, uid))
         await self.bot.send_reply(
-            message, f"You have {bal['hats']:,} {cur}{extra}. Earn {cur} by watching, "
-                     f"then !buy, !gamble, or grab bingo cards.", whisper)
+            message, f"You have {bal['hats']:,} {cur}{extra}. Watch time: {watched}.",
+            whisper)
 
     async def cmd_tophats(self, message, args, whisper=False):
         if self._db is None:

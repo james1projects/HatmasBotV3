@@ -90,6 +90,14 @@ async def test_twitch_create_placeholder_upgrade_and_rename():
         # bare twitch id without login still works
         assert await U.get_or_create_twitch(db, "77", "") == c
         assert await U.public_ref(db, a) == ("twitch", "dynamite")
+        # watch time: grows, floors (never lowers), formats
+        await U.add_watch_minutes(db, a, 5)
+        await U.floor_watch_minutes(db, a, 3)
+        assert await U.watch_minutes_of(db, a) == 5
+        await U.floor_watch_minutes(db, a, 1500)
+        assert await U.watch_minutes_of(db, a) == 1500
+        assert U.format_watch(1500) == "1d 1h 0m" and U.format_watch(65) == "1h 5m"
+        assert U.format_watch(7) == "7m" and U.format_watch(0) == "0m"
     finally:
         await db.close()
 
@@ -174,6 +182,8 @@ async def test_merge_rules():
                          "VALUES (?, '2026-09-11', 'Loki')", (yt,))
         await db.execute("INSERT INTO priority_payments VALUES ('cs', 'x', 'Ymir', ?)", (yt,))
         await U.set_leaderboard_opt_out(db, yt, True)
+        await U.add_watch_minutes(db, tw, 10)
+        await U.add_watch_minutes(db, yt, 7)
         await db.commit()
 
         hooks = []
@@ -205,8 +215,9 @@ async def test_merge_rules():
         assert await U.resolve(db, yt) == tw
         assert await U.find_youtube(db, "UCabc") == tw
         assert (await U.get_user(db, yt))["uuid"] == tw
-        # survivor keeps its own opt-out (rule 4)
+        # survivor keeps its own opt-out (rule 4); watch time adds up
         assert not await U.get_leaderboard_opt_out(db, tw)
+        assert await U.watch_minutes_of(db, tw) == 17
         async with db.execute("SELECT absorbed_uuid, survivor_uuid, initiated_by, summary "
                               "FROM user_merges") as c:
             m = await c.fetchone()
