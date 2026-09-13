@@ -155,6 +155,14 @@ KINDS: Dict[str, dict] = {
 KIND_FIELDS = ("enabled", "lane", "duration", "sound", "volume", "x", "y", "w", "h", "anchor")
 
 
+def _lane_defaults(max_queue: int = 10) -> dict:
+    """A lane is a queue; with `shared` on it also owns ONE placement that
+    every kind in the lane uses (the kinds' own x/y/w/h are ignored), for
+    kinds that take turns in the same spot on the scene."""
+    return {"max_queue": int(max_queue), "shared": False,
+            "x": 700, "y": 340, "w": 520, "h": 400, "anchor": "center"}
+
+
 def _kind_defaults(kind: str) -> dict:
     d = KINDS[kind]
     return {"enabled": bool(d["enabled"]), "lane": d["lane"], "duration": int(d["duration"]),
@@ -164,7 +172,7 @@ def _kind_defaults(kind: str) -> dict:
 
 def default_config() -> dict:
     return {"boxes": {"main": {"volume": 100, "kinds": {k: _kind_defaults(k) for k in KINDS}}},
-            "lanes": copy.deepcopy(DEFAULT_LANES)}
+            "lanes": {name: _lane_defaults(v["max_queue"]) for name, v in DEFAULT_LANES.items()}}
 
 
 def _clamp(v: Any, lo: int, hi: int, default: int) -> int:
@@ -213,15 +221,25 @@ def validate_config(raw: Any) -> dict:
     if "main" not in out["boxes"]:
         out["boxes"]["main"] = default_config()["boxes"]["main"]
     lanes_in = raw.get("lanes") if isinstance(raw.get("lanes"), dict) else {}
-    lanes = copy.deepcopy(DEFAULT_LANES)
+    lanes = {name: _lane_defaults(v["max_queue"]) for name, v in DEFAULT_LANES.items()}
     for name, lane in lanes_in.items():
         name = str(name).strip().lower()[:24]
-        if name and name.replace("_", "").isalnum() and isinstance(lane, dict):
-            lanes[name] = {"max_queue": _clamp(lane.get("max_queue"), 1, 200, 10)}
+        if not (name and name.replace("_", "").isalnum() and isinstance(lane, dict)):
+            continue
+        base = lanes.get(name) or _lane_defaults()
+        base["max_queue"] = _clamp(lane.get("max_queue"), 1, 200, base["max_queue"])
+        base["shared"] = bool(lane.get("shared", base["shared"]))
+        base["w"] = _clamp(lane.get("w"), 40, CANVAS_W, base["w"])
+        base["h"] = _clamp(lane.get("h"), 30, CANVAS_H, base["h"])
+        base["x"] = _clamp(lane.get("x"), 0, CANVAS_W - base["w"], base["x"])
+        base["y"] = _clamp(lane.get("y"), 0, CANVAS_H - base["h"], base["y"])
+        anchor = str(lane.get("anchor") or base["anchor"])
+        base["anchor"] = anchor if anchor in ANCHORS else base["anchor"]
+        lanes[name] = base
     # every lane a kind refers to exists
     for box in out["boxes"].values():
         for k in box["kinds"].values():
-            lanes.setdefault(k["lane"], {"max_queue": 10})
+            lanes.setdefault(k["lane"], _lane_defaults())
     out["lanes"] = lanes
     return out
 
@@ -309,12 +327,16 @@ class AlertBox:
         bcfg = self._config["boxes"][box]
         kc = bcfg["kinds"][kind]
         box_vol = int(bcfg.get("volume", 100))
+        lane = self._config["lanes"].get(kc["lane"]) or {}
+        # a shared lane owns the placement: every kind in it lands in the lane's spot
+        src = lane if lane.get("shared") else kc
         return {"id": self._seq, "box": box, "kind": kind, "event": event, "ts": time.time(), "test": test,
                 "data": data if data is not None else {},
                 "lane": kc["lane"], "duration": kc["duration"], "sound": kc["sound"],
                 # effective volume = the kind's slider scaled by the box's master slider
                 "volume": int(round(kc["volume"] * box_vol / 100)), "kind_volume": kc["volume"], "box_volume": box_vol,
-                "placement": {"x": kc["x"], "y": kc["y"], "w": kc["w"], "h": kc["h"], "anchor": kc["anchor"]}}
+                "shared_lane": bool(lane.get("shared")),
+                "placement": {"x": src["x"], "y": src["y"], "w": src["w"], "h": src["h"], "anchor": src["anchor"]}}
 
     async def _send(self, alert: dict) -> None:
         box = alert["box"]

@@ -323,6 +323,31 @@ def test_box_volume_and_background():
     assert box.clear_background()['removed'] == 1 and box.background_path() is None
 
 
+def test_shared_lane_placement():
+    tmp = _tmp()
+    box = AB.AlertBox(_Overlay(), str(tmp / "alerts.json"))
+    cfg = box.config()
+    lane = cfg['lanes']['economy']
+    assert lane['shared'] is False and set(lane) >= {'max_queue', 'x', 'y', 'w', 'h', 'anchor'}, lane
+    # off: the kind's own placement
+    a = asyncio.run(box.test('portfolio'))['alert']
+    assert a['shared_lane'] is False and a['placement']['x'] == AB.KINDS['portfolio']['x']
+    # on: every kind in the lane lands in the lane's spot
+    cfg['lanes']['economy'].update({'shared': True, 'x': 100, 'y': 200, 'w': 600, 'h': 300, 'anchor': 'top-left'})
+    asyncio.run(box.save_config(cfg))
+    for kind in ('portfolio', 'match_end'):
+        a = asyncio.run(box.test(kind))['alert']
+        assert a['shared_lane'] is True and a['placement'] == {'x': 100, 'y': 200, 'w': 600, 'h': 300, 'anchor': 'top-left'}, a
+    # a kind in another lane is untouched; clamping applies to lane placements too
+    a = asyncio.run(box.test('gamble'))['alert']
+    assert a['shared_lane'] is False and a['placement']['x'] == AB.KINDS['gamble']['x']
+    v = AB.validate_config({'lanes': {'economy': {'shared': 1, 'x': 5000, 'w': 99999, 'anchor': 'nope'}}})['lanes']['economy']
+    assert v['shared'] is True and v['w'] == 1920 and v['x'] == 0 and v['anchor'] == 'center'
+    # unknown lane referenced by a kind gets full defaults
+    v = AB.validate_config({'boxes': {'main': {'kinds': {'gamble': {'lane': 'popups'}}}}})
+    assert v['lanes']['popups']['shared'] is False and v['lanes']['popups']['w'] == 520
+
+
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
 
 def main() -> int:

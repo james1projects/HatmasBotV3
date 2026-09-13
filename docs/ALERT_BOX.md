@@ -203,6 +203,15 @@ Everything above landed the same day, plus these additions and differences:
   (newest on top, eight kept) and restarts its timer instead of queueing.
   `HatmasAlerts.define(kind, {sticky: true, render, update})`. The
   one-card-per-trade `tradefeed` kind stays for those who prefer it.
+- **Lanes made visible** (later the same day): every lane has a colour, used
+  for the stage outlines, the kinds list (now grouped by lane, with a
+  move-to-lane dropdown per kind) and the Lanes panel. A lane can be
+  **shared** ("one spot for the whole lane"): it then owns one placement
+  (`lanes.<name>.{shared,x,y,w,h,anchor}`) that every kind in it uses; the
+  alert carries `shared_lane: true` and the lane's placement. That is the
+  "Portfolio and Match end recap in the same place, never overlapping"
+  case in one drag. Off by default so a lane like `audio` can still put its
+  kinds in different corners.
 - **Layout editor extras**: an eye per kind hides it in the editor only
   (never saved; for placing two kinds that share a spot); a "live preview"
   iframe of the real box behind the stage so Test plays in place; a scene

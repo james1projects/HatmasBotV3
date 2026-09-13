@@ -45,6 +45,19 @@
   .kinds .krow { display: flex; align-items: center; gap: 4px; }
   .kinds .krow button[data-pick] { flex: 1; min-width: 0; }
   .kinds .krow.hidden-ed button[data-pick] { opacity: 0.5; }
+  /* lanes are colour-coded everywhere: stage outlines, the kinds list headings, the Lanes panel */
+  .kinds h4 { margin: 8px 0 3px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim); display: flex; align-items: center; gap: 6px; }
+  .kinds h4:first-child { margin-top: 0; }
+  .kinds h4 .n { font-weight: 400; color: var(--muted); text-transform: none; letter-spacing: 0; }
+  .kinds h4 .shared { font-weight: 400; color: var(--accent); text-transform: none; letter-spacing: 0; }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; flex: none; }
+  .kinds .krow select { font-size: 11px; padding: 2px 4px; max-width: 92px; color: var(--muted); background: transparent; border-color: transparent; }
+  .kinds .krow select:hover { border-color: var(--border); color: var(--text); }
+  .kbox .tag .ln { opacity: 0.75; font-size: 18px; }
+  .lanerow { border-top: 1px solid var(--border); padding: 6px 0; }
+  .lanerow:first-child { border-top: 0; }
+  .lanerow .field { padding: 2px 0; }
+  .lanerow .place { font-family: var(--mono); font-size: 11px; color: var(--muted); }
   .kbox.off { border-color: rgba(175,194,201,0.35); background: rgba(175,194,201,0.04); }
   .kbox.off .preview { opacity: 0.35; }
   .kbox.sel { border: 2px solid var(--accent); background: rgba(223,160,110,0.12); z-index: 5; }
@@ -103,7 +116,7 @@
     <div class="side">
       <div class="box"><h2>Kinds</h2><div class="kinds" id="kinds"></div></div>
       <div class="box" id="edit"><h2>Selected</h2><div id="fields" class="hint">Pick a kind.</div></div>
-      <div class="box"><h2>Lanes <span class="hint" style="display:inline">(queues; kinds in one lane play one at a time)</span></h2><div id="lanes"></div></div>
+      <div class="box"><h2>Lanes <span class="hint" style="display:inline">(a lane is a queue: its kinds never play at the same time; tick "one spot" to give the whole lane one place on the scene)</span></h2><div id="lanes"></div></div>
       <div class="box"><h2>Recent <button type="button" class="btn small ghost" id="refresh-recent">refresh</button></h2><div class="recent" id="recent"></div></div>
     </div>
   </div>
@@ -144,6 +157,22 @@
       return j;
     }
     function kcfg(kind) { return config.boxes[box].kinds[kind]; }
+    // lanes: colour, and the placement a kind actually uses (its own, or the lane's when the lane is shared)
+    const LANE_COLORS = ['#DFA06E', '#4CC38A', '#7D98A1', '#C77DFF', '#F5F3BB', '#5AB0F0', '#F0A5C8', '#DF2935'];
+    function laneColor(name) { const i = Object.keys(config.lanes).indexOf(name); return LANE_COLORS[(i < 0 ? 7 : i) % LANE_COLORS.length]; }
+    function laneDefaults() { return {max_queue: 10, shared: false, x: 700, y: 340, w: 520, h: 400, anchor: 'center'}; }
+    function laneOf(kind) { const c = kcfg(kind); if (!config.lanes[c.lane]) config.lanes[c.lane] = laneDefaults(); return config.lanes[c.lane]; }
+    function isShared(kind) { return !!laneOf(kind).shared; }
+    function placementOf(kind) { return isShared(kind) ? laneOf(kind) : kcfg(kind); }
+    function setLane(kind, value) {
+      if (value === '__new') {
+        const n = (prompt('New lane name (letters, digits, underscores):') || '').trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+        if (!n) return false;
+        if (!config.lanes[n]) config.lanes[n] = laneDefaults();
+        value = n;
+      }
+      kcfg(kind).lane = value; setDirty(true); return true;
+    }
     function setDirty(v) { dirty = v; $('status').textContent = v ? 'unsaved changes' : 'saved'; $('status').className = 'status' + (v ? ' dirty' : ''); }
 
     // ── stage ──
@@ -175,45 +204,64 @@
         const c = kcfg(k.kind);
         if (!c.enabled && !showOff) continue;
         if (hiddenHere.has(k.kind)) continue;
+        const p = placementOf(k.kind), col = laneColor(c.lane), shared = isShared(k.kind);
         const el = document.createElement('div');
         el.className = 'kbox' + (c.enabled ? '' : ' off') + (selected === k.kind ? ' sel' : '');
         el.dataset.kind = k.kind;
-        el.style.left = c.x + 'px'; el.style.top = c.y + 'px'; el.style.width = c.w + 'px'; el.style.height = c.h + 'px';
-        el.innerHTML = '<div class="tag">' + esc(k.label) + '</div><div class="preview a-' + c.anchor + '"></div><div class="grip"></div>';
+        el.style.left = p.x + 'px'; el.style.top = p.y + 'px'; el.style.width = p.w + 'px'; el.style.height = p.h + 'px';
+        el.style.borderColor = col; if (selected === k.kind) el.style.boxShadow = '0 0 0 2px ' + col;
+        el.innerHTML = '<div class="tag" style="color:' + col + '">' + esc(k.label) + ' <span class="ln">&middot; ' + esc(c.lane) + (shared ? ' (shared spot)' : '') + '</span></div><div class="preview a-' + p.anchor + '"></div><div class="grip" style="background:linear-gradient(135deg, transparent 50%, ' + col + ' 50%)"></div>';
         stage.appendChild(el);
-        try { HatmasAlerts.preview(k.kind, el.querySelector('.preview'), samples[k.kind], {width: c.w, height: c.h}); } catch (e) { console.warn(e); }
+        try { HatmasAlerts.preview(k.kind, el.querySelector('.preview'), samples[k.kind], {width: p.w, height: p.h}); } catch (e) { console.warn(e); }
       }
     }
+    function laneOptions(current) {
+      return Object.keys(config.lanes).map((l) => `<option value="${esc(l)}" ${l === current ? 'selected' : ''}>${esc(l)}</option>`).join('') + '<option value="__new">new lane&hellip;</option>';
+    }
     function renderKinds() {
-      $('kinds').innerHTML = catalog.map((k) => { const c = kcfg(k.kind), hid = hiddenHere.has(k.kind);
-        return `<div class="krow ${hid ? 'hidden-ed' : ''}"><button type="button" class="eye ${hid ? 'closed' : ''}" data-eye="${k.kind}" title="${hid ? 'show in the editor' : 'hide in the editor (not on stream)'}">${hid ? EYE_SHUT : EYE_OPEN}</button>` +
-          `<button type="button" data-pick="${k.kind}" class="${selected === k.kind ? 'sel' : ''} ${c.enabled ? '' : 'off'}"><span>${c.enabled ? '' : '&#9675; '}${esc(k.label)}</span><span class="lane">${esc(c.lane)}</span></button></div>`; }).join('');
+      // grouped by lane (the queue): what shares a lane never plays at the same time
+      const groups = {};
+      Object.keys(config.lanes).forEach((l) => groups[l] = []);
+      catalog.forEach((k) => { const l = kcfg(k.kind).lane; (groups[l] || (groups[l] = [])).push(k); });
+      $('kinds').innerHTML = Object.entries(groups).map(([lane, ks]) => {
+        const l = config.lanes[lane] || {};
+        return `<h4><span class="swatch" style="background:${laneColor(lane)}"></span>${esc(lane)} <span class="n">${ks.length} kind${ks.length === 1 ? '' : 's'}, one at a time</span>${l.shared ? '<span class="shared">&middot; one spot</span>' : ''}</h4>` +
+          (ks.map((k) => { const c = kcfg(k.kind), hid = hiddenHere.has(k.kind);
+            return `<div class="krow ${hid ? 'hidden-ed' : ''}"><button type="button" class="eye ${hid ? 'closed' : ''}" data-eye="${k.kind}" title="${hid ? 'show in the editor' : 'hide in the editor (not on stream)'}">${hid ? EYE_SHUT : EYE_OPEN}</button>` +
+              `<button type="button" data-pick="${k.kind}" class="${selected === k.kind ? 'sel' : ''} ${c.enabled ? '' : 'off'}"><span>${c.enabled ? '' : '&#9675; '}${esc(k.label)}</span></button>` +
+              `<select data-lane-of="${k.kind}" title="move to another lane (queue)">${laneOptions(c.lane)}</select></div>`; }).join('') || '<div class="hint" style="padding:2px 8px">empty</div>');
+      }).join('');
     }
     function renderFields() {
       if (!selected) { $('fields').innerHTML = '<span class="hint">Pick a kind.</span>'; return; }
-      const k = catalog.find((x) => x.kind === selected), c = kcfg(selected);
-      const laneList = Object.keys(config.lanes);
+      const k = catalog.find((x) => x.kind === selected), c = kcfg(selected), p = placementOf(selected), shared = isShared(selected);
       $('fields').innerHTML = `
         <div class="field"><b>${esc(k.label)}</b><span class="hint" style="margin:0">${esc(k.events.join(', '))}</span></div>
         <div class="field"><label>Enabled</label><input type="checkbox" data-f="enabled" ${c.enabled ? 'checked' : ''}></div>
-        <div class="field"><label>Lane</label><input list="lanes-list" data-f="lane" value="${esc(c.lane)}" style="width:120px"><datalist id="lanes-list">${laneList.map((l) => `<option value="${esc(l)}">`).join('')}</datalist></div>
+        <div class="field"><label>Lane <span class="swatch" style="background:${laneColor(c.lane)}"></span></label><select data-f="lane">${laneOptions(c.lane)}</select></div>
         <div class="field"><label>Max seconds</label><input type="number" data-f="duration" min="1" max="600" value="${c.duration}"></div>
         <div class="field"><label>Sound</label><input type="checkbox" data-f="sound" ${c.sound ? 'checked' : ''}></div>
         <div class="field"><label>Volume</label><span><input type="range" data-f="volume" min="0" max="100" value="${c.volume}"> <span id="vol-val" style="font-family:var(--mono)">${c.volume}</span></span></div>
-        <div class="field"><label>Anchor</label><select data-f="anchor">${anchors.map((a) => `<option ${a === c.anchor ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
+        ${shared ? `<p class="hint" style="margin:6px 0 2px">Position is the lane's: every kind in <b>${esc(c.lane)}</b> uses this one spot (untick "one spot" in Lanes to place kinds separately).</p>` : ''}
+        <div class="field"><label>Anchor</label><select data-f="anchor">${anchors.map((a) => `<option ${a === p.anchor ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
         <div class="row2">
-          <div class="field"><label>x</label><input type="number" data-f="x" min="0" max="${CW}" value="${c.x}"></div>
-          <div class="field"><label>y</label><input type="number" data-f="y" min="0" max="${CH}" value="${c.y}"></div>
-          <div class="field"><label>w</label><input type="number" data-f="w" min="40" max="${CW}" value="${c.w}"></div>
-          <div class="field"><label>h</label><input type="number" data-f="h" min="30" max="${CH}" value="${c.h}"></div>
+          <div class="field"><label>x</label><input type="number" data-f="x" min="0" max="${CW}" value="${p.x}"></div>
+          <div class="field"><label>y</label><input type="number" data-f="y" min="0" max="${CH}" value="${p.y}"></div>
+          <div class="field"><label>w</label><input type="number" data-f="w" min="40" max="${CW}" value="${p.w}"></div>
+          <div class="field"><label>h</label><input type="number" data-f="h" min="30" max="${CH}" value="${p.h}"></div>
         </div>
         <div class="field" style="margin-top:6px"><button type="button" class="btn small" id="test-one">Test this kind</button><button type="button" class="btn small ghost" id="reset-one">Reset to default</button></div>
         ${k.legacy ? `<p class="hint">Replaces the legacy source <code>${esc(k.legacy)}</code>: once this is enabled, remove that source in OBS.</p>` : ''}`;
     }
     function renderLanes() {
-      $('lanes').innerHTML = Object.entries(config.lanes).map(([name, l]) =>
-        `<div class="field"><label>${esc(name)}</label><span>queue up to <input type="number" data-lane="${esc(name)}" min="1" max="200" value="${l.max_queue}" style="width:56px"></span></div>`).join('') +
-        `<div class="field"><input id="new-lane" placeholder="new lane name" style="width:140px"><button type="button" class="btn small" id="add-lane">Add</button></div>`;
+      $('lanes').innerHTML = Object.entries(config.lanes).map(([name, l]) => {
+        const n = catalog.filter((k) => kcfg(k.kind).lane === name).length;
+        return `<div class="lanerow">
+          <div class="field"><label><span class="swatch" style="background:${laneColor(name)}"></span> <b>${esc(name)}</b> <span class="hint" style="margin:0">${n} kind${n === 1 ? '' : 's'}</span></label><span>queue up to <input type="number" data-lane="${esc(name)}" min="1" max="200" value="${l.max_queue}" style="width:56px"></span></div>
+          <div class="field"><label title="every kind in this lane uses one spot on the scene; drag any of them to move it">one spot for the whole lane</label><input type="checkbox" data-lane-shared="${esc(name)}" ${l.shared ? 'checked' : ''}></div>
+          ${l.shared ? `<div class="place">at ${l.x}, ${l.y} &middot; ${l.w} x ${l.h} &middot; ${esc(l.anchor)}</div>` : ''}
+        </div>`; }).join('') +
+        `<div class="field" style="margin-top:6px"><input id="new-lane" placeholder="new lane name" style="width:140px"><button type="button" class="btn small" id="add-lane">Add</button></div>`;
     }
     async function renderRecent() {
       const j = await api('/api/alerts/recent?box=' + encodeURIComponent(box));
@@ -281,23 +329,36 @@
       const pick = e.target.closest('[data-pick]'); if (pick) { selected = pick.dataset.pick; hiddenHere.delete(selected); renderAll(); return; }
       if (e.target.id === 'test-one' && selected) { const r = await api('/api/alerts/test?kind=' + selected + '&box=' + box, 'POST'); toast(r.ok ? 'test sent' + (r.clients ? '' : ' (no alert box connected)') : r.error, !r.ok); renderRecent(); return; }
       if (e.target.id === 'reset-one' && selected) { Object.assign(kcfg(selected), catalog.find((k) => k.kind === selected).defaults); setDirty(true); renderAll(); return; }
-      if (e.target.id === 'add-lane') { const n = ($('new-lane').value || '').trim().toLowerCase().replace(/[^a-z0-9_]/g, ''); if (n && !config.lanes[n]) { config.lanes[n] = {max_queue: 10}; setDirty(true); renderLanes(); renderFields(); } return; }
+      if (e.target.id === 'add-lane') { const n = ($('new-lane').value || '').trim().toLowerCase().replace(/[^a-z0-9_]/g, ''); if (n && !config.lanes[n]) { config.lanes[n] = laneDefaults(); setDirty(true); renderAll(); } return; }
       const rp = e.target.closest('[data-replay]'); if (rp) { const r = await api('/api/alerts/replay?id=' + rp.dataset.replay + '&box=' + box, 'POST'); toast(r.ok ? 'replayed' : r.error, !r.ok); }
     });
     $('edit').addEventListener('input', (e) => {
       const f = e.target.dataset.f; if (!f || !selected) return;
       const c = kcfg(selected);
+      if (f === 'lane') { if (!setLane(selected, e.target.value)) { e.target.value = c.lane; return; } renderAll(); return; }
+      const p = placementOf(selected);                 // x/y/w/h/anchor go to the lane when it is shared
       if (f === 'enabled' || f === 'sound') c[f] = e.target.checked;
-      else if (f === 'lane' || f === 'anchor') c[f] = e.target.value;
+      else if (f === 'anchor') p.anchor = e.target.value;
+      else if (f === 'x' || f === 'y' || f === 'w' || f === 'h') { const v = Number(e.target.value); if (Number.isFinite(v)) p[f] = v; clampBox(p); }
       else { const v = Number(e.target.value); if (Number.isFinite(v)) c[f] = v; }
       if (f === 'volume') $('vol-val').textContent = c.volume;
-      if (f === 'x' || f === 'y' || f === 'w' || f === 'h') clampBox(c);
       setDirty(true);
-      if (f === 'enabled' || f === 'lane') renderKinds();
-      renderStage();
-      if (f === 'lane' && c.lane && !config.lanes[c.lane]) { /* lane created on save */ }
+      if (f === 'enabled') renderKinds();
+      renderStage(); if (isShared(selected)) renderLanes();
     });
-    $('lanes').addEventListener('input', (e) => { const l = e.target.dataset.lane; if (l) { config.lanes[l].max_queue = Number(e.target.value) || 10; setDirty(true); } });
+    $('kinds').addEventListener('change', (e) => { const k = e.target.dataset.laneOf; if (k) { if (!setLane(k, e.target.value)) e.target.value = kcfg(k).lane; renderAll(); } });
+    $('lanes').addEventListener('input', (e) => {
+      const l = e.target.dataset.lane; if (l) { config.lanes[l].max_queue = Number(e.target.value) || 10; setDirty(true); return; }
+      const sh = e.target.dataset.laneShared;
+      if (sh) {
+        const lane = config.lanes[sh]; lane.shared = e.target.checked;
+        if (lane.shared) {   // start the lane's spot where its first kind sits, so nothing jumps
+          const first = catalog.find((k) => kcfg(k.kind).lane === sh);
+          if (first) { const c = kcfg(first.kind); Object.assign(lane, {x: c.x, y: c.y, w: c.w, h: c.h, anchor: c.anchor}); }
+        }
+        setDirty(true); renderAll();
+      }
+    });
     function clampBox(c) { c.w = Math.max(40, Math.min(CW, c.w)); c.h = Math.max(30, Math.min(CH, c.h)); c.x = Math.max(0, Math.min(CW - c.w, c.x)); c.y = Math.max(0, Math.min(CH - c.h, c.y)); }
     function snap(v) { return Math.round(v / 10) * 10; }
 
@@ -307,24 +368,24 @@
       const kb = e.target.closest('.kbox'); if (!kb) return;
       selected = kb.dataset.kind; renderKinds(); renderFields();
       document.querySelectorAll('.kbox.sel').forEach((x) => x.classList.remove('sel')); kb.classList.add('sel');
-      const c = kcfg(selected);
+      const c = placementOf(selected);
       drag = {kind: selected, resize: e.target.classList.contains('grip'), sx: e.clientX, sy: e.clientY, x: c.x, y: c.y, w: c.w, h: c.h, el: kb};
       kb.setPointerCapture(e.pointerId); e.preventDefault();
     });
     $('stage').addEventListener('pointermove', (e) => {
       if (!drag) return;
-      const c = kcfg(drag.kind), dx = (e.clientX - drag.sx) / scale, dy = (e.clientY - drag.sy) / scale;
+      const c = placementOf(drag.kind), dx = (e.clientX - drag.sx) / scale, dy = (e.clientY - drag.sy) / scale;
       if (drag.resize) { c.w = snap(drag.w + dx); c.h = snap(drag.h + dy); } else { c.x = snap(drag.x + dx); c.y = snap(drag.y + dy); }
       clampBox(c);
       drag.el.style.left = c.x + 'px'; drag.el.style.top = c.y + 'px'; drag.el.style.width = c.w + 'px'; drag.el.style.height = c.h + 'px';
       ['x', 'y', 'w', 'h'].forEach((f) => { const i = $('fields').querySelector(`[data-f="${f}"]`); if (i) i.value = c[f]; });
       setDirty(true);
     });
-    const endDrag = () => { if (drag) { drag = null; renderStage(); } };
+    const endDrag = () => { if (drag) { const sh = isShared(drag.kind); drag = null; renderStage(); if (sh) renderLanes(); } };
     $('stage').addEventListener('pointerup', endDrag); $('stage').addEventListener('pointercancel', endDrag);
     document.addEventListener('keydown', (e) => {
       if (!selected || /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;
-      const step = e.shiftKey ? 10 : 1, c = kcfg(selected);
+      const step = e.shiftKey ? 10 : 1, c = placementOf(selected);
       if (e.key === 'ArrowLeft') c.x -= step; else if (e.key === 'ArrowRight') c.x += step; else if (e.key === 'ArrowUp') c.y -= step; else if (e.key === 'ArrowDown') c.y += step; else return;
       e.preventDefault(); clampBox(c); setDirty(true); renderStage(); renderFields();
     });
