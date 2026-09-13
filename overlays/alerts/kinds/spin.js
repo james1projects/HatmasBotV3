@@ -96,7 +96,7 @@ HatmasAlerts.define('spin', {
     const s = ctx.synth();
     const timers = [];
     // real samples first (alerts_core SOUNDS: spin_tick / spin_land), the old synth as fallback
-    const tick = () => { if (!s) return; if (ctx.play('spin_tick', {gain: 0.6, rate: 0.9 + Math.random() * 0.3})) return; const now = s.ctx.currentTime, o = s.ctx.createOscillator(), g = s.ctx.createGain(); o.type = 'sine'; o.frequency.setValueAtTime(820 + Math.random() * 360, now); g.gain.setValueAtTime(0.07, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.05); o.connect(g); g.connect(s.gain); o.start(now); o.stop(now + 0.06); };
+    const tick = () => { if (!s) return; if (ctx.play('spin_tick', {gain: 0.45, rate: 0.9 + Math.random() * 0.25})) return; const now = s.ctx.currentTime, o = s.ctx.createOscillator(), g = s.ctx.createGain(); o.type = 'sine'; o.frequency.setValueAtTime(820 + Math.random() * 360, now); g.gain.setValueAtTime(0.07, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.05); o.connect(g); g.connect(s.gain); o.start(now); o.stop(now + 0.06); };
     const land = () => { if (!s) return; if (ctx.play('spin_land', {gain: 0.9})) return; const now = s.ctx.currentTime; [784, 1175].forEach((f, i) => { const o = s.ctx.createOscillator(), g = s.ctx.createGain(); o.type = 'triangle'; o.frequency.setValueAtTime(f, now + i * 0.14); g.gain.setValueAtTime(0, now + i * 0.14); g.gain.linearRampToValueAtTime(0.22, now + i * 0.14 + 0.02); g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.14 + 0.55); o.connect(g); g.connect(s.gain); o.start(now + i * 0.14); o.stop(now + i * 0.14 + 0.6); }); };
     const jitter = Math.random() * 12 - 6;
     const offset = -(winnerCenter - frameWidth / 2 + jitter);
