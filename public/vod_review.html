@@ -71,6 +71,7 @@
     <div class="notice off" id="notice">Loading</div>
 
     <div class="toolbar">
+      <select id="channel" hidden><option value="">All channels</option></select>
       <select id="god"><option value="">All gods</option></select>
       <select id="vis"><option value="">Public and private</option><option value="private">Private only</option><option value="public">Public only</option></select>
       <input id="filter" type="search" placeholder="filter by file name" aria-label="Filter">
@@ -105,6 +106,13 @@
         n.className = "notice off";
         n.textContent = "The web_vod toggle is off: nothing is visible to viewers, whatever is marked here. Flip it on the dashboard when you are ready.";
       }
+      OWNER = data.owner || "hatmaster";
+      const chans = data.channels || [];
+      const csel = $("channel"); const ccur = csel.value;
+      csel.innerHTML = '<option value="">All channels</option>' +
+        chans.map((c) => '<option value="' + esc(c.channel) + '">' + esc(c.display_name || c.channel) + "</option>").join("");
+      csel.value = ccur;
+      csel.hidden = chans.length <= 1;
       const gods = [...new Set(rows.map((x) => x.god).filter(Boolean))].sort();
       const sel = $("god"); const cur = sel.value;
       sel.innerHTML = '<option value="">All gods</option>' + gods.map((g) => '<option value="' + esc(g) + '">' + esc(g) + "</option>").join("");
@@ -116,10 +124,12 @@
     }
   }
 
+  let OWNER = "hatmaster";
   function shown() {
-    const g = $("god").value, v = $("vis").value, f = $("filter").value.trim().toLowerCase();
-    return rows.filter((r) => (!g || r.god === g) && (!v || r.visibility === v) &&
-      (!f || String(r.stem || "").toLowerCase().includes(f) || String(r.folder || "").toLowerCase().includes(f)));
+    const g = $("god").value, v = $("vis").value, f = $("filter").value.trim().toLowerCase(), c = $("channel").value;
+    return rows.filter((r) => (!g || r.god === g) && (!v || r.visibility === v) && (!c || r.channel === c) &&
+      (!f || String(r.stem || "").toLowerCase().includes(f) || String(r.folder || "").toLowerCase().includes(f) ||
+             String(r.title || "").toLowerCase().includes(f)));
   }
 
   function render() {
@@ -133,7 +143,9 @@
       const best = r.best_tier >= 2 ? " (" + tierLabel(r.best_tier) + ")" : "";
       html += '<tr class="' + esc(r.visibility) + '" data-id="' + r.id + '">' +
         '<td><div class="thumb">' + (r.thumb_url ? '<img loading="lazy" src="' + esc(r.thumb_url) + '" alt="">' : "") + "</div></td>" +
-        '<td><div class="god">' + esc(r.god || "Unknown") + '</div><div class="mono">' + esc(r.stem || "") + ".mp4</div>" +
+        '<td><div class="god">' + esc(r.god || "Unknown") + (r.publishable ? "" : ' <span class="pill private">' + esc(r.display_name || r.channel) + "</span>") + '</div>' +
+          (r.title ? '<div class="mono">' + esc(r.title) + "</div>" : "") +
+          '<div class="mono">' + esc(r.stem || "") + ".mp4</div>" +
           '<a class="mono" href="/vod?clip=' + esc(r.key || "") + '" target="_blank">open</a></td>' +
         '<td class="mono hide-sm">' + esc(r.date) + "</td>" +
         '<td class="mono hide-sm">' + esc(r.clock) + "</td>" +
@@ -141,9 +153,11 @@
         '<td class="mono">' + (r.kills || 0) + esc(best) + " / " + (r.deaths || 0) + " deaths</td>" +
         '<td><span class="pill ' + esc(r.visibility) + '">' + (r.visibility === "public" ? "Public" : "Private") + "</span></td>" +
         '<td class="row-actions">' +
-          (r.visibility === "public"
-            ? '<button type="button" class="btn priv" data-set="private">Make private</button>'
-            : '<button type="button" class="btn pub" data-set="public">Make public</button>') +
+          (!r.publishable
+            ? '<span class="pill private" title="Another channel\'s stream: never published, whatever is set here">Local only</span>'
+            : r.visibility === "public"
+              ? '<button type="button" class="btn priv" data-set="private">Make private</button>'
+              : '<button type="button" class="btn pub" data-set="public">Make public</button>') +
         "</td></tr>";
     }
     $("list").innerHTML = html + "</tbody></table>";
@@ -167,12 +181,13 @@
     setVisibility([id], b.dataset.set);
   });
   $("pub-shown").addEventListener("click", () => {
-    const ids = shown().map((r) => r.id);
-    if (ids.length && confirm("Make " + ids.length + " shown recording(s) public?")) setVisibility(ids, "public");
+    const ids = shown().filter((r) => r.publishable).map((r) => r.id);
+    if (!ids.length) { alert("Nothing publishable is shown (other channels are local only)."); return; }
+    if (confirm("Make " + ids.length + " shown recording(s) public?")) setVisibility(ids, "public");
   });
   $("priv-shown").addEventListener("click", () => { const ids = shown().map((r) => r.id); if (ids.length) setVisibility(ids, "private"); });
   $("priv-all").addEventListener("click", () => { if (confirm("Make every recording private?")) setVisibility([], "private", { all: true }); });
-  ["god", "vis"].forEach((id) => $(id).addEventListener("change", render));
+  ["god", "vis", "channel"].forEach((id) => $(id).addEventListener("change", render));
   $("filter").addEventListener("input", render);
   load();
 })();

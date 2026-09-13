@@ -53,6 +53,15 @@ def clip_name(recording_id: int, start_s: float, end_s: float, height: int = 720
     return f"r{int(recording_id)}_{int(round(start_s * 10))}_{int(round(end_s * 10))}_{height}p_a{tracks}.mp4"
 
 
+def tracks_for(configured: Sequence[int], audio_streams: int) -> List[int]:
+    """The configured audio tracks that actually exist in a file. A
+    downloaded Twitch VOD has one stream, so (0,1,2,3) becomes [0] and
+    the mixer is skipped; 0 (unknown / legacy rows) keeps them all."""
+    if not audio_streams or audio_streams <= 0:
+        return list(configured)
+    return [int(t) for t in configured if int(t) < int(audio_streams)]
+
+
 def _audio_args(audio_tracks: Sequence[int]) -> Tuple[List[str], List[str]]:
     """Return (filter_complex args, map args) for the wanted tracks."""
     tracks = list(dict.fromkeys(int(t) for t in audio_tracks))

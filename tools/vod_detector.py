@@ -40,7 +40,8 @@ from typing import Optional
 import numpy as np
 from PIL import Image
 
-from core.kda_reader import KDA_REGION, KdaReader
+from core.detector_profile import DetectorProfile
+from core.kda_reader import KdaReader
 
 
 # --- Constants -------------------------------------------------------------
@@ -373,10 +374,21 @@ class VodDetector:
         reader: KdaReader,
         options: Optional[VodDetectorOptions] = None,
         logger: Optional[logging.Logger] = None,
+        profile: Optional[DetectorProfile] = None,
     ):
         self.reader = reader
         self.opts = options or VodDetectorOptions()
         self.log = logger or logging.getLogger("VodDetector")
+        # Where the HUD lives in this source's 1080p canvas.  The default
+        # profile reproduces the VOD_CROP_* literals exactly; another
+        # channel's profile (core/detector_profile.py) moves the crop box
+        # and the portrait, and can switch portrait matching off.
+        self.profile = profile or DetectorProfile.default()
+        self._crop_x, self._crop_y, self._crop_w, self._crop_h = self.profile.crop_box()
+        # (width, height) of the current source, set by detect(); the
+        # per-frame refinement extractor scales non-1080p sources to match
+        # the coarse pass.
+        self._source_size: Optional[tuple[int, int]] = None
 
         # God identification state.  Populated lazily on first detect()
         # call (so importing this module doesn't load the icon library).
@@ -460,6 +472,7 @@ class VodDetector:
         duration, width, height = self._probe_video_info(video_path)
         if duration is None or duration <= 0:
             raise VodDetectorError(f"Could not probe duration of {video_path}")
+        self._source_size = (int(width), int(height)) if width and height else None
         # Stash for failure-event tagging — the failure callback formats
         # this string into the dashboard payload so the user can tell a
         # 4K alignment issue (which would shouldn't happen, since
@@ -1161,6 +1174,12 @@ class VodDetector:
         if self._god_matcher_init_attempted:
             return
         self._god_matcher_init_attempted = True
+        if not self.profile.portrait_enabled:
+            # A facecam / overlay covers this channel's portrait: no
+            # identification, everything files under unknown/ — events
+            # still detect.
+            self._god_matcher = None
+            return
 
         # Resolve the overlay-icons directory.  ``None`` means "use the
         # repo's default location"; setting it to a Path that doesn't
@@ -1181,12 +1200,21 @@ class VodDetector:
         elif str(reference_dir) == "":
             reference_dir = None  # explicit opt-out
 
+        # A loaded channel profile defaults both to False: James's OBS
+        # overlay art and his captured portrait references must never be
+        # matched against another streamer's frames.
+        if not self.profile.overlay_icons:
+            overlay_dir = None
+        if not self.profile.reference_icons:
+            reference_dir = None
+
         try:
             from core.god_matcher import GodMatcher
             matcher = GodMatcher(
                 icons_dir=self.opts.god_icons_dir,
                 overlay_icons_dir=overlay_dir,
                 reference_icons_dir=reference_dir,
+                portrait_region=self.profile.regions["portrait"],
             )
             if matcher.load_icons():
                 self._god_matcher = matcher
@@ -1367,13 +1395,9 @@ class VodDetector:
             #    KDA_REGION by the same crop_origin we'd use for reading
             #    so the slice lines up regardless of whether ``img`` is
             #    the cropped strip or a full 1920x1080 frame.
-            origin = (
-                (VOD_CROP_X, VOD_CROP_Y)
-                if img.size == (VOD_CROP_W, VOD_CROP_H)
-                else (0, 0)
-            )
+            origin = self._origin_for(img)
             ox, oy = origin
-            x1, y1, x2, y2 = KDA_REGION
+            x1, y1, x2, y2 = self.reader.kda_region
             kda_crop = img.crop((x1 - ox, y1 - oy, x2 - ox, y2 - oy))
             kda_crop.save(str(out_dir / f"{stem}.kda.png"))
         except Exception as e:
@@ -1754,11 +1778,7 @@ class VodDetector:
         ``video_t`` is the timestamp into the source video for the frame
         (seconds).  Only used to tag failure-event payloads; safe to omit.
         """
-        origin = (
-            (VOD_CROP_X, VOD_CROP_Y)
-            if img.size == (VOD_CROP_W, VOD_CROP_H)
-            else (0, 0)
-        )
+        origin = self._origin_for(img)
         img_array = np.array(img)
         if not self.reader.is_gameplay_screen(img_array, crop_origin=origin):
             self._fail_counts["gameplay_fail"] += 1
@@ -1825,11 +1845,7 @@ class VodDetector:
         ``reason`` is one of "implausible_baseline", "partial_decrease",
         "max_jump" — matching the labels used in :meth:`detect`.
         """
-        origin = (
-            (VOD_CROP_X, VOD_CROP_Y)
-            if img.size == (VOD_CROP_W, VOD_CROP_H)
-            else (0, 0)
-        )
+        origin = self._origin_for(img)
         extra = {
             "prev_kda": list(prev_kda) if prev_kda is not None else None,
             "read_kda": list(read_kda),
@@ -1949,6 +1965,40 @@ class VodDetector:
 
     # --- ffmpeg / ffprobe --------------------------------------------------
 
+    def _origin_for(self, img: Image.Image) -> tuple[int, int]:
+        """crop_origin for a frame: the profile's crop box origin when
+        ``img`` is the ffmpeg-cropped HUD strip, else (0, 0) for a full
+        1920x1080 frame."""
+        if img.size == (self._crop_w, self._crop_h):
+            return (self._crop_x, self._crop_y)
+        return (0, 0)
+
+    def _extract_frame_cmd(self, video_path: str, t: float) -> list[str]:
+        """ffmpeg argv for one PNG frame at ``t``.  Non-1080p sources are
+        scaled to 1920x1080 here too, so refinement reads see the same
+        geometry as the coarse pass (they used to index raw-resolution
+        pixels and silently fail on 720p/936p/4K sources)."""
+        cmd = [self.opts.ffmpeg, "-v", "error"]
+        if self.opts.hwaccel:
+            cmd.extend(["-hwaccel", self.opts.hwaccel])
+        cmd.extend(["-ss", f"{max(0.0, t):.3f}", "-i", video_path, "-frames:v", "1"])
+        if self._source_size and self._source_size != (1920, 1080):
+            cmd.extend(["-vf", "scale=1920:1080"])
+        cmd.extend(["-f", "image2pipe", "-c:v", "png", "-"])
+        return cmd
+
+    def _build_coarse_vf(self, width: int, height: int, do_crop: bool = True) -> tuple[str, int, int]:
+        """(-vf string, out_w, out_h) for the coarse seek scan: scale to
+        1080p when needed, then crop to the profile's HUD box."""
+        scale_filter = "" if (width == 1920 and height == 1080) else "scale=1920:1080,"
+        if do_crop:
+            out_w, out_h = self._crop_w, self._crop_h
+            crop_filter = f"crop={self._crop_w}:{self._crop_h}:{self._crop_x}:{self._crop_y},"
+        else:
+            out_w, out_h = 1920, 1080
+            crop_filter = ""
+        return (scale_filter + crop_filter).rstrip(","), out_w, out_h
+
     def _extract_frame(self, video_path: str, t: float) -> Optional[Image.Image]:
         """Pull a single PNG frame at time ``t`` from ``video_path``.
 
@@ -1962,17 +2012,7 @@ class VodDetector:
         # Fast-seek + per-frame decode.  ``-hwaccel`` goes before the input
         # URL so the seek itself can use the GPU decoder.  Keeping ``-ss``
         # before ``-i`` preserves fast-seek behavior.
-        cmd = [self.opts.ffmpeg, "-v", "error"]
-        if self.opts.hwaccel:
-            cmd.extend(["-hwaccel", self.opts.hwaccel])
-        cmd.extend([
-            "-ss", f"{max(0.0, t):.3f}",
-            "-i", video_path,
-            "-frames:v", "1",
-            "-f", "image2pipe",
-            "-c:v", "png",
-            "-",
-        ])
+        cmd = self._extract_frame_cmd(video_path, t)
         try:
             result = subprocess.run(
                 cmd,
@@ -2108,31 +2148,8 @@ class VodDetector:
             )
             return
 
-        streamed_any = False
-
-        if width and height:
-            try:
-                for t, img in self._stream_raw_frames(
-                    video_path, width, height, interval, scan_end
-                ):
-                    streamed_any = True
-                    yield t, img
-            except Exception as e:
-                if not streamed_any:
-                    self.log.warning(
-                        f"Streaming extraction failed ({e}), "
-                        f"falling back to per-frame ffmpeg seeks."
-                    )
-                else:
-                    # Partial success — just stop.  The detect() loop will
-                    # emit whatever events we've accumulated up to this point.
-                    self.log.warning(
-                        f"Streaming cut short ({e}); "
-                        f"keeping events found so far."
-                    )
-                    return
-            if streamed_any:
-                return
+        # (A streaming ffmpeg backend used to live here; it was never
+        # wired up, so --no-seek-scan is simply the slow per-frame path.)
 
         # Fallback: one ffmpeg per sample, classic path.
         t = 0.0
@@ -2173,28 +2190,12 @@ class VodDetector:
         scan_end = max(0.0, duration - 0.5)
         do_crop = bool(getattr(self.opts, "ffmpeg_crop", True))
 
-        # Build the scale+crop filter chain.  No fps filter here — we
-        # control the sample cadence ourselves via the -ss loop.
-        if width == 1920 and height == 1080:
-            scale_filter = ""
-        else:
-            scale_filter = "scale=1920:1080,"
-            if self.opts.verbose:
-                self.log.info(
-                    f"[VodDetector] Source is {width}x{height} — adding "
-                    "scale=1920:1080 to the seek-based ffmpeg pipeline."
-                )
-
-        if do_crop:
-            out_w, out_h = VOD_CROP_W, VOD_CROP_H
-            crop_filter = (
-                f"crop={VOD_CROP_W}:{VOD_CROP_H}:{VOD_CROP_X}:{VOD_CROP_Y},"
+        vf, out_w, out_h = self._build_coarse_vf(width, height, do_crop)
+        if self.opts.verbose and (width, height) != (1920, 1080):
+            self.log.info(
+                f"[VodDetector] Source is {width}x{height} — adding "
+                "scale=1920:1080 to the seek-based ffmpeg pipeline."
             )
-        else:
-            out_w, out_h = 1920, 1080
-            crop_filter = ""
-
-        vf = (scale_filter + crop_filter).rstrip(",")
         frame_bytes = out_w * out_h * 3
 
         # Track the last successfully-yielded timestamp so we can decide

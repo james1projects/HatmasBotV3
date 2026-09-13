@@ -116,6 +116,7 @@
   .badge.kill { background: var(--green-bg); color: var(--green); }
   .badge.multikill { background: var(--accent); color: var(--bg); }
   .badge.death { background: var(--red-bg); color: var(--red); }
+  .badge.channel { background: #3a2f5a; color: #d9ccff; }
   .badge.speaker { background: var(--panel-hi); color: var(--text); }
   .badge.vis-private { background: var(--bg-2); color: var(--text-fade); border: 1px dashed var(--border-hi); }
   .badge.vis-public { background: var(--green-bg); color: var(--green); }
@@ -193,6 +194,7 @@
         <option value="short">Clip: short</option>
       </select>
       <select id="god" aria-label="Filter by god"><option value="">All gods</option></select>
+      <select id="channel" aria-label="Channel" title="Whose stream" hidden></select>
     </div>
 
     <div class="results-head"><span id="head">Latest moments</span><span class="note" id="note"></span></div>
@@ -203,7 +205,9 @@
 <script>
 (function () {
   const $ = (id) => document.getElementById(id);
-  const state = { q: "", god: "", event: "", offset: 0, limit: 20, total: 0, key: "", mode: "hybrid", len: "normal" };
+  const state = { q: "", god: "", event: "", offset: 0, limit: 20, total: 0, key: "", mode: "hybrid", len: "normal", channel: "" };
+  const OWNER = "hatmaster";
+  const NAMES = {};   // channel login -> display name, from /api/vod/stats
   function clipSrc(url) { return url + (state.len && state.len !== "normal" ? "?len=" + state.len : ""); }
   let activeVideo = null;
 
@@ -230,18 +234,25 @@
     return "";
   }
 
-  function speakerChip(sp) {
-    if (!sp) return "";
-    const label = sp === "hatmaster" ? "Hatmaster" : "Friends";
-    return '<span class="badge speaker">' + label + "</span>";
+  function speakerChip(m) {
+    const sp = m.speaker;
+    if (!sp || String(sp).startsWith("dup:")) return "";
+    const ch = m.channel || OWNER;
+    const label = sp === ch ? (NAMES[ch] || (ch === OWNER ? "Hatmaster" : ch)) : "Friends";
+    return '<span class="badge speaker">' + esc(label) + "</span>";
   }
 
   function renderCard(m) {
     const card = document.createElement("article");
     card.className = "card";
+    const owner = !m.channel || m.channel === OWNER;
     const god = m.god
-      ? '<span class="god"><a href="/god/' + encodeURIComponent(m.god) + '">' + esc(m.god) + "</a></span>"
+      ? (owner
+          ? '<span class="god"><a href="/god/' + encodeURIComponent(m.god) + '">' + esc(m.god) + "</a></span>"
+          : '<span class="god">' + esc(m.god) + "</span>")
       : '<span class="god">Unknown god</span>';
+    const channelTag = owner ? "" :
+      '<span class="badge channel" title="' + esc(m.title || "") + '">' + esc(NAMES[m.channel] || m.channel) + "</span>";
     const badges = (m.events || []).map(badgeFor).join("");
     const line = m.snippet
       ? '<p class="line' + (m.hidden ? " redacted" : "") + '">' + snippetHtml(m.snippet) + "</p>"
@@ -252,10 +263,10 @@
         '<div class="play"></div>' +
       "</div>" +
       "<div>" +
-        '<div class="meta">' + god +
+        '<div class="meta">' + god + channelTag +
           '<span class="mono">' + esc(m.date || "") + "</span>" +
           '<span class="mono">' + esc(m.clock || "") + "</span>" +
-          speakerChip(m.speaker) + badges +
+          speakerChip(m) + badges +
           (m.hidden ? '<span class="badge hidden" title="Redacted: visitors never see this line">Hidden</span>' : "") +
           (m.via === "meaning" ? '<span class="badge via" title="Matched by meaning, not exact words' + (m.score != null ? ", similarity " + m.score : "") + '">meaning</span>' : "") +
           (m.visibility ? '<span class="badge vis-' + esc(m.visibility) + '" title="Only public recordings are shown to viewers">' + (m.visibility === "public" ? "Public" : "Private") + "</span>" : "") +
@@ -356,6 +367,7 @@
       if (state.god) p.set("god", state.god);
       if (state.event) p.set("event", state.event);
       if (state.mode && state.mode !== "hybrid") p.set("mode", state.mode);
+      if (state.channel) p.set("channel", state.channel);
     }
     const qs = p.toString();
     history.replaceState(null, "", location.pathname + (qs ? "?" + qs : ""));
@@ -369,7 +381,7 @@
 
   async function loadStats() {
     try {
-      const s = await fetchJson("/api/vod/stats");
+      const s = await fetchJson("/api/vod/stats" + (state.channel ? "?channel=" + encodeURIComponent(state.channel) : ""));
       const kills = ((s.events || {}).kill || 0) + ((s.events || {}).multikill || 0);
       if (!s.ready) {
         $("stats").textContent = "The archive is still being built. Check back soon.";
@@ -386,6 +398,22 @@
       });
       sel.value = state.god;
       if (sel.value !== state.god) { state.god = ""; }
+      const chans = s.channels || [];
+      chans.forEach((c) => { NAMES[c.channel] = c.display_name || c.channel; });
+      const csel = $("channel");
+      if (s.local && chans.length > 1) {
+        csel.innerHTML = "";
+        chans.forEach((c) => {
+          const o = document.createElement("option");
+          o.value = c.channel; o.textContent = (c.display_name || c.channel) + " (" + c.recordings + ")";
+          csel.appendChild(o);
+        });
+        const all = document.createElement("option");
+        all.value = "all"; all.textContent = "All channels";
+        csel.appendChild(all);
+        csel.value = state.channel || OWNER;
+        csel.hidden = false;
+      }
     } catch (_) {
       $("stats").textContent = "";
     }
@@ -406,6 +434,7 @@
       if (state.god) p.set("god", state.god);
       if (state.event) p.set("event", state.event);
       if (state.mode && state.mode !== "hybrid") p.set("mode", state.mode);
+      if (state.channel) p.set("channel", state.channel);
     }
     let res;
     try {
@@ -488,6 +517,13 @@
     if (state.q) search(false);
   });
   $("more").addEventListener("click", () => search(true));
+  $("channel").addEventListener("change", () => {
+    state.channel = $("channel").value === OWNER ? "" : $("channel").value;
+    state.god = ""; $("god").value = "";
+    // the god list is per channel: rebuild it, then search
+    const sel = $("god"); sel.innerHTML = '<option value="">All gods</option>';
+    loadStats().then(() => search(false));
+  });
 
   // ── boot ──
   const params = new URLSearchParams(location.search);
@@ -496,6 +532,7 @@
   state.event = params.get("event") || "";
   state.key = (params.get("clip") || "").trim();
   state.mode = ["hybrid", "keyword", "meaning"].includes(params.get("mode")) ? params.get("mode") : "hybrid";
+  state.channel = /^([a-z0-9_]{1,25})$/.test(params.get("channel") || "") && params.get("channel") !== OWNER ? params.get("channel") : "";
   try { const l = localStorage.getItem("vod.len"); if (l && ["short", "normal", "long"].includes(l)) { state.len = l; $("len").value = l; } } catch (_) {}
   document.querySelectorAll("[data-mode]").forEach((c) => c.setAttribute("aria-pressed", c.dataset.mode === state.mode ? "true" : "false"));
   $("q").value = state.q;

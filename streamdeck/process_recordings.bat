@@ -52,7 +52,7 @@ REM code is logged but never masks the sorter's.
 echo. >> "data\process_recordings.log"
 echo --- vod_index (Ask the VOD) --- >> "data\process_recordings.log"
 powershell -NoProfile -Command ^
-    "& { python toolsod_index.py index 2>&1 | Tee-Object -FilePath 'data\process_recordings.log' -Append }"
+    "& { python tools\vod_index.py index 2>&1 | Tee-Object -FilePath 'data\process_recordings.log' -Append }"
 echo vod_index exit code %ERRORLEVEL% >> "data\process_recordings.log"
 
 echo. >> "data\process_recordings.log"

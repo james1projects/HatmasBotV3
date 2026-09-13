@@ -28,23 +28,10 @@ from . import clips as clips_mod
 from .indexer import (DEFAULT_TRACKS, IndexOptions, embed_pending, fmt_hms, refresh_events,
                       relabel_speakers, run as run_index)
 from .transcribe import DEFAULT_INITIAL_PROMPT
-from .store import Store
+from .store import OWNER_CHANNEL, Store
 
 
-def parse_tracks(spec: str) -> Dict[int, str]:
-    """'1:hatmaster,2:discord,3:misc' -> {1: 'hatmaster', ...}. A bare
-    number gets the label 'track<N>'."""
-    out: Dict[int, str] = {}
-    for part in (spec or "").split(","):
-        part = part.strip()
-        if not part:
-            continue
-        if ":" in part:
-            idx, label = part.split(":", 1)
-            out[int(idx)] = label.strip() or f"track{int(idx)}"
-        else:
-            out[int(part)] = f"track{int(part)}"
-    return out
+from .channels import parse_tracks  # noqa: E402  (shared with the channel registry)
 
 
 def build_parser(defaults: Optional[dict] = None) -> argparse.ArgumentParser:
@@ -85,6 +72,10 @@ def build_parser(defaults: Optional[dict] = None) -> argparse.ArgumentParser:
     ix.add_argument("--embed-host", default=d.get("embed_host", "http://localhost:11434"))
     ix.add_argument("--embed-model", default=d.get("embed_model", "nomic-embed-text"))
     ix.add_argument("--dry-run", action="store_true")
+    ix.add_argument("--channel", default=OWNER_CHANNEL,
+                    help="recordings.channel for this root (a downloaded Twitch channel's login)")
+    ix.add_argument("--primary-speaker", default=None,
+                    help="label of the streamer's own track (default: the channel)")
 
     se = sub.add_parser("search", help="full-text search over the transcript")
     se.add_argument("query", nargs="+")
@@ -92,6 +83,7 @@ def build_parser(defaults: Optional[dict] = None) -> argparse.ArgumentParser:
     se.add_argument("--god")
     se.add_argument("--event", choices=["any", "kill", "multikill", "death", "assist"])
     se.add_argument("--speaker")
+    se.add_argument("--channel", help="only this channel's recordings")
     se.add_argument("--limit", type=int, default=20)
     se.add_argument("--semantic", action="store_true", help="rank by meaning (needs embeddings)")
     se.add_argument("--embed-host", default=d.get("embed_host", "http://localhost:11434"))
@@ -111,6 +103,7 @@ def build_parser(defaults: Optional[dict] = None) -> argparse.ArgumentParser:
     add_db(br)
     br.add_argument("--god")
     br.add_argument("--event", choices=["any", "kill", "multikill", "death", "assist"], default="any")
+    br.add_argument("--channel")
     br.add_argument("--limit", type=int, default=20)
 
     cl = sub.add_parser("clip", help="render a clip for a segment / event / time span")
@@ -141,10 +134,12 @@ def build_parser(defaults: Optional[dict] = None) -> argparse.ArgumentParser:
         vp.add_argument("--god", help="every done recording of this god")
         vp.add_argument("--folder", help="every done recording in this folder (e.g. Ymir, mixed, unknown)")
         vp.add_argument("--all", action="store_true", help="every done recording")
+        vp.add_argument("--channel", help="restrict --god/--folder/--all to this channel")
 
     stt = sub.add_parser("stats", help="index statistics")
     add_db(stt)
     stt.add_argument("--errors", action="store_true", help="list recordings in error state")
+    stt.add_argument("--channel")
     return p
 
 
@@ -171,7 +166,8 @@ def cmd_index(a) -> int:
         min_duration_s=a.min_duration, min_speech_frac=a.min_speech,
         ffmpeg=a.ffmpeg, ffprobe=a.ffprobe, force=a.force, limit=a.limit,
         include_root=a.include_root, dry_run=a.dry_run, prune_missing=not a.no_prune,
-        embed=not a.no_embed, embed_host=a.embed_host, embed_model=a.embed_model)
+        embed=not a.no_embed, embed_host=a.embed_host, embed_model=a.embed_model,
+        channel=a.channel or OWNER_CHANNEL, primary_speaker=a.primary_speaker)
     counters = run_index(opts)
     return 1 if counters["errors"] and not counters["indexed"] else 0
 
@@ -188,10 +184,12 @@ def cmd_search(a) -> int:
                 return 2
             scored = top_k(emb.embed_query(q), ids, mat, k=a.limit * 4)
             moments = store.moments_for_segments(scored, god=a.god, event=a.event,
-                                                 speaker=a.speaker, limit=a.limit)
+                                                 speaker=a.speaker, limit=a.limit,
+                                                 channel=a.channel)
             res = {"mode": "semantic", "total": len(moments), "moments": moments}
         else:
-            res = store.search(q, god=a.god, event=a.event, speaker=a.speaker, limit=a.limit)
+            res = store.search(q, god=a.god, event=a.event, speaker=a.speaker, limit=a.limit,
+                               channel=a.channel)
     _print_moments(res)
     return 0
 
@@ -218,7 +216,7 @@ def cmd_embed(a) -> int:
 
 def cmd_browse(a) -> int:
     with Store(a.db) as store:
-        res = store.browse(god=a.god, event=a.event, limit=a.limit)
+        res = store.browse(god=a.god, event=a.event, limit=a.limit, channel=a.channel)
     _print_moments(res)
     return 0
 
@@ -269,23 +267,29 @@ def cmd_visibility(a) -> int:
     with Store(a.db) as store:
         ids = list(a.recording or [])
         if a.god:
-            ids += store.recording_ids(god=a.god)
+            ids += store.recording_ids(god=a.god, channel=a.channel)
         if a.folder:
-            ids += store.recording_ids(folder=a.folder)
+            ids += store.recording_ids(folder=a.folder, channel=a.channel)
         if a.all:
-            ids += store.recording_ids()
+            ids += store.recording_ids(channel=a.channel)
         if not ids:
             print("nothing selected: pass --recording ID, --god NAME, --folder NAME, or --all", file=sys.stderr)
             return 2
-        n = store.set_visibility(sorted(set(ids)), vis)
+        ids = sorted(set(ids))
+        n = store.set_visibility(ids, vis)
         s = store.stats()
-    print(f"{n} recording(s) now {vis}; archive: {s['by_visibility']}")
+    refused = len(ids) - n
+    print(f"{n} recording(s) now {vis}; archive: {s['by_visibility']}"
+          + (f"; {refused} refused (only {OWNER_CHANNEL} recordings can be public)"
+             if vis == "public" and refused > 0 else ""))
     return 0
 
 
 def cmd_stats(a) -> int:
     with Store(a.db) as store:
-        s = store.stats()
+        s = store.stats(channel=a.channel)
+        print("channels:   " + ", ".join(f"{c['channel']} ({c['recordings']} rec, {c['hours']} h)"
+                                         for c in s.get("channels") or []))
         print(f"recordings: {s['recordings']} done ({s['hours']} h), status {s['by_status']},"
               f" visibility {s.get('by_visibility')}")
         print(f"segments:   {s['segments']} ({s['words']} words)")

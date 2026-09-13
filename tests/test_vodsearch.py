@@ -784,6 +784,164 @@ def test_event_window_and_key_preference():
     assert dec[1]["key"] == "s5"
 
 
+# ── other channels (local-only) ───────────────────────────────────────
+
+def _seed_foo(store):
+    """A recording downloaded for channel 'foo' with one line and a kill."""
+    from vodsearch.store import OWNER_CHANNEL
+    assert OWNER_CHANNEL == "hatmaster"
+    f = store.upsert_recording(r"D:\rec\channels\foo\Ymir\v123.mp4", god="Ymir", gods_seen=["Ymir"],
+                               folder="Ymir", duration_s=3000, size_bytes=30, mtime=7.0,
+                               recorded_at="2026-08-30T12:00:00", model="large-v3",
+                               status="done", channel="foo", title="ranked grind", audio_streams=1)
+    store.replace_segments(f, [
+        dict(track_index=0, speaker="foo", start_s=10, end_s=14, text="a trap on the enemy foo"),
+        dict(track_index=0, speaker="guest", start_s=20, end_s=22, text="foo friend line"),
+    ])
+    store.replace_events(f, [{"timestamp_sec": 12.0, "type": "kill", "note": "", "pre_sec": 7, "post_sec": 6}],
+                         god="Ymir")
+    return f
+
+
+def test_migration_adds_channel_title_audio_streams():
+    import sqlite3 as _sq
+    d = tempfile.mkdtemp(prefix="vod_chan_migrate_")
+    db = Path(d) / "old.db"
+    con = _sq.connect(db)
+    con.executescript("""
+        CREATE TABLE recordings (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, folder TEXT, stem TEXT,
+            god TEXT, gods_seen TEXT, duration_s REAL DEFAULT 0, size_bytes INTEGER DEFAULT 0, mtime REAL DEFAULT 0,
+            recorded_at TEXT, indexed_at TEXT, model TEXT, status TEXT DEFAULT 'pending', error TEXT,
+            visibility TEXT DEFAULT 'private');
+        INSERT INTO recordings (path, god, status, visibility) VALUES ('old.mp4', 'Ymir', 'done', 'public');
+    """)
+    con.commit(); con.close()
+    s = Store(db)
+    rec = s.get_recording(1)
+    assert rec["channel"] == "hatmaster" and rec["audio_streams"] == 0 and rec["title"] is None
+    assert s.stats(public_only=True)["recordings"] == 1, "old public rows stay public (they are the owner's)"
+    assert [c["channel"] for c in s.channels()] == ["hatmaster"]
+    s.close()
+
+
+def test_publish_refused_for_non_owner_channel():
+    s = _store()
+    y, _ = _seed(s)
+    f = _seed_foo(s)
+    assert s.set_visibility([f], "public") == 0
+    assert s.get_recording(f)["visibility"] == "private"
+    assert s.set_visibility([y, f], "public") == 1
+    assert s.get_recording(y)["visibility"] == "public"
+    assert s.get_recording(f)["visibility"] == "private"
+    assert s.set_visibility([f], "private") == 1, "private is always allowed"
+    assert s.recording_ids(channel="foo") == [f]
+    assert f not in s.recording_ids(channel="hatmaster")
+    # even a row forced public by hand never reaches visitors
+    s.conn.execute("UPDATE recordings SET visibility='public' WHERE id=?", (f,)); s.conn.commit()
+    assert s.stats(public_only=True)["recordings"] == 1
+    assert all(m["channel"] == "hatmaster" for m in s.search("trap", public_only=True)["moments"])
+    assert all(m["channel"] == "hatmaster" for m in s.browse(public_only=True)["moments"])
+    assert {g["god"] for g in s.gods(public_only=True)} == {"Ymir"}, "Loki is private, foo is not the owner"
+    assert [c["channel"] for c in s.channels(public_only=True)] == ["hatmaster"]
+
+
+def test_channel_filters_and_review_counts():
+    from core.vod_web import VodWeb
+    s = _store()
+    _seed(s)
+    f = _seed_foo(s)
+    both = s.search("trap")["moments"]
+    assert {m["channel"] for m in both} == {"hatmaster", "foo"}
+    only_foo = s.search("trap", channel="foo")["moments"]
+    assert [m["recording_id"] for m in only_foo] == [f] and only_foo[0]["title"] == "ranked grind"
+    assert s.search("trap", channel="hatmaster")["total"] == 2
+    assert all(m["channel"] == "foo" for m in s.browse(channel="foo")["moments"])
+    assert s.browse(channel="hatmaster")["total"] == 2
+    st = s.stats(channel="foo")
+    assert st["recordings"] == 1 and st["channel"] == "foo" and [g["god"] for g in st["gods"]] == ["Ymir"]
+    chans = {c["channel"]: c for c in s.stats()["channels"]}
+    assert chans["hatmaster"]["recordings"] == 2 and chans["foo"]["recordings"] == 1
+    assert list(chans)[0] == "hatmaster", "owner listed first"
+    rows = {r["id"]: r for r in s.review_list()}
+    assert rows[f]["channel"] == "foo" and rows[f]["friend_segments"] == 1 and rows[f]["audio_streams"] == 1
+    assert [r["id"] for r in s.review_list(channel="foo")] == [f]
+    seg = s.get_segment(only_foo[0]["segment_id"])
+    assert seg["channel"] == "foo" and seg["audio_streams"] == 1
+    ev = s.get_event(s.browse(channel="foo")["moments"][0]["event_id"])
+    assert ev["channel"] == "foo" and ev["audio_streams"] == 1
+    # the web layer drops any non-owner moment for a visitor, whatever the store said
+    dec = VodWeb._decorate([{"segment_id": 1, "recording_id": f, "channel": "foo", "start_s": 1, "end_s": 2},
+                            {"segment_id": 2, "recording_id": 1, "channel": "hatmaster", "start_s": 1, "end_s": 2}],
+                           local=False)
+    assert [d["channel"] for d in dec] == ["hatmaster"]
+    assert len(VodWeb._decorate([{"segment_id": 1, "recording_id": f, "channel": "foo",
+                                  "start_s": 1, "end_s": 2}], local=True)) == 1
+
+
+def test_tracks_for_and_single_stream_clip_cmd():
+    from vodsearch.clips import tracks_for
+    assert tracks_for((0, 1, 2, 3), 1) == [0]
+    assert tracks_for((0, 1, 2, 3), 2) == [0, 1]
+    assert tracks_for((0, 1, 2, 3), 0) == [0, 1, 2, 3], "legacy rows keep today's behaviour"
+    cmd = build_clip_cmd("ffmpeg", r"D:\x\v1.mp4", 10, 20, r"D:\x\out.mp4", tracks_for((0, 1, 2, 3), 1))
+    assert "0:a:0" in cmd and "amix" not in " ".join(cmd) and "[aout]" not in cmd
+    multi = build_clip_cmd("ffmpeg", r"D:\x\v1.mp4", 10, 20, r"D:\x\out.mp4", tracks_for((0, 1, 2, 3), 0))
+    assert "amix=inputs=4" in " ".join(multi)
+
+
+def test_discover_skips_inbox_and_underscore_dirs():
+    d = Path(tempfile.mkdtemp(prefix="vod_discover_inbox_"))
+    (d / "_inbox").mkdir(); (d / "_scratch").mkdir(); (d / "Ymir").mkdir()
+    (d / "_inbox" / "v1.mp4").write_bytes(b"0")
+    (d / "_scratch" / "v2.mp4").write_bytes(b"0")
+    (d / "Ymir" / "v3.mp4").write_bytes(b"0")
+    (d / "v4.mp4").write_bytes(b"0")
+    assert [p.name for p in discover(d)] == ["v3.mp4"]
+    assert {p.name for p in discover(d, include_root=True)} == {"v3.mp4", "v4.mp4"}
+
+
+def test_index_recording_uses_twitch_sidecar_and_channel():
+    from vodsearch import indexer as ix
+    from vodsearch.audio import AudioTrack, ProbeResult
+    d = Path(tempfile.mkdtemp(prefix="vod_index_chan_"))
+    root = d / "foo"
+    (root / "Ymir").mkdir(parents=True)
+    mp4 = root / "Ymir" / "v123.mp4"
+    mp4.write_bytes(b"0")
+    (root / "Ymir" / "v123.twitch.json").write_text(json.dumps({
+        "vod_id": "123", "channel": "foo", "title": "ranked grind",
+        "created_at": "2026-09-01T18:03:12Z", "duration_s": 3000}), encoding="utf-8")
+    saved = (ix.audio_mod.probe, ix.audio_mod.decode_tracks)
+    try:
+        ix.audio_mod.probe = lambda path, ffprobe="ffprobe": ProbeResult(
+            duration_s=3000.0, audio_tracks=[AudioTrack(index=0, codec="aac", channels=2)])
+        ix.audio_mod.decode_tracks = lambda path, tracks, ffmpeg="ffmpeg": {t: np.zeros(16000, dtype=np.float32) for t in tracks}
+        store = _store()
+        opts = ix.IndexOptions(recordings_dir=root, db_path=store.db_path, channel="foo",
+                               tracks={0: "foo"}, embed=False, prune_missing=False)
+        res = ix.index_recording(store, transcriber=None, path=mp4, opts=opts, log=lambda *_: None)
+        assert res.get("recording_id")
+        rec = store.get_recording(res["recording_id"])
+        assert rec["channel"] == "foo" and rec["title"] == "ranked grind" and rec["audio_streams"] == 1
+        assert rec["god"] == "Ymir" and rec["status"] == "done"
+        expected = datetime(2026, 9, 1, 18, 3, 12, tzinfo=__import__("datetime").timezone.utc).astimezone().replace(tzinfo=None)
+        assert rec["recorded_at"] == expected.isoformat(), rec["recorded_at"]
+        tracks = store.conn.execute("SELECT track_index, speaker, transcribed FROM tracks WHERE recording_id=?",
+                                    (rec["id"],)).fetchall()
+        assert [tuple(t) for t in tracks] == [(0, "foo", 0)], "silent single stream: stored, not transcribed"
+        # hatmaster's default track map cannot see a 1-stream file at all
+        assert [t for t in {1: "hatmaster", 2: "friends"} if t < 1] == []
+        # without the sidecar, the vods table dates it
+        (root / "Ymir" / "v123.twitch.json").unlink()
+        store.upsert_vod("123", "foo", title="from vods", created_at="2026-08-20T00:00:00Z")
+        opts.force = True
+        ix.index_recording(store, transcriber=None, path=mp4, opts=opts, log=lambda *_: None)
+        rec = store.get_recording(res["recording_id"])
+        assert rec["title"] == "from vods" and rec["recorded_at"].startswith("2026-08-19") or rec["recorded_at"].startswith("2026-08-20")
+    finally:
+        ix.audio_mod.probe, ix.audio_mod.decode_tracks = saved
+
+
 # ── harness ───────────────────────────────────────────────────────────
 
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

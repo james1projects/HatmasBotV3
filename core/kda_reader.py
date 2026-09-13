@@ -34,7 +34,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Mapping, Optional, Sequence
 
 import numpy as np
 from PIL import Image
@@ -188,6 +188,9 @@ class KdaReader:
         debug_dir: Optional[Path] = None,
         logger: Optional[logging.Logger] = None,
         group_mode: str = "fields",
+        regions: Optional[Mapping[str, Sequence[int]]] = None,
+        kda_field_windows: Optional[Mapping[str, Sequence[int]]] = None,
+        template_dir: Optional[Path] = None,
     ):
         # group_mode: how digit components are split into K / D / A.
         #   "fields" — DEFAULT since 2026-07-10: fixed positional
@@ -206,6 +209,23 @@ class KdaReader:
         if group_mode not in ("gaps", "fields"):
             raise ValueError(f"unknown group_mode: {group_mode!r}")
         self._group_mode = group_mode
+        # Region geometry is INSTANCE state so one process can read
+        # frames from differently laid-out HUDs (another streamer's VOD
+        # via a core.detector_profile.DetectorProfile).  With no
+        # ``regions`` the module constants apply — the live plugin and
+        # every existing caller are unchanged.
+        regions = regions or {}
+        self._kda_region = tuple(regions.get("kda", KDA_REGION))
+        self._overlay_check_region = tuple(regions.get("overlay_check", OVERLAY_CHECK_REGION))
+        self._hud_check_region = tuple(regions.get("hud_check", HUD_CHECK_REGION))
+        self._gameplay_check_region = tuple(regions.get("gameplay_check", GAMEPLAY_CHECK_REGION))
+        self._field_windows = (
+            {k: tuple(v) for k, v in kda_field_windows.items()}
+            if kda_field_windows else dict(KDA_FIELD_WINDOWS)
+        )
+        # Optional per-profile digit template library (another channel's
+        # HUD scale may need its own enrolments; never pollute the shared one).
+        self._template_dir = Path(template_dir) if template_dir else None
         self._data_dir = Path(data_dir) if data_dir else _default_data_dir()
         self._tesseract_path = tesseract_path
         self._debug = debug
@@ -293,6 +313,20 @@ class KdaReader:
             self._logger.warning(f"Tesseract not working: {e}")
             return False
 
+    @property
+    def kda_region(self) -> tuple:
+        """(x1, y1, x2, y2) this reader crops for K/D/A, in 1080p coords."""
+        return self._kda_region
+
+    @property
+    def regions(self) -> dict:
+        return {
+            "kda": self._kda_region,
+            "overlay_check": self._overlay_check_region,
+            "hud_check": self._hud_check_region,
+            "gameplay_check": self._gameplay_check_region,
+        }
+
     def load_digit_matcher(self):
         """Load the template-based digit matcher from DATA_DIR/digit_templates."""
         try:
@@ -303,7 +337,7 @@ class KdaReader:
             return
 
         try:
-            template_dir = self._data_dir / "digit_templates"
+            template_dir = self._template_dir or (self._data_dir / "digit_templates")
             self._digit_matcher = DigitMatcher(template_dir)
             if self._digit_matcher.is_loaded:
                 coverage = sorted(self._digit_matcher.digit_coverage)
@@ -354,14 +388,14 @@ class KdaReader:
         ox, oy = crop_origin
 
         # Stage 1: upper-left dark-pixel ratio
-        x1, y1, x2, y2 = OVERLAY_CHECK_REGION
+        x1, y1, x2, y2 = self._overlay_check_region
         region = img_array[y1 - oy:y2 - oy, x1 - ox:x2 - ox]
         dark_ratio = float(np.mean(region < 40))
         if dark_ratio <= OVERLAY_DARK_THRESHOLD:
             return False
 
         # Stage 2: K/D/A bar must also be dim (real overlays cover it)
-        kx1, ky1, kx2, ky2 = KDA_REGION
+        kx1, ky1, kx2, ky2 = self._kda_region
         kda_region = img_array[ky1 - oy:ky2 - oy, kx1 - ox:kx2 - ox]
         bar_std = float(np.std(kda_region))
         if bar_std >= OVERLAY_BAR_VISIBLE_STD:
@@ -386,7 +420,7 @@ class KdaReader:
         h, w = img_array.shape[:2]
 
         # Check 1: ability bar
-        x1, y1, x2, y2 = HUD_CHECK_REGION
+        x1, y1, x2, y2 = self._hud_check_region
         x1s, y1s, x2s, y2s = x1 - ox, y1 - oy, x2 - ox, y2 - oy
         if y2s <= h and x2s <= w and x1s >= 0 and y1s >= 0:
             region = img_array[y1s:y2s, x1s:x2s]
@@ -401,7 +435,7 @@ class KdaReader:
             return True
 
         # Check 2: god portrait + health/mana
-        x1, y1, x2, y2 = GAMEPLAY_CHECK_REGION
+        x1, y1, x2, y2 = self._gameplay_check_region
         x1s, y1s, x2s, y2s = x1 - ox, y1 - oy, x2 - ox, y2 - oy
         if y2s <= h and x2s <= w and x1s >= 0 and y1s >= 0:
             gp_region = img_array[y1s:y2s, x1s:x2s]
@@ -461,7 +495,7 @@ class KdaReader:
                     pytesseract.pytesseract.tesseract_cmd = self._tesseract_path
 
             ox, oy = crop_origin
-            x1, y1, x2, y2 = KDA_REGION
+            x1, y1, x2, y2 = self._kda_region
             crop = img.crop((x1 - ox, y1 - oy, x2 - ox, y2 - oy))
             gray = np.array(crop.convert("L"))
 
@@ -574,7 +608,7 @@ class KdaReader:
         h, w = img_array.shape[:2]
 
         # --- Ability bar (HUD_CHECK_REGION) ---
-        x1, y1, x2, y2 = HUD_CHECK_REGION
+        x1, y1, x2, y2 = self._hud_check_region
         x1s, y1s, x2s, y2s = x1 - ox, y1 - oy, x2 - ox, y2 - oy
         if y2s <= h and x2s <= w and x1s >= 0 and y1s >= 0:
             r = img_array[y1s:y2s, x1s:x2s]
@@ -585,7 +619,7 @@ class KdaReader:
             hud_mean = 0.0
 
         # --- Portrait + health bar (GAMEPLAY_CHECK_REGION) ---
-        x1, y1, x2, y2 = GAMEPLAY_CHECK_REGION
+        x1, y1, x2, y2 = self._gameplay_check_region
         x1s, y1s, x2s, y2s = x1 - ox, y1 - oy, x2 - ox, y2 - oy
         if y2s <= h and x2s <= w and x1s >= 0 and y1s >= 0:
             r = img_array[y1s:y2s, x1s:x2s]
@@ -599,11 +633,11 @@ class KdaReader:
         )
 
         # --- Overlay (store/scoreboard) two-stage check ---
-        x1, y1, x2, y2 = OVERLAY_CHECK_REGION
+        x1, y1, x2, y2 = self._overlay_check_region
         ovl = img_array[y1 - oy:y2 - oy, x1 - ox:x2 - ox]
         overlay_dark_ratio = float(np.mean(ovl < 40)) if ovl.size else 0.0
 
-        kx1, ky1, kx2, ky2 = KDA_REGION
+        kx1, ky1, kx2, ky2 = self._kda_region
         kda_region = img_array[ky1 - oy:ky2 - oy, kx1 - ox:kx2 - ox]
         overlay_bar_std = float(np.std(kda_region)) if kda_region.size else 0.0
         kda_crop_std = overlay_bar_std  # same region — alias for clarity
@@ -687,7 +721,7 @@ class KdaReader:
                     pytesseract.pytesseract.tesseract_cmd = self._tesseract_path
 
             ox, oy = crop_origin
-            x1, y1, x2, y2 = KDA_REGION
+            x1, y1, x2, y2 = self._kda_region
             crop = img.crop((x1 - ox, y1 - oy, x2 - ox, y2 - oy))
             result["crop"] = crop
             gray = np.array(crop.convert("L"))
@@ -1240,7 +1274,7 @@ class KdaReader:
             buckets = {"K": [], "D": [], "A": []}
             for comp in digits:
                 center = comp[0] + comp[2] / 2.0
-                for label, (w0, w1) in KDA_FIELD_WINDOWS.items():
+                for label, (w0, w1) in self._field_windows.items():
                     if w0 <= center <= w1:
                         buckets[label].append(comp)
                         break

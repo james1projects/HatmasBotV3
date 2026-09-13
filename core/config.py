@@ -508,6 +508,26 @@ VOD_STREAM_MAX_CONCURRENT = 2            # simultaneous live transcodes (each ho
 VOD_FFMPEG = "ffmpeg"
 VOD_FFPROBE = "ffprobe"
 
+# --- Other channels (tools/vod_channels.py + vodsearch/channels.py) ---
+# "Ask the VOD" for any Twitch channel: add a channel by login, its
+# archive VODs are downloaded with yt-dlp into VOD_CHANNELS_ROOT/<login>/,
+# scanned by the same offline detector (with a per-channel detector
+# profile, see core/detector_profile.py), transcribed and indexed into
+# the same vod_index.db with recordings.channel = <login>. Those rows are
+# LOCAL ONLY: the Store refuses to publish them and tunneled visitors
+# never see them, whatever the review page says. Downloading another
+# creator's archives is for private analysis; never republish. Helix
+# calls use an app-access token (core/twitch_app.py) cached at
+# VOD_APP_TOKEN_FILE so a CLI never touches the bot's user tokens.
+VOD_CHANNELS_FILE = DATA_DIR / "vod" / "channels.json"   # the channel registry (hand-editable)
+VOD_CHANNELS_ROOT = Path(r"D:\Recordings\channels")      # <root>/<login>/ per channel (D: has the space)
+VOD_CHANNELS_QUALITY = "best[height<=1080]/best"          # yt-dlp format; 1080p is what the detector is calibrated for
+VOD_CHANNELS_FRAGMENTS = 4                                # yt-dlp concurrent HLS fragment downloads
+VOD_CHANNELS_MAX_PER_SYNC = 5                             # newest archives fetched per `sync` unless --max
+VOD_CHANNELS_KEEP = 20                                    # VODs kept on disk per channel (oldest evicted); 0 = unlimited
+VOD_CHANNELS_MIN_FREE_GB = 25                             # refuse to download below this much free space on the root drive
+VOD_APP_TOKEN_FILE = DATA_DIR / "twitch_app_token.json"   # cached client-credentials token (not a user token)
+
 # === CO-CASTER (plugins/cocaster/) ===
 # Stage 1 of the AI co-caster. Two channels, both gated by the "cocaster"
 # feature toggle (default OFF):

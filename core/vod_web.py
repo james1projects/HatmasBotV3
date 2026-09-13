@@ -55,13 +55,16 @@ from core.config import (
     VOD_CLIP_ENCODER, VOD_CLIP_HEIGHT, VOD_CLIP_MAX_CONCURRENT, VOD_DB_PATH,
     VOD_EMBED_HOST, VOD_EMBED_MODEL, VOD_FFMPEG, VOD_SEMANTIC_MIN_SCORE,
     VOD_STREAM_MAX_CONCURRENT, VOD_STREAM_MAX_S,
+    VOD_CHANNELS_FILE,
 )
 from vodsearch import clips as clips_mod
 from vodsearch.embed import OllamaEmbedder, top_k
-from vodsearch.store import Store
+from vodsearch.channels import Registry
+from vodsearch.store import OWNER_CHANNEL, Store
 
 PUBLIC_DIR = Path(__file__).resolve().parent.parent / "public"
 _KEY_RE = re.compile(r"^([se])(\d{1,12})$")
+_CHANNEL_RE = re.compile(r"^[a-z0-9_]{1,25}$")
 _EVENTS = {"any", "kill", "multikill", "death", "assist", "double", "triple", "quadra", "penta"}
 # Clip windows. The detector's sidecar pre/post (7 s / 6 s) are editing
 # cut points, far too tight to watch: James asked for longer previews
@@ -170,12 +173,41 @@ class VodWeb:
         peer = request.remote or ""
         return peer in ("127.0.0.1", "::1")
 
+    def _channel_param(self, request: web.Request, local: bool) -> Optional[str]:
+        """?channel= -> store filter. Absent = the owner's archive; "all"
+        = every channel (local only). Visitors are pinned to the owner
+        whatever they ask for: other channels are local-only, always."""
+        if not local:
+            return OWNER_CHANNEL
+        raw = (request.query.get("channel") or "").strip().lower()
+        if not raw:
+            return OWNER_CHANNEL
+        if raw == "all":
+            return None
+        if not _CHANNEL_RE.match(raw):
+            raise web.HTTPBadRequest(text="bad channel")
+        return raw
+
+    @staticmethod
+    def _channel_names() -> Dict[str, str]:
+        names = {OWNER_CHANNEL: "Hatmaster"}
+        try:
+            for login, ch in Registry(VOD_CHANNELS_FILE).channels.items():
+                names[login] = ch.display_name or login
+        except Exception:
+            pass
+        return names
+
     @staticmethod
     def _decorate(moments: List[dict], local: bool = False) -> List[dict]:
         out = []
         for m in moments:
             d = dict(m)
             if not local:
+                # Defence in depth: the store already filters, but a
+                # non-owner moment must never leave the PC.
+                if (d.get("channel") or OWNER_CHANNEL) != OWNER_CHANNEL:
+                    continue
                 d.pop("path", None)
                 d.pop("visibility", None)
                 d.pop("hidden", None)
@@ -213,9 +245,13 @@ class VodWeb:
             return web.json_response({"ready": False, "recordings": 0, "hours": 0,
                                       "segments": 0, "events": {}, "gods": []})
         local = self._is_local(request)
-        stats = await self._with_store(lambda s: s.stats(public_only=not local))
+        channel = self._channel_param(request, local)
+        stats = await self._with_store(lambda s: s.stats(public_only=not local, channel=channel))
         stats["ready"] = stats.get("recordings", 0) > 0
         stats["local"] = local
+        names = self._channel_names() if local else {OWNER_CHANNEL: "Hatmaster"}
+        for c in stats.get("channels") or []:
+            c["display_name"] = names.get(c["channel"], c["channel"])
         if not local:
             stats.pop("by_status", None)
             stats.pop("by_visibility", None)
@@ -237,6 +273,7 @@ class VodWeb:
         if not self._index_ready():
             return web.json_response({"mode": "empty", "total": 0, "moments": [], "q": q})
         local = self._is_local(request)
+        channel = self._channel_param(request, local)
         key = (request.query.get("key") or "").strip()
         if key:
             # Shared link: exactly one moment by its clip key.
@@ -244,7 +281,8 @@ class VodWeb:
                 return web.json_response({"error": "bad key"}, status=400)
             moment = await self._with_store(lambda s: self._moment_for_key(s, key, local))
             if moment is None or (not local and (moment.get("visibility") != "public"
-                                                 or moment.get("hidden"))):
+                                                 or moment.get("hidden")
+                                                 or moment.get("channel") != OWNER_CHANNEL)):
                 return web.json_response({"mode": "key", "total": 0, "moments": [], "q": ""})
             return web.json_response({"mode": "key", "total": 1, "q": "",
                                       "moments": self._decorate([moment], local)},
@@ -257,9 +295,9 @@ class VodWeb:
         def _query(store: Store) -> dict:
             if q:
                 return store.search(q, god=god, event=event, limit=limit, offset=offset,
-                                    public_only=not local)
+                                    public_only=not local, channel=channel)
             return store.browse(god=god, event=event or "any", limit=limit, offset=offset,
-                                public_only=not local)
+                                public_only=not local, channel=channel)
 
         res = await self._with_store(_query)
         if q and mode != "keyword" and offset == 0:
@@ -268,7 +306,8 @@ class VodWeb:
             need = limit if mode == "meaning" else max(0, limit - (
                 len(res.get("moments") or []) if res.get("mode") == "and" else 0))
             if need > 0:
-                extra = await self._semantic(q, god, event, not local, k=need + len(res.get("moments") or []))
+                extra = await self._semantic(q, god, event, not local, k=need + len(res.get("moments") or []),
+                                             channel=channel)
                 if extra:
                     seen = {m.get("segment_id") for m in res.get("moments") or []}
                     if mode == "meaning":
@@ -299,6 +338,7 @@ class VodWeb:
             await self._with_store(lambda st: _attach_paths(st, res.get("moments") or []))
         res["moments"] = self._decorate(res.get("moments") or [], local)
         res["local"] = local
+        res["channel"] = channel or "all"
         res["q"] = q
         res["god"] = god
         res["event"] = event
@@ -307,7 +347,7 @@ class VodWeb:
         return web.json_response(res, headers={"Cache-Control": "no-cache"})
 
     async def _semantic(self, q: str, god: Optional[str], event: Optional[str],
-                        public_only: bool, k: int) -> List[dict]:
+                        public_only: bool, k: int, channel: Optional[str] = None) -> List[dict]:
         """Meaning matches for q, filtered like search(). Empty when the
         embedder is unreachable or nothing is embedded; never raises."""
         try:
@@ -325,7 +365,8 @@ class VodWeb:
                 return []
             return await self._with_store(
                 lambda s: s.moments_for_segments(scored, god=god, event=event,
-                                                 public_only=public_only, limit=k))
+                                                 public_only=public_only, limit=k,
+                                                 channel=channel))
         except Exception as e:
             print(f"[VodWeb] semantic search unavailable: {type(e).__name__}: {e}")
             return []
@@ -345,6 +386,7 @@ class VodWeb:
                 "segment_id": int(seg["id"]), "recording_id": int(seg["recording_id"]),
                 "path": seg.get("path"), "visibility": seg.get("visibility") or "private",
                 "hidden": bool(seg.get("hidden") or 0),
+                "channel": seg.get("channel") or OWNER_CHANNEL, "title": seg.get("title"),
                 "god": seg.get("god"), "recorded_at": seg.get("recorded_at"),
                 "start_s": float(seg["start_s"]), "end_s": float(seg["end_s"]),
                 "speaker": seg.get("speaker"), "text": seg.get("text"),
@@ -363,6 +405,7 @@ class VodWeb:
             "segment_id": None, "event_id": int(ev["id"]),
             "recording_id": int(ev["recording_id"]), "path": ev.get("path"),
             "visibility": ev.get("visibility") or "private",
+            "channel": ev.get("channel") or OWNER_CHANNEL, "title": ev.get("title"),
             "god": ev.get("god") or ev.get("rec_god"), "recorded_at": ev.get("recorded_at"),
             "start_s": max(0.0, ts - float(ev.get("pre_s") or 0)),
             "end_s": ts + float(ev.get("post_s") or 0), "ts_s": ts,
@@ -376,19 +419,21 @@ class VodWeb:
 
     async def _resolve_key(self, key: str, request: Optional[web.Request] = None
                            ) -> Optional[Tuple[int, str, float, float, float]]:
-        """-> (recording_id, source_path, start_s, end_s, mid_s) or None.
-        With `request`, a private recording resolves to None for anyone
-        who is not the local browser, and ?len= scales the window."""
+        """-> (recording_id, source_path, start_s, end_s, mid_s, audio_streams)
+        or None. With `request`, anyone who is not the local browser gets
+        None for a private recording or any other channel's recording,
+        and ?len= scales the window."""
         scale = 1.0
         if request is not None:
             scale = LEN_SCALE.get((request.query.get("len") or "normal").lower(), 1.0)
         resolved = await self._resolve_key_raw(key, scale)
         if resolved is None:
             return None
-        rec_id, src, start, end, mid, visibility = resolved
-        if request is not None and not self._is_local(request) and visibility != "public":
+        rec_id, src, start, end, mid, visibility, channel, audio_streams = resolved
+        if request is not None and not self._is_local(request) and (
+                visibility != "public" or channel != OWNER_CHANNEL):
             return None
-        return rec_id, src, start, end, mid
+        return rec_id, src, start, end, mid, audio_streams
 
     async def _resolve_key_raw(self, key: str, scale: float = 1.0):
         m = _KEY_RE.match(key or "")
@@ -407,7 +452,8 @@ class VodWeb:
                                                    max_len=min(clips_mod.MAX_CLIP_S, SEGMENT_MAX_S * scale))
                 mid = (float(seg["start_s"]) + float(seg["end_s"])) / 2.0
                 return (int(seg["recording_id"]), seg["path"], start, end, mid,
-                        seg.get("visibility") or "private")
+                        seg.get("visibility") or "private",
+                        seg.get("channel") or OWNER_CHANNEL, int(seg.get("audio_streams") or 0))
             ev = store.get_event(ident)
             if not ev:
                 return None
@@ -416,7 +462,8 @@ class VodWeb:
             ts = float(ev["ts_s"])
             start, end = clips_mod.clip_window(ts, None, dur, pre, post)
             return (int(ev["recording_id"]), ev["path"], start, end, ts,
-                    ev.get("visibility") or "private")
+                    ev.get("visibility") or "private",
+                    ev.get("channel") or OWNER_CHANNEL, int(ev.get("audio_streams") or 0))
 
         return await self._with_store(_lookup)
 
@@ -503,11 +550,11 @@ class VodWeb:
         resolved = await self._resolve_key(key, request)
         if not resolved:
             raise web.HTTPNotFound()
-        rec_id, src, start, end, _mid = resolved
+        rec_id, src, start, end, _mid, audio_streams = resolved
         src_path = Path(src)
         if not src_path.exists():
             raise web.HTTPNotFound()
-        tracks = list(VOD_CLIP_AUDIO_TRACKS)
+        tracks = clips_mod.tracks_for(VOD_CLIP_AUDIO_TRACKS, audio_streams)
         out = self.clips_dir / clips_mod.clip_name(rec_id, start, end, VOD_CLIP_HEIGHT, tracks)
         try:
             await self._render(
@@ -535,7 +582,7 @@ class VodWeb:
         resolved = await self._resolve_key(key, request)
         if not resolved:
             raise web.HTTPNotFound()
-        rec_id, src, start, _end, _mid = resolved
+        rec_id, src, start, _end, _mid, audio_streams = resolved
         src_path = Path(src)
         if not src_path.exists():
             raise web.HTTPNotFound()
@@ -549,7 +596,7 @@ class VodWeb:
         length = float(VOD_STREAM_MAX_S)
         if duration > 0:
             length = max(1.0, min(length, duration - from_s))
-        tracks = list(VOD_CLIP_AUDIO_TRACKS)
+        tracks = clips_mod.tracks_for(VOD_CLIP_AUDIO_TRACKS, audio_streams)
 
         resp = web.StreamResponse(status=200, headers={
             "Content-Type": "video/mp4",
@@ -611,15 +658,22 @@ class VodWeb:
             raise web.HTTPNotFound()
         if not self._index_ready():
             return web.json_response({"recordings": [], "toggle": self._toggle_on()})
-        rows = await self._with_store(lambda s: s.review_list())
+        channel = self._channel_param(request, True)
+        rows = await self._with_store(lambda s: s.review_list(channel=channel))
+        names = self._channel_names()
         for r in rows:
+            r["channel"] = r.get("channel") or OWNER_CHANNEL
+            r["display_name"] = names.get(r["channel"], r["channel"])
+            r["publishable"] = r["channel"] == OWNER_CHANNEL
             key = f"e{r['top_event_id']}" if r.get("top_event_id") else (
                 f"s{r['first_segment_id']}" if r.get("first_segment_id") else None)
             r["thumb_url"] = f"/api/vod/thumb/{key}.jpg" if key else None
             r["key"] = key
             r["date"] = (r.get("recorded_at") or "")[:10]
             r["clock"] = _fmt_clock(r.get("duration_s") or 0)
-        return web.json_response({"recordings": rows, "toggle": self._toggle_on()},
+        return web.json_response({"recordings": rows, "toggle": self._toggle_on(),
+                                  "channels": [{"channel": k, "display_name": v} for k, v in names.items()],
+                                  "owner": OWNER_CHANNEL},
                                  headers={"Cache-Control": "no-cache"})
 
     async def handle_review_set(self, request: web.Request):
@@ -640,15 +694,20 @@ class VodWeb:
         folder = (body.get("folder") or "").strip()[:80] or None
 
         def _apply(store: Store) -> dict:
+            # Publishing only ever targets the owner's rows; the Store
+            # refuses the rest anyway and `refused` reports how many.
+            chan = OWNER_CHANNEL if vis == "public" else None
             target = list(ids)
             if god:
-                target += store.recording_ids(god=god)
+                target += store.recording_ids(god=god, channel=chan)
             if folder:
-                target += store.recording_ids(folder=folder)
+                target += store.recording_ids(folder=folder, channel=chan)
             if body.get("all"):
-                target += store.recording_ids()
-            n = store.set_visibility(sorted(set(target)), vis)
-            return {"changed": n, "by_visibility": store.stats().get("by_visibility")}
+                target += store.recording_ids(channel=chan)
+            target = sorted(set(target))
+            n = store.set_visibility(target, vis)
+            return {"changed": n, "refused": max(0, len(target) - n),
+                    "by_visibility": store.stats().get("by_visibility")}
 
         res = await self._with_store(_apply)
         res["ok"] = True
@@ -674,7 +733,7 @@ class VodWeb:
         resolved = await self._resolve_key(key, request)
         if not resolved:
             raise web.HTTPNotFound()
-        rec_id, src, _start, _end, mid = resolved
+        rec_id, src, _start, _end, mid, _audio_streams = resolved
         src_path = Path(src)
         if not src_path.exists():
             raise web.HTTPNotFound()

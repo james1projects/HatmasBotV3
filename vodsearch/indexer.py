@@ -22,12 +22,12 @@ import json
 import re
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 from . import audio as audio_mod
-from .store import Store, now_iso
+from .store import OWNER_CHANNEL, Store, now_iso
 from .transcribe import DEFAULT_INITIAL_PROMPT, Transcriber
 
 DEFAULT_TRACKS: Dict[int, str] = {1: "hatmaster", 2: "friends", 3: "friends"}
@@ -54,7 +54,9 @@ class IndexOptions:
     force: bool = False
     limit: Optional[int] = None
     include_root: bool = False
-    skip_dirs: Tuple[str, ...] = (".tiktok_bg", "processed", "replays")
+    skip_dirs: Tuple[str, ...] = (".tiktok_bg", "processed", "replays", "_inbox")
+    channel: str = OWNER_CHANNEL           # recordings.channel for every row this run writes
+    primary_speaker: Optional[str] = None  # the streamer's track label; default = channel
     dry_run: bool = False
     prune_missing: bool = True
     embed: bool = True                     # embed new lines after indexing (needs Ollama)
@@ -63,7 +65,7 @@ class IndexOptions:
 
 
 def discover(recordings_dir: Path, include_root: bool = False,
-             skip_dirs: Tuple[str, ...] = (".tiktok_bg",)) -> List[Path]:
+             skip_dirs: Tuple[str, ...] = (".tiktok_bg", "_inbox")) -> List[Path]:
     """All .mp4 files under `recordings_dir`, newest first. Root-level
     files are unsorted drop-folder recordings and are skipped unless
     `include_root` (the sorter will move them into a god folder later
@@ -81,7 +83,7 @@ def discover(recordings_dir: Path, include_root: bool = False,
         if not p.is_file():
             continue
         rel_parts = p.relative_to(root).parts[:-1]
-        if any(part.lower() in skip or part.startswith(".") for part in rel_parts):
+        if any(part.lower() in skip or part.startswith((".", "_")) for part in rel_parts):
             continue
         if not rel_parts and not include_root:
             continue
@@ -120,6 +122,38 @@ def assign_speakers(configured: Dict[int, str], speech: Dict[int, float],
 
 def sidecar_path(mp4: Path) -> Path:
     return mp4.parent / (mp4.stem + ".events.json")
+
+
+def twitch_sidecar_path(mp4: Path) -> Path:
+    return mp4.parent / (mp4.stem + ".twitch.json")
+
+
+def load_twitch_sidecar(mp4: Path) -> Optional[dict]:
+    """Helix metadata written by the downloader next to a v<id>.mp4
+    (title, created_at UTC, duration ...); None when absent/corrupt."""
+    sc = twitch_sidecar_path(mp4)
+    if not sc.exists():
+        return None
+    try:
+        data = json.loads(sc.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def utc_to_local_iso(ts: str) -> Optional[str]:
+    """Helix "2026-09-01T18:03:12Z" -> naive local ISO (what recorded_at
+    stores). None when unparseable."""
+    try:
+        t = ts.strip()
+        if t.endswith("Z"):
+            t = t[:-1] + "+00:00"
+        dt = datetime.fromisoformat(t)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone().replace(microsecond=0, tzinfo=None).isoformat()
+    except (ValueError, AttributeError):
+        return None
 
 
 def load_sidecar(mp4: Path) -> Tuple[List[str], List[dict]]:
@@ -182,10 +216,17 @@ def index_recording(store: Store, transcriber: Transcriber, path: Path,
         rel_folder = rel.parts[0] if len(rel.parts) > 1 else ""
     except ValueError:
         pass
+    # Downloaded Twitch VODs carry Helix metadata: the broadcast start
+    # (UTC) and title, from the .twitch.json sidecar or the vods table.
+    tw = load_twitch_sidecar(path) or store.vod_meta_for_stem(path.stem) or {}
+    recorded_at = (utc_to_local_iso(tw["created_at"]) if tw.get("created_at") else None) \
+        or recorded_at_for(path, pr.duration_s, st.st_mtime)
+    primary = opts.primary_speaker or opts.channel
     meta = dict(folder=rel_folder, stem=path.stem, god=god, gods_seen=gods_seen,
                 duration_s=pr.duration_s, size_bytes=st.st_size, mtime=st.st_mtime,
-                recorded_at=recorded_at_for(path, pr.duration_s, st.st_mtime),
-                model=opts.model, status="indexing", error=None)
+                recorded_at=recorded_at, model=opts.model, status="indexing", error=None,
+                channel=opts.channel, title=tw.get("title"),
+                audio_streams=len(pr.audio_tracks))
     if opts.dry_run:
         return {"path": str(path), "dry_run": True, "god": god,
                 "duration_s": pr.duration_s, "events": len(events),
@@ -211,10 +252,10 @@ def index_recording(store: Store, transcriber: Transcriber, path: Path,
     kept: List[int] = []
     fracs = {t: audio_mod.speech_fraction(decoded[t], threshold_db=opts.speech_threshold_db)
              for t in wanted if decoded.get(t) is not None}
-    labels = assign_speakers(opts.tracks, fracs, opts.min_speech_frac)
+    labels = assign_speakers(opts.tracks, fracs, opts.min_speech_frac, primary=primary)
     if labels != {t: opts.tracks[t] for t in labels}:
         moved = [t for t in labels if labels[t] != opts.tracks.get(t)]
-        log(f"    speaker layout: track {[t for t in labels if labels[t] == 'hatmaster']} is the streamer"
+        log(f"    speaker layout: track {[t for t in labels if labels[t] == primary]} is the streamer"
             f" (configured track silent; relabeled {moved})")
     for t in wanted:
         samples = decoded.get(t)
@@ -337,9 +378,12 @@ def relabel_speakers(store: Store, configured: Dict[int, str], min_speech: float
     return counters
 
 
-def prune_missing(store: Store, log: Logger = print) -> int:
+def prune_missing(store: Store, log: Logger = print, channel: Optional[str] = None) -> int:
+    """Drop rows whose file vanished. Scoped to one channel so a run for
+    channel X never prunes another channel's rows (its drive may simply
+    be offline)."""
     gone = 0
-    for rec in store.list_recordings():
+    for rec in store.list_recordings(channel=channel):
         if not Path(rec["path"]).exists():
             store.delete_recording(int(rec["id"]))
             gone += 1
@@ -373,7 +417,7 @@ def run(opts: IndexOptions, log: Logger = print) -> dict:
     t_run = time.time()
     try:
         if opts.prune_missing and not opts.dry_run:
-            counters["pruned"] = prune_missing(store, log)
+            counters["pruned"] = prune_missing(store, log, channel=opts.channel)
         for i, path in enumerate(files, 1):
             label = f"[{i}/{len(files)}] {path.relative_to(opts.recordings_dir)}"
             try:

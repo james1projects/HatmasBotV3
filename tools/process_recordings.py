@@ -70,6 +70,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from core.detector_profile import DetectorProfile, ProfileError
 from core.kda_reader import KdaReader
 from tools.vod_detector import (
     VodDetector,
@@ -199,8 +200,18 @@ def move_and_emit(
     source_root: Path,
     *,
     dry_run: bool,
+    keep_stem: bool = False,
+    no_move: bool = False,
 ) -> tuple[Path, Path]:
     """Move ``video`` into the right subfolder and write its events JSON.
+
+    ``keep_stem`` keeps the file's own name (downloaded Twitch VODs are
+    ``v<id>.mp4`` and the id must survive) instead of ``<God>-N``; a
+    same-named file already in the target folder raises FileExistsError
+    rather than silently renaming.  ``no_move`` leaves the video where it
+    is and writes the JSON beside it.  Sibling sidecars named
+    ``<stem>.*.json`` (the downloader's ``.twitch.json``) move with the
+    video.
 
     Order of operations is:
         1. Decide target paths.
@@ -219,9 +230,13 @@ def move_and_emit(
     paths.
     """
     subfolder, stem = categorize(gods_seen)
-    target_dir = source_root / subfolder
-    n = next_index(target_dir, stem)
-    new_stem = f"{stem}-{n}"
+    if no_move:
+        target_dir, new_stem = video.parent, video.stem
+    elif keep_stem:
+        target_dir, new_stem = source_root / subfolder, video.stem
+    else:
+        target_dir = source_root / subfolder
+        new_stem = f"{stem}-{next_index(target_dir, stem)}"
     new_video = target_dir / f"{new_stem}{video.suffix}"
     new_json = target_dir / f"{new_stem}.events.json"
 
@@ -230,7 +245,15 @@ def move_and_emit(
 
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    shutil.move(str(video), str(new_video))
+    if new_video != video:
+        if new_video.exists():
+            raise FileExistsError(f"{new_video} already exists")
+        shutil.move(str(video), str(new_video))
+        # Sidecars that belong to this recording travel with it.
+        for side in video.parent.glob(f"{video.stem}.*.json"):
+            if side.name.endswith(".events.json"):
+                continue
+            shutil.move(str(side), str(target_dir / side.name))
 
     payload = render_events_json(
         str(new_video.resolve()),
@@ -251,6 +274,8 @@ def reprocess_one(
     source_root: Path,
     *,
     dry_run: bool,
+    keep_stem: bool = False,
+    no_move: bool = False,
 ) -> dict:
     """Re-process a video already living in a per-god subfolder.
 
@@ -379,6 +404,7 @@ def reprocess_one(
     try:
         new_video, _new_json = move_and_emit(
             video, events, gods_seen, source_root, dry_run=dry_run,
+            keep_stem=keep_stem, no_move=no_move,
         )
     except Exception as e:
         print(f"{prefix} -> ERROR moving file: {type(e).__name__}: {e}")
@@ -437,6 +463,8 @@ def process_one(
     source_root: Path,
     *,
     dry_run: bool,
+    keep_stem: bool = False,
+    no_move: bool = False,
 ) -> dict:
     """Scan + sort a single recording.  Never raises.
 
@@ -528,6 +556,7 @@ def process_one(
     try:
         new_video, _new_json = move_and_emit(
             video, events, gods_seen, source_root, dry_run=dry_run,
+            keep_stem=keep_stem, no_move=no_move,
         )
     except Exception as e:
         print(f"{prefix} -> ERROR moving file: {type(e).__name__}: {e}")
@@ -742,6 +771,56 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--profile",
+        type=Path,
+        default=None,
+        help=(
+            "Detector profile JSON for a differently laid-out HUD (another "
+            "channel's VOD; see core/detector_profile.py). Default: the "
+            "global regions in data/detector_regions.json."
+        ),
+    )
+    p.add_argument(
+        "--group-mode",
+        choices=("gaps", "fields"),
+        default=None,
+        help="Digit grouping override (default: the profile's, 'fields' without a profile).",
+    )
+    p.add_argument(
+        "--god-icons-dir", type=Path, default=None,
+        help="Base god icon library (default data/god_icons).",
+    )
+    p.add_argument(
+        "--god-overlay-icons-dir", default=None,
+        help="OBS overlay icon library, or 'none' (default: repo assets; profiles default to none).",
+    )
+    p.add_argument(
+        "--god-reference-icons-dir", default=None,
+        help="Captured portrait references, or 'none' (default: repo assets; profiles default to none).",
+    )
+    p.add_argument(
+        "--keep-scanning",
+        action="store_true",
+        help=(
+            "Do not stop after the first match ends: keep scanning to the end "
+            "of the file. Needed for multi-match sources such as a whole "
+            "Twitch VOD (James's OBS recordings are one match each)."
+        ),
+    )
+    p.add_argument(
+        "--keep-stem",
+        action="store_true",
+        help=(
+            "File the recording under its own name (v<id>.mp4 for downloaded "
+            "Twitch VODs) instead of renaming to <God>-N.mp4."
+        ),
+    )
+    p.add_argument(
+        "--no-move",
+        action="store_true",
+        help="Leave files where they are; only write the .events.json beside each.",
+    )
+    p.add_argument(
         "--reprocess-all",
         action="store_true",
         help=(
@@ -757,6 +836,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     return p
+
+
+def _icon_dir_arg(value):
+    """CLI icon-dir flag: None = repo default, 'none' = explicit opt-out
+    (Path('')), anything else = that directory."""
+    if value is None:
+        return None
+    if str(value).strip().lower() in ("none", "off", ""):
+        return Path("")
+    return Path(value)
 
 
 def _resolve_hwaccel(value: Optional[str]) -> Optional[str]:
@@ -935,10 +1024,19 @@ def main(argv: list[str] | None = None) -> int:
         tesseract_path = DEFAULT_TESSERACT_WIN
 
     # --- Build reader + detector ------------------------------------
+    try:
+        profile = DetectorProfile.load(args.profile) if args.profile else DetectorProfile.default()
+    except ProfileError as e:
+        print(f"error: bad detector profile: {e}", file=sys.stderr)
+        return 2
     reader = KdaReader(
         data_dir=args.data_dir,
         tesseract_path=tesseract_path,
         debug=False,
+        group_mode=args.group_mode or profile.group_mode,
+        regions=profile.regions,
+        kda_field_windows=profile.kda_field_windows,
+        template_dir=profile.digit_templates_dir,
     )
     if not reader.is_ready:
         print(
@@ -961,10 +1059,14 @@ def main(argv: list[str] | None = None) -> int:
         no_refine=args.no_refine,
         ffmpeg_crop=not args.no_ffmpeg_crop,
         lobby_skip=not args.no_lobby_skip,
+        post_match_stop=not args.keep_scanning,
         use_seek_scan=not args.no_seek_scan,
         hwaccel=_resolve_hwaccel(args.hwaccel),
         merge_overlaps=not args.no_merge_overlaps,
         enable_god_detection=True,
+        god_icons_dir=args.god_icons_dir,
+        god_overlay_icons_dir=_icon_dir_arg(args.god_overlay_icons_dir),
+        god_reference_icons_dir=_icon_dir_arg(args.god_reference_icons_dir),
         misread_debug_dir=(
             Path(args.debug_misreads) if args.debug_misreads else None
         ),
@@ -975,7 +1077,11 @@ def main(argv: list[str] | None = None) -> int:
         failure_event_callback=_push_kda_failure_to_dashboard,
     )
 
-    detector = VodDetector(reader, opts)
+    detector = VodDetector(reader, opts, profile=profile)
+    if args.profile:
+        cx, cy, cw, ch = profile.crop_box()
+        print(f"profile: {profile.name} ({args.profile})  crop {cw}x{ch}+{cx}+{cy}  "
+              f"group_mode={reader._group_mode}  portrait={'on' if profile.portrait_enabled else 'off'}")
 
     # --- Header -------------------------------------------------------
     include_label = ["kills"]
@@ -1057,6 +1163,7 @@ def main(argv: list[str] | None = None) -> int:
             _per_video(
                 video, i, len(mp4s), detector, args.source,
                 dry_run=args.dry_run,
+                keep_stem=args.keep_stem, no_move=args.no_move,
             )
             for i, video in enumerate(mp4s, 1)
         ]

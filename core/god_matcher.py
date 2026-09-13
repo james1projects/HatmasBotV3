@@ -114,6 +114,7 @@ class GodMatcher:
         icons_dir=None,
         overlay_icons_dir=None,
         reference_icons_dir=None,
+        portrait_region=None,
     ):
         """
         Args:
@@ -138,6 +139,12 @@ class GodMatcher:
                 only files whose stem matches a known base-library
                 god are kept.  Pass ``None`` to skip.
         """
+        # portrait_region: (x1, y1, x2, y2) in 1080p coords.  None = the
+        # module constant (the live plugin); a detector profile passes
+        # another streamer's HUD position here.
+        self._portrait_region = (
+            tuple(int(v) for v in portrait_region) if portrait_region else tuple(PORTRAIT_REGION)
+        )
         if icons_dir is None:
             icons_dir = Path(__file__).parent.parent / "data" / "god_icons"
         self._icons_dir = Path(icons_dir)
@@ -400,6 +407,10 @@ class GodMatcher:
 
         return loaded
 
+    @property
+    def portrait_region(self) -> tuple:
+        return self._portrait_region
+
     def identify(
         self,
         screenshot: Image.Image,
@@ -429,10 +440,10 @@ class GodMatcher:
         # frame or a pre-cropped strip).
         cx, cy = crop_origin
         region = (
-            PORTRAIT_REGION[0] - cx,
-            PORTRAIT_REGION[1] - cy,
-            PORTRAIT_REGION[2] - cx,
-            PORTRAIT_REGION[3] - cy,
+            self._portrait_region[0] - cx,
+            self._portrait_region[1] - cy,
+            self._portrait_region[2] - cx,
+            self._portrait_region[3] - cy,
         )
         portrait = screenshot.crop(region)
 
@@ -521,10 +532,10 @@ class GodMatcher:
 
         cx, cy = crop_origin
         region = (
-            PORTRAIT_REGION[0] - cx,
-            PORTRAIT_REGION[1] - cy,
-            PORTRAIT_REGION[2] - cx,
-            PORTRAIT_REGION[3] - cy,
+            self._portrait_region[0] - cx,
+            self._portrait_region[1] - cy,
+            self._portrait_region[2] - cx,
+            self._portrait_region[3] - cy,
         )
         portrait = screenshot.crop(region)
         portrait_cv = cv2.cvtColor(np.array(portrait), cv2.COLOR_RGB2BGR)
@@ -571,10 +582,10 @@ class GodMatcher:
 
         cx, cy = crop_origin
         region = (
-            PORTRAIT_REGION[0] - cx,
-            PORTRAIT_REGION[1] - cy,
-            PORTRAIT_REGION[2] - cx,
-            PORTRAIT_REGION[3] - cy,
+            self._portrait_region[0] - cx,
+            self._portrait_region[1] - cy,
+            self._portrait_region[2] - cx,
+            self._portrait_region[3] - cy,
         )
         portrait = screenshot.crop(region)
         portrait_cv = cv2.cvtColor(np.array(portrait), cv2.COLOR_RGB2BGR)
