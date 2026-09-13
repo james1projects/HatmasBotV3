@@ -25,7 +25,7 @@ Every command starts with `!`. Commands marked **(mods)** need mod or broadcaste
 ## Song Requests
 
 - **!sr <song or URL>** - Queues a song. 2 per viewer, 4 per sub, 10 minute max length.
-- **!burn <amount>** - Destroy your own Hats on stream (min 500, no refunds). Biggest of the stream and all-time record get called out. **!burns** lists them.
+- **!burn <amount>** - Destroy your own Hats on stream (min 500, no refunds). Biggest of the stream and all-time record get called out. **!burns** lists them plus the top burners by total; **!burned** is your own all-time total and rank.
 - **!vipsr <song or URL>** - Same as !sr but costs 200 Hats and cuts the line (behind earlier VIP songs). 2 per viewer per hour. No refunds.
 - **!skip** (mods) - Skips the current song.
 - **!wrongsong** - Removes your most recent queued song.

@@ -3132,7 +3132,10 @@ a boom. Chat gets "X just burned N Hats!" plus the record tag; the
 burner gets their balance. "Tonight" resets on the stream_status live
 transition; the all-time record is read from the ledger (`MIN(delta)`
 where reason = burn) so it survives restarts. `!burns` lists the top
-three of the stream and the all-time record. Feature toggle `burn`.
+three of the stream, the all-time record and the top three burners by
+total; `!burned` is a viewer's own all-time total, burn count and rank
+(sums over the ledger, no second counter). The burn reply and the alert
+carry the burner's running total and rank. Feature toggle `burn`.
 `plugins/burn.py`, `overlays/alerts/kinds/burn.js`; tests:
 `tests/test_burn.py`.
 

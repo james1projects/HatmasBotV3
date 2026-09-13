@@ -2,7 +2,8 @@
 // event hats_burned). The number is the whole point, so it counts up big;
 // a record (of the stream, or all-time) gets a ribbon and a bigger boom.
 // data = {display_name, amount, balance_after, stream_total, stream_record: {display, amount} | null,
-//         is_stream_record, alltime_record: {display, amount} | null, is_alltime_record}.
+//         is_stream_record, alltime_record: {display, amount} | null, is_alltime_record,
+//         user_total, user_burns, user_rank, burners}.
 HatmasAlerts.define('burn', {
   render(el, d, ctx) {
     ctx.style('hm-kind-burn', `
@@ -24,6 +25,7 @@ HatmasAlerts.define('burn', {
       .hmk-burn .ribbon.stream { background: var(--hm-red, #DF2935); color: #fff; }
       .hmk-burn .foot { margin-top: 10px; font-size: 11px; color: var(--hm-text-muted, #8FA6AF); display: flex; justify-content: center; gap: 18px; }
       .hmk-burn .foot b { color: var(--hm-text-secondary, #AFC2C9); font-family: 'JetBrains Mono', monospace; }
+      .hmk-burn .foot .rk { color: var(--hm-gold, #DFA06E); font-weight: 700; }
       /* a short slot (a shared lane of ~180px): tighter, no footer */
       .hmk-burn.compact { padding: 10px 20px 10px; min-width: 300px; }
       .hmk-burn.compact .head { font-size: 17px; letter-spacing: 3px; }
@@ -44,6 +46,7 @@ HatmasAlerts.define('burn', {
     const foot = [];
     if (sr && !streamRec && !record) foot.push('Tonight’s biggest <b>' + esc(sr.display) + ' ' + Number(sr.amount).toLocaleString() + '</b>');
     if (ar && !record) foot.push('All-time <b>' + esc(ar.display) + ' ' + Number(ar.amount).toLocaleString() + '</b>');
+    if (d.user_total && d.user_burns > 1) foot.push(esc(d.display_name || 'They') + ' total <b>' + Number(d.user_total).toLocaleString() + '</b>' + (d.user_rank ? ' <span class="rk">#' + esc(d.user_rank) + '</span>' : ''));
     if (d.stream_total) foot.push('Burned tonight <b>' + Number(d.stream_total).toLocaleString() + '</b>');
     el.innerHTML =
       '<div class="hmk-burn' + (record ? ' record' : '') + ((ctx.height || 300) < 260 ? ' compact' : '') + '">' +

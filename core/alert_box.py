@@ -157,7 +157,8 @@ KINDS: Dict[str, dict] = {
         "sample": {"display_name": "Dyna", "login": "dyna", "amount": 2000, "balance_after": 12400,
                    "stream_total": 3500, "stream_burns": 3,
                    "stream_record": {"display": "Dyna", "amount": 2000}, "is_stream_record": True,
-                   "alltime_record": {"display": "Rich", "amount": 5000}, "is_alltime_record": False},
+                   "alltime_record": {"display": "Rich", "amount": 5000}, "is_alltime_record": False,
+                   "user_total": 7500, "user_burns": 4, "user_rank": 2, "burners": 9},
     },
 }
 

@@ -18,7 +18,9 @@ What happens on a burn:
 "Tonight" = since the stream went live (stream_status live listener
 resets the session); the all-time record comes from the ledger, so it
 survives restarts. `!burns` lists the biggest burns of the stream and
-the all-time record.
+the all-time record; `!burned` is your own all-time total and rank.
+Per-viewer totals are sums over the ledger (reason = burn), never a
+second counter that could drift.
 
 Feature toggle "burn".
 """
@@ -54,7 +56,10 @@ class BurnPlugin:
             description=f"Burn your {cur} for everyone to see: !burn <amount> (min {self._min():,})")
         bot.register_command(
             "burns", self.cmd_burns, platforms=("twitch", "discord"), plugin="burn",
-            description=f"Biggest {cur} burns of the stream and the all-time record")
+            description=f"Biggest {cur} burns of the stream, the record, the top burners")
+        bot.register_command(
+            "burned", self.cmd_burned, identity=True, plugin="burn",
+            description=f"How many {cur} you have burned all-time, and your rank")
         ss = (bot.plugins or {}).get("stream_status") if hasattr(bot, "plugins") else None
         if ss is not None and hasattr(ss, "add_live_listener"):
             ss.add_live_listener(self._on_live)
@@ -85,6 +90,38 @@ class BurnPlugin:
 
     def stream_top(self, limit: int = 3) -> List[dict]:
         return sorted(self.session["burns"], key=lambda b: -b["amount"])[:limit]
+
+    async def user_total(self, user_uuid: str) -> dict:
+        """Everything this viewer has ever burned, and their rank among
+        burners (1 = most burned)."""
+        if self._db is None:
+            return {"total": 0, "burns": 0, "rank": None, "burners": 0}
+        async with self._db.execute(
+                "SELECT COALESCE(SUM(-delta), 0), COUNT(*) FROM wallet_ledger "
+                "WHERE reason = 'burn' AND user_uuid = ?", (user_uuid,)) as cur:
+            total, count = await cur.fetchone()
+        async with self._db.execute(
+                "SELECT COUNT(*), SUM(CASE WHEN t > ? THEN 1 ELSE 0 END) FROM ("
+                "SELECT SUM(-delta) AS t FROM wallet_ledger WHERE reason = 'burn' "
+                "GROUP BY user_uuid)", (int(total),)) as cur:
+            burners, ahead = await cur.fetchone()
+        return {"total": int(total), "burns": int(count),
+                "rank": (int(ahead or 0) + 1) if total else None, "burners": int(burners or 0)}
+
+    async def top_burners(self, limit: int = 3) -> List[dict]:
+        """Most Hats burned all-time, per viewer."""
+        if self._db is None:
+            return []
+        out = []
+        async with self._db.execute(
+                "SELECT l.user_uuid, COALESCE(u.display_name, l.user_uuid), SUM(-l.delta) AS t, COUNT(*) "
+                "FROM wallet_ledger l LEFT JOIN users u ON u.uuid = l.user_uuid "
+                "WHERE l.reason = 'burn' GROUP BY l.user_uuid ORDER BY t DESC, l.user_uuid LIMIT ?",
+                (int(limit),)) as cur:
+            async for uuid_, name, total, count in cur:
+                out.append({"rank": len(out) + 1, "user_uuid": uuid_, "display": name,
+                            "total": int(total), "burns": int(count)})
+        return out
 
     async def alltime_record(self) -> Optional[dict]:
         """Biggest single burn ever, from the ledger."""
@@ -133,6 +170,9 @@ class BurnPlugin:
             "alltime_record": {"display": alltime["display"], "amount": alltime["amount"]} if alltime else None,
             "is_alltime_record": is_alltime_record,
         }
+        mine = await self.user_total(user_uuid)
+        data.update(user_total=mine["total"], user_burns=mine["burns"],
+                    user_rank=mine["rank"], burners=mine["burners"])
         await self._emit(data)
         return data
 
@@ -175,8 +215,26 @@ class BurnPlugin:
         elif res["is_stream_record"]:
             tag = " Biggest burn of the stream!"
         await self.bot.send_chat(f"{display} just burned {amount:,} {cur}!{tag}")
+        total = ""
+        if res["user_burns"] > 1:
+            total = f" You've burned {res['user_total']:,} total (#{res['user_rank']} of {res['burners']} burners)."
         await self.bot.send_reply(
-            message, f"{amount:,} {cur} gone. {res['balance_after']:,} left.", whisper)
+            message, f"{amount:,} {cur} gone. {res['balance_after']:,} left.{total}", whisper)
+
+    async def cmd_burned(self, message, args, whisper=False):
+        cur = _c("ECONOMY_CURRENCY_NAME", "Hats")
+        uid = await self.bot.user_uuid_for(message.chatter)
+        if not uid:
+            await self.bot.send_reply(message, f"{cur} are still loading. Try again in a moment.", whisper)
+            return
+        mine = await self.user_total(uid)
+        if not mine["total"]:
+            await self.bot.send_reply(
+                message, f"You haven't burned any {cur} yet. !burn <amount> (min {self._min():,}).", whisper)
+            return
+        await self.bot.send_reply(
+            message, f"You've burned {mine['total']:,} {cur} in {mine['burns']} burn(s): "
+                     f"#{mine['rank']} of {mine['burners']} burners.", whisper)
 
     async def cmd_burns(self, message, args, whisper=False):
         cur = _c("ECONOMY_CURRENCY_NAME", "Hats")
@@ -189,5 +247,9 @@ class BurnPlugin:
         else:
             parts.append(f"Nobody has burned any {cur} tonight.")
         if alltime:
-            parts.append(f"All-time: {alltime['display']} {alltime['amount']:,}")
+            parts.append(f"Biggest ever: {alltime['display']} {alltime['amount']:,}")
+        top_total = await self.top_burners(3)
+        if top_total:
+            parts.append("Most burned: " + " | ".join(
+                f"{b['rank']}. {b['display']} {b['total']:,}" for b in top_total))
         await self.bot.send_reply(message, " || ".join(parts), whisper)

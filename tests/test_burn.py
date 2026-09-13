@@ -100,14 +100,29 @@ async def test_burn_debits_records_and_announces():
         assert hist[0]["reason"] == "burn" and hist[0]["delta"] == -1000
         # a smaller burn: no record tags, the records still show
         bob = await U.get_or_create_twitch(db, "2", "bob", "Bob")
-        await W.credit(db, bob, "hats", 600, "watch")
+        await W.credit(db, bob, "hats", 1100, "watch")
         await p.cmd_burn(msg("Bob", "2"), "500")
         assert bot.chat[-1] == "Bob just burned 500 Hats!"
         data = bot.web_server.overlay.events[-1][1]
         assert not data["is_stream_record"] and not data["is_alltime_record"]
         assert data["stream_record"]["display"] == "Rich" and data["stream_total"] == 1500
         await p.cmd_burns(msg("Bob", "2"), "")
-        assert bot.replies[-1] == "Tonight: 1. Rich 1,000 | 2. Bob 500 || All-time: Rich 1,000"
+        assert bot.replies[-1] == ("Tonight: 1. Rich 1,000 | 2. Bob 500 || Biggest ever: Rich 1,000 || "
+                                   "Most burned: 1. Rich 1,000 | 2. Bob 500"), bot.replies[-1]
+        # per-viewer totals come from the ledger: a second burn adds up
+        await p.cmd_burn(msg("Bob", "2"), "500")
+        assert await W.get(db, bob) == 100
+        assert bot.replies[-1] == "500 Hats gone. 100 left. You've burned 1,000 total (#1 of 2 burners)."
+        data = bot.web_server.overlay.events[-1][1]
+        assert data["user_total"] == 1000 and data["user_burns"] == 2 and data["user_rank"] == 1 and data["burners"] == 2
+        assert await p.user_total(rich) == {"total": 1000, "burns": 1, "rank": 1, "burners": 2}   # tie: both #1
+        await p.cmd_burned(msg("Bob", "2"), "")
+        assert bot.replies[-1] == "You've burned 1,000 Hats in 2 burn(s): #1 of 2 burners."
+        nobody = await U.get_or_create_twitch(db, "9", "nobody", "Nobody")
+        await p.cmd_burned(msg("Nobody", "9"), "")
+        assert bot.replies[-1].startswith("You haven't burned any Hats yet.")
+        assert [b["display"] for b in await p.top_burners(5)] == ["Bob", "Rich"] or \
+               [b["display"] for b in await p.top_burners(5)] == ["Rich", "Bob"]
         # the alert box knows the kind and its sample renders a summary
         assert "burn" in AB.KINDS and AB.KINDS["burn"]["events"] == ["hats_burned"]
         assert AB._summary({"kind": "burn", "data": data}) == "Bob burned 500 Hats"
@@ -147,7 +162,8 @@ async def test_stream_resets_but_alltime_survives():
         await bot.live_listeners[0]({"is_live": True})          # next stream
         assert p.session["burns"] == [] and p.session["total"] == 0
         await p.cmd_burns(msg("Rich", "1"), "")
-        assert bot.replies[-1] == "Nobody has burned any Hats tonight. || All-time: Rich 3,000"
+        assert bot.replies[-1] == ("Nobody has burned any Hats tonight. || Biggest ever: Rich 3,000 || "
+                                   "Most burned: 1. Rich 3,000")
         # a fresh plugin (restart) still knows the all-time record from the ledger
         q = B.BurnPlugin(); q.setup(bot); await q.on_ready()
         assert (await q.alltime_record())["amount"] == 3000
