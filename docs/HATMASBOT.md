@@ -405,6 +405,7 @@ Subscriptions 1-6 (chat, whisper, subs, resubs, gifts, raids) work fine via `sub
 | Command | Access | Description |
 |---------|--------|-------------|
 | !sr <song/URL> | Everyone | Request song (2 per user, 4 for subs, 10min max) |
+| !vipsr <song/URL> | Everyone | Same as !sr but costs SR_PRIORITY_COST Hats (200) and cuts the line; SR_PRIORITY_MAX_PER_HOUR (2) per viewer per rolling hour |
 | !skip | Mods | Skip current song |
 | !wrongsong | Everyone | Remove your most recent queued song |
 | !songlist | Everyone | Top 5 queued songs |
@@ -3097,3 +3098,24 @@ Tokens for Hats would let top earners god-request for hours), so the
 strip is bragging rights for watch time. `tools/dev_stub_site.py` carries
 a canned row set. Test: `test_hats_leaderboard` in
 tests/test_web_profile_live.py.
+
+## v2.19 — !vipsr: Hats to cut the song queue (2026-09-13)
+
+The first Hats sink under the "Hats as a flex" rule (James, 2026-09-13:
+Hats have no real-world value and never buy stream control, so no God
+Tokens for Hats). `!vipsr <song>` is `!sr` with a price: after every
+normal check passes (feature, per-user song cap, duration, blacklist,
+duplicate) the wallet is debited SR_PRIORITY_COST (200, reason
+`priority_sr`, note = title by artist) in one conditional UPDATE, so a
+short balance changes nothing. The song is inserted behind any earlier
+VIP songs and never ahead of a song already pushed to Spotify
+(`pushed_to_spotify`). SR_PRIORITY_MAX_PER_HOUR (2) cuts per viewer per
+rolling hour, tracked in memory (a restart resets it). The flex: the
+bot posts "X spent 200 Hats to cut the line with Y" for everyone, the
+reply shows the position and balance left, the queue payload and
+`!songstatus` carry a VIP tag, and the Now Playing overlay shows a
+gold "vip request" label + VIP badge. No refunds by the bot; mods use
+`!givehats`. Feature toggle `priority_sr` (also needs `song_requests`).
+The overlay's secondary text was also lightened (artist, requester,
+label, time) because the theme steel was hard to read over gameplay.
+Tests: `tests/test_priority_sr.py` (3).

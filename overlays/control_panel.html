@@ -863,7 +863,7 @@ function renderQueue(queue) {
   }
   el.innerHTML = queue.map((s, i) => `
     <div class="queue-item">
-      <span class="queue-song">${i+1}. ${s.title}</span>
+      <span class="queue-song">${i+1}. ${s.priority ? '<b>VIP</b> ' : ''}${s.title}</span>
       <span class="queue-user">${s.requester}</span>
     </div>
   `).join('');

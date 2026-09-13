@@ -4,6 +4,13 @@ Song Request Plugin
 Dual Spotify/YouTube song requests with queue management,
 likes system, blacklist, vote-skip, and Now Playing overlay.
 
+!vipsr <song> is !sr that costs Hats (SR_PRIORITY_COST, wallet reason
+priority_sr) and cuts the line: the song goes in after any earlier VIP
+songs and never ahead of a song already handed to Spotify. At most
+SR_PRIORITY_MAX_PER_HOUR cuts per viewer per rolling hour. The spend is
+announced in chat (the flex) and the Now Playing overlay marks the song
+VIP. No refunds by the bot; mods use !givehats.
+
 YouTube songs play through a separate OBS browser source
 (youtube_player.html) while Spotify is paused, then Spotify
 resumes automatically when the YouTube song ends.
@@ -28,6 +35,9 @@ from core.config import (
     SR_BLACKLIST_FILE, SR_STATE_FILE, DATA_DIR, CLAUDE_API_KEY, WEB_PORT, WEB_HOST
 )
 from core.nsfw_check import NSFWChecker
+from core import config as _cfg
+from core import db as _shared_db
+from core import wallet as _wallet
 
 NSFW_PLACEHOLDER_URL = f"http://localhost:{WEB_PORT}/overlays/nsfw_placeholder.svg"
 
@@ -56,6 +66,9 @@ class SongRequestPlugin:
 
         # Vote-skip tracking (reset each song)
         self._voteskip_users = set()
+
+        # !vipsr cuts per viewer: user_uuid -> [monotonic timestamps]
+        self._priority_times = {}
 
         # Spotify error resilience
         self._spotify_errors = 0
@@ -139,6 +152,10 @@ class SongRequestPlugin:
         self.bot = bot
         bot.register_command("sr", self.cmd_sr,
                              description="Queue a song by name or URL", identity=True, plugin="songrequest")
+        bot.register_command("vipsr", self.cmd_vipsr,
+                             description=f"Cut the song queue for {self._priority_cost()} "
+                                         f"{getattr(_cfg, 'ECONOMY_CURRENCY_NAME', 'Hats')}: !vipsr <song>",
+                             identity=True, plugin="songrequest")
         bot.register_command("skip", self.cmd_skip,
                              mod_only=True, description="Skip the current song", plugin="songrequest")
         bot.register_command("wrongsong", self.cmd_wrongsong,
@@ -175,6 +192,7 @@ class SongRequestPlugin:
                 "title": self.current_song["title"],
                 "artist": self.current_song["artist"],
                 "requester": self.current_song["requester"],
+                "priority": bool(self.current_song.get("priority")),
                 "album_art": self.current_song.get("album_art"),
                 "duration_ms": self.current_song.get("duration_ms", 0),
                 "likes": like_count,
@@ -392,8 +410,7 @@ class SongRequestPlugin:
                 self._save_data()
                 if self.bot.web_server:
                     self.bot.web_server.update_queue(
-                        [{"title": s["title"], "artist": s["artist"],
-                          "requester": s["requester"]} for s in self.queue]
+                        self._queue_payload()
                     )
                 await self.bot.send_chat(
                     f"Could not play: {removed['title']} (invalid YouTube URL) - skipping"
@@ -425,6 +442,7 @@ class SongRequestPlugin:
                 "title": self.current_song["title"],
                 "artist": self.current_song["artist"],
                 "requester": self.current_song["requester"],
+                "priority": bool(self.current_song.get("priority")),
                 "album_art": self.current_song.get("album_art"),
                 "duration_ms": self.current_song.get("duration_ms", 0),
                 "likes": like_count,
@@ -437,8 +455,7 @@ class SongRequestPlugin:
             })
 
             self.bot.web_server.update_queue(
-                [{"title": s["title"], "artist": s["artist"],
-                  "requester": s["requester"]} for s in self.queue]
+                self._queue_payload()
             )
 
         likes_key = self._song_key(self.current_song["title"], self.current_song["artist"])
@@ -552,10 +569,71 @@ class SongRequestPlugin:
 
     # === COMMANDS ===
 
+    # ── !vipsr helpers ──────────────────────────────────────────────
+
+    @staticmethod
+    def _priority_cost():
+        return max(0, int(getattr(_cfg, "SR_PRIORITY_COST", 200)))
+
+    @staticmethod
+    def _priority_max_per_hour():
+        return max(0, int(getattr(_cfg, "SR_PRIORITY_MAX_PER_HOUR", 2)))
+
+    def _queue_payload(self):
+        return [{"title": s["title"], "artist": s["artist"],
+                 "requester": s["requester"], "priority": bool(s.get("priority"))}
+                for s in self.queue]
+
+    def _priority_insert_index(self):
+        """Where a VIP song goes: behind earlier VIP songs, and never in
+        front of a song already handed to Spotify (it is going to play
+        whatever we do)."""
+        idx = 0
+        while idx < len(self.queue) and (
+                self.queue[idx].get("priority") or self.queue[idx].get("pushed_to_spotify")):
+            idx += 1
+        return idx
+
+    def _priority_uses(self, user_uuid, now=None):
+        """Timestamps of this viewer's cuts inside the rolling hour."""
+        now = time.monotonic() if now is None else now
+        recent = [t for t in self._priority_times.get(user_uuid, []) if now - t < 3600]
+        self._priority_times[user_uuid] = recent
+        return recent
+
     async def cmd_sr(self, message, args, whisper=False):
+        await self._request(message, args, whisper, priority=False)
+
+    async def cmd_vipsr(self, message, args, whisper=False):
+        await self._request(message, args, whisper, priority=True)
+
+    async def _request(self, message, args, whisper=False, priority=False):
         if not self.bot.is_feature_enabled("song_requests"):
             await self.bot.send_reply(message, "Song requests are currently closed.", whisper)
             return
+        cur = getattr(_cfg, "ECONOMY_CURRENCY_NAME", "Hats")
+        cost = self._priority_cost()
+        user_uuid = None
+        if priority:
+            if not self.bot.is_feature_enabled("priority_sr"):
+                await self.bot.send_reply(message, "VIP song requests are currently closed.", whisper)
+                return
+            if not args:
+                await self.bot.send_reply(
+                    message, f"Usage: !vipsr <song name or URL> (cuts the line for {cost} {cur})", whisper)
+                return
+            user_uuid = await self.bot.user_uuid_for(message.chatter)
+            if not user_uuid:
+                await self.bot.send_reply(message, f"{cur} are still loading. Try again in a moment.", whisper)
+                return
+            uses = self._priority_uses(user_uuid)
+            cap = self._priority_max_per_hour()
+            if len(uses) >= cap:
+                wait_min = max(1, int((3600 - (time.monotonic() - min(uses))) // 60) + 1)
+                await self.bot.send_reply(
+                    message, f"You've used your {cap} VIP requests this hour. Next one in ~{wait_min} min.",
+                    whisper)
+                return
 
         if not args:
             await self.bot.send_reply(message, "Usage: !sr <song name or URL>", whisper)
@@ -632,27 +710,65 @@ class SongRequestPlugin:
         song["requester_id"] = str(message.chatter.id) if hasattr(message.chatter, "id") else ""
         song["requested_at"] = datetime.now().isoformat()
 
-        self.queue.append(song)
+        if priority:
+            # Everything above passed, so charge now: one conditional
+            # UPDATE, nothing moves when the balance is short.
+            db = await _shared_db.get_db()
+            if db is None:
+                await self.bot.send_reply(message, f"{cur} are still loading. Try again in a moment.", whisper)
+                return
+            try:
+                left = await _wallet.debit(
+                    db, user_uuid, "hats", cost, "priority_sr", channel="chat",
+                    note=f"{song['title']} by {song['artist']}")
+            except Exception as e:
+                print(f"[SongRequest] vipsr debit failed: {e}")
+                await self.bot.send_reply(message, "Couldn't charge that right now. Try again.", whisper)
+                return
+            if left is None:
+                have = await _wallet.get(db, user_uuid)
+                await self.bot.send_reply(
+                    message, f"A VIP request costs {cost} {cur}; you have {have:,}.", whisper)
+                return
+            song["priority"] = True
+            song["priority_cost"] = cost
+            self._priority_uses(user_uuid).append(time.monotonic())
+            position = self._priority_insert_index() + 1
+            self.queue.insert(position - 1, song)
+        else:
+            self.queue.append(song)
+            position = len(self.queue)
         self._save_data()
 
-        # Smart wait time: queue durations + remaining time on current song
-        position = len(self.queue)
-        wait_ms = self._estimate_wait_ms()
+        # Smart wait time: durations ahead of this song + remaining time on current song
+        wait_ms = sum(q.get("duration_ms", 0) for q in self.queue[:position - 1])
+        wait_ms += self._current_remaining_ms
         wait_min = max(1, round(wait_ms / 60000)) if wait_ms > 30000 else 0
 
         source_label = "Spotify" if song["source"] == "spotify" else "YouTube"
         wait_text = f"~{wait_min} min wait" if wait_min > 0 else "up next"
-        await self.bot.send_reply(
-            message,
-            f"Added: {song['title']} by {song['artist']} [{source_label}] | "
-            f"Position: #{position} | {wait_text}",
-            whisper
-        )
+        if priority:
+            await self.bot.send_reply(
+                message,
+                f"VIP: {song['title']} by {song['artist']} [{source_label}] | "
+                f"Position: #{position} | {wait_text} | -{cost} {cur} ({left:,} left)",
+                whisper
+            )
+            # the flex: everyone sees the spend
+            await self.bot.send_chat(
+                f"{message.chatter.name} spent {cost} {cur} to cut the line with "
+                f"{song['title']} by {song['artist']}!")
+        else:
+            await self.bot.send_reply(
+                message,
+                f"Added: {song['title']} by {song['artist']} [{source_label}] | "
+                f"Position: #{position} | {wait_text}",
+                whisper
+            )
 
         if self.bot.web_server:
             self.bot.web_server.update_queue(
-                [{"title": s["title"], "artist": s["artist"],
-                  "requester": s["requester"]} for s in self.queue]
+                self._queue_payload()
             )
 
     async def cmd_skip(self, message, args, whisper=False):
@@ -718,8 +834,7 @@ class SongRequestPlugin:
         if self.bot.web_server:
             self.bot.web_server.update_now_playing(None)
             self.bot.web_server.update_queue(
-                [{"title": s["title"], "artist": s["artist"],
-                  "requester": s["requester"]} for s in self.queue]
+                self._queue_payload()
             )
 
         if was_youtube:
@@ -734,8 +849,7 @@ class SongRequestPlugin:
 
                 if self.bot.web_server:
                     self.bot.web_server.update_queue(
-                        [{"title": s["title"], "artist": s["artist"],
-                          "requester": s["requester"]} for s in self.queue]
+                        self._queue_payload()
                     )
 
                 if removed.get("pushed_to_spotify"):
@@ -1007,7 +1121,8 @@ class SongRequestPlugin:
                 wait_ms += self._current_remaining_ms
                 wait_min = max(1, round(wait_ms / 60000)) if wait_ms > 30000 else 0
                 wait_text = f"~{wait_min} min" if wait_min > 0 else "up next"
-                user_songs.append(f"#{i+1} {s['title']} ({wait_text})")
+                tag = "VIP " if s.get("priority") else ""
+                user_songs.append(f"#{i+1} {tag}{s['title']} ({wait_text})")
 
         if not user_songs:
             await self.bot.send_reply(message, "You have no songs in the queue.", whisper)
@@ -1213,6 +1328,7 @@ class SongRequestPlugin:
                         "title": self.current_song["title"],
                         "artist": self.current_song["artist"],
                         "requester": self.current_song["requester"],
+                        "priority": bool(self.current_song.get("priority")),
                         "album_art": self.current_song.get("album_art"),
                         "duration_ms": self.current_song.get("duration_ms", 0),
                         "likes": like_count,
@@ -1225,8 +1341,7 @@ class SongRequestPlugin:
                     })
 
                     self.bot.web_server.update_queue(
-                        [{"title": s["title"], "artist": s["artist"],
-                          "requester": s["requester"]} for s in self.queue]
+                        self._queue_payload()
                     )
 
                 # Update stream title with new song (for {song} placeholder)

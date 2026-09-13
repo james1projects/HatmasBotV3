@@ -175,6 +175,12 @@ SR_MAX_PER_SUB = 4
 SR_MAX_DURATION_MS = 600000       # 10 minutes
 SR_VOTESKIP_THRESHOLD = 5         # Votes needed to skip
 SR_PLAYLIST_AUTO_HIDE_SECONDS = 8 # Seconds before playlist song overlay auto-hides
+# !vipsr <song>: cut the song queue for Hats (core/wallet.py, reason
+# priority_sr). Capped per viewer per rolling hour so a big balance can
+# never own the queue; the normal per-user song cap still applies.
+# Feature toggle "priority_sr" (also needs song_requests on).
+SR_PRIORITY_COST = 200            # Hats per cut
+SR_PRIORITY_MAX_PER_HOUR = 2      # cuts per viewer per rolling hour
 SR_QUEUE_FILE = DATA_DIR / "song_queue.json"
 SR_HISTORY_FILE = DATA_DIR / "song_history.json"
 SR_LIKES_FILE = DATA_DIR / "song_likes.json"
@@ -615,6 +621,7 @@ TIMED_MESSAGES_TICK_SEC = 1.0              # how often the loop checks the lanes
 # one back to its default removes it from the file).
 DEFAULT_FEATURES = {
     "song_requests": True, "predictions": False, "snap": True,
+    "priority_sr": True,   # !vipsr (Hats to cut the song queue); needs song_requests too
     "claude_chat": True, "smite_tracking": True, "gamble": True,
     "now_playing_overlay": True, "auto_scene_switch": True,
     "auto_title": True, "god_requests": True, "auto_shoutout": True,
