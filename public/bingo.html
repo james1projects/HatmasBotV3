@@ -74,6 +74,16 @@
   .sq.line { outline: 2px solid var(--green); outline-offset: -2px; }
   .sq.flash { animation: flash 0.9s ease; }
   @keyframes flash { 0% { transform: scale(1.12); } 100% { transform: scale(1); } }
+  /* the Bingo! button: only rendered while the round is open and the server says this card holds a line */
+  .claim-bingo { display: flex; align-items: center; gap: 10px; margin: 10px 0 2px; }
+  .claim-bingo .btn.big { font-family: var(--font-display); font-size: 22px; letter-spacing: 0.06em; text-transform: uppercase; padding: 10px 22px; background: var(--green); color: var(--bg); animation: pulse 1.2s ease-in-out infinite; }
+  .claim-bingo .btn.big[disabled] { animation: none; }
+  @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(76,195,138,0.45); } 50% { box-shadow: 0 0 0 8px rgba(76,195,138,0); } }
+  .card.has-line { animation: cardflash 0.9s ease 2; }
+  @keyframes cardflash { 0%, 100% { box-shadow: 0 0 0 2px var(--green-bg); } 50% { box-shadow: 0 0 0 6px var(--green); } }
+  .card.claimed h3 { color: var(--green); }
+  .onstream { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-dim); cursor: pointer; }
+  .onstream input { accent-color: var(--accent); }
 
   .side { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 22px; }
   .box { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 12px; }
@@ -99,7 +109,7 @@
     </div>
 
     <h1>Stream Bingo</h1>
-    <p class="sub">Every card is different. Squares fill in as Hatmaster plays: kills, deaths, multikills, and the things he says. First line wins the Hats pot.</p>
+    <p class="sub">Every card is different. Squares fill in as Hatmaster plays: kills, deaths, multikills, and the things he says. Get a full row, column, or diagonal, press <b>Bingo!</b>, and the first to press wins the Hats pot.</p>
 
     <div id="round"></div>
     <div class="actions" id="actions"></div>
@@ -131,7 +141,7 @@
       return;
     }
     el.innerHTML =
-      (r.winner ? '<div class="winner">BINGO! ' + esc(r.winner.display) + ' won ' + esc(r.winner.prize) + ' Hats.</div>' : '') +
+      (r.winner ? '<div class="winner">BINGO! ' + esc(r.winner.display) + ' claimed it and won ' + esc(r.winner.prize) + ' Hats.</div>' : '') +
       '<div class="round">' +
         '<div class="stat pot"><div class="k">Pot</div><div class="v">' + esc(r.pot) + ' Hats</div></div>' +
         '<div class="stat"><div class="k">Cards</div><div class="v">' + esc(r.cards) + '</div></div>' +
@@ -156,25 +166,66 @@
     }
     if (!me.twitch) { el.innerHTML = '<span class="err">Bingo cards need a Twitch login.</span>'; return; }
     if (!open) { el.innerHTML = '<span class="hint">Your cards appear here when a round opens.</span>'; return; }
+    const onStream = '<label class="onstream" title="Your card takes a turn on the stream\'s bingo carousel"><input type="checkbox" id="on-stream"' + (me.on_stream ? ' checked' : '') + '> Show my card on stream</label>';
     if (me.can_claim) {
       const price = me.next_price || 0;
       el.innerHTML = '<button type="button" class="btn" id="claim">' + (price ? 'Buy another card for ' + price + ' Hats' : 'Get your free card') + '</button>' +
-        '<span class="hint">' + (myCards.length ? myCards.length + ' of ' + state.max_cards + ' cards' : 'One free card per round, up to ' + state.max_cards + ' with Hats') + '</span><span class="err" id="claim-err"></span>';
+        '<span class="hint">' + (myCards.length ? myCards.length + ' of ' + state.max_cards + ' cards' : 'One free card per round, up to ' + state.max_cards + ' with Hats') + '</span><span class="err" id="claim-err"></span>' + (myCards.length ? onStream : '');
       $("claim").addEventListener("click", claim);
     } else {
-      el.innerHTML = '<span class="hint">You have all ' + myCards.length + ' cards for this round. Good luck.</span>';
+      el.innerHTML = '<span class="hint">You have all ' + myCards.length + ' cards for this round. Good luck.</span>' + onStream;
     }
+    const cb = $("on-stream");
+    if (cb) cb.addEventListener("change", async () => {
+      cb.disabled = true;
+      try { const r = await postJson("/api/bingo/prefs", {on_stream: cb.checked}); if (r.ok) me.on_stream = r.on_stream; else cb.checked = !cb.checked; }
+      catch (_) { cb.checked = !cb.checked; }
+      cb.disabled = false;
+    });
+  }
+  async function postJson(url, body) {
+    const r = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body || {})});
+    return r.json();
+  }
+
+  // ── the Bingo! press ──
+  let chimed = new Set();
+  function chime() {
+    try {
+      const ac = new (window.AudioContext || window.webkitAudioContext)();
+      [523, 659, 784, 1047].forEach((f, i) => { const o = ac.createOscillator(), g = ac.createGain(); o.type = "triangle"; o.frequency.value = f;
+        g.gain.setValueAtTime(0, ac.currentTime + i * 0.12); g.gain.linearRampToValueAtTime(0.25, ac.currentTime + i * 0.12 + 0.02); g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + i * 0.12 + 0.5);
+        o.connect(g); g.connect(ac.destination); o.start(ac.currentTime + i * 0.12); o.stop(ac.currentTime + i * 0.12 + 0.55); });
+    } catch (_) {}
+  }
+  async function claimBingo(cardId, btn) {
+    if (btn) btn.disabled = true;
+    const errEl = document.querySelector('.claim-bingo[data-card="' + cardId + '"] .err');
+    try {
+      const r = await postJson("/api/bingo/claim", {card_id: cardId});
+      if (!r.ok) { if (errEl) errEl.textContent = r.error || "Could not claim."; if (btn) btn.disabled = false; return; }
+      if (state) { state.round = r.summary; }
+      renderRound(); await loadMe();
+    } catch (_) { if (btn) btn.disabled = false; }
   }
 
   function cardHtml(c) {
     const line = new Set(c.line || []);
-    return '<div class="card' + (c.bingo ? ' bingo' : '') + '" data-id="' + c.id + '">' +
-      '<h3>Card ' + c.seq + (c.bingo ? ' BINGO' : '') + '<span>' + (c.to_bingo === 0 ? 'won' : c.to_bingo + ' to go') + '</span></h3>' +
+    const open = state && state.round && !state.round.winner && me && me.open;
+    const status = c.claimed ? 'won' : (c.bingo ? (open ? 'line! claim it' : 'had a line') : c.to_bingo + ' to go');
+    return '<div class="card' + (c.bingo ? ' bingo' : '') + (c.claimed ? ' claimed' : '') + '" data-id="' + c.id + '">' +
+      '<h3>Card ' + c.seq + (c.claimed ? ' BINGO' : '') + '<span>' + status + '</span></h3>' +
       '<div class="grid">' + c.squares.map((s, i) =>
         '<div class="sq' + (s.marked ? ' marked' : '') + (s.free ? ' free' : '') + (line.has(i) ? ' line' : '') + '" data-sq="' + esc(s.id) + '" title="' + esc(s.label) + '"><span>' + esc(s.label) + '</span></div>').join('') +
-      '</div></div>';
+      '</div>' +
+      (c.bingo && open && !c.claimed ? '<div class="claim-bingo" data-card="' + c.id + '"><button type="button" class="btn big" data-claim="' + c.id + '">Bingo!</button><span class="hint">You have a line. First to press wins the pot.</span><span class="err"></span></div>' : '') +
+      '</div>';
   }
-  function renderCards() { $("cards").innerHTML = myCards.map(cardHtml).join(''); }
+  function renderCards() {
+    $("cards").innerHTML = myCards.map(cardHtml).join('');
+    myCards.forEach((c) => { if (c.bingo && !chimed.has(c.id) && me && me.open) { chimed.add(c.id); const el = document.querySelector('.card[data-id="' + c.id + '"]'); if (el) el.classList.add('has-line'); chime(); } });
+  }
+  $("cards").addEventListener("click", (e) => { const b = e.target.closest("[data-claim]"); if (b) claimBingo(Number(b.dataset.claim), b); });
 
   async function claim() {
     const btn = $("claim"); if (btn) btn.disabled = true;
@@ -208,8 +259,10 @@
           if (myCards.some((c) => touched.has(c.id))) loadMe();
         }
       }
-      else if (msg.event === "bingo_win") { if (state) state.round = d; renderRound(); loadMe(); }
-      else if (msg.event === "bingo_uncall") { if (state) state.round = d; renderRound(); loadMe(); }
+      else if (msg.event === "bingo_win" || msg.event === "bingo_claim") { if (state) state.round = d; renderRound(); loadMe(); }
+      else if (msg.event === "bingo_line") { if (state) state.round = d; renderRound(); if (me && (d.lines || []).some((l) => l.login === me.login)) loadMe(); }
+      else if (msg.event === "bingo_uncall") { if (state) state.round = d; chimed.clear(); renderRound(); loadMe(); }
+      else if (msg.event === "bingo_prefs") { if (state) state.round = d; renderRound(); }
       else if (msg.event === "bingo_closed") { if (state) { state.round = null; state.last = d; } renderRound(); loadMe(); }
       else if (msg.event === "card_added") { if (state) state.round = d; renderRound(); }
     };

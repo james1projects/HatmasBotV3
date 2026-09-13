@@ -2834,6 +2834,39 @@ detect, everything files under `unknown/`). If digits are visible in the 8x
 crop but distances are high (different HUD scale), give the profile its own
 `digit_templates_dir` and enrol there so the shared library stays clean.
 
+
+## v2.15 Update — Hatmaster Alert Box, Sources page, Bingo on stream (2026-09-12)
+
+Spec and as-built notes: `docs/ALERT_BOX.md`. Built and verified on the dev host the
+same day; the bot must be restarted before any of it exists on :8069.
+
+- **Sources page** (`core/sources.py`, `overlays/sources.html`, dashboard `/sources`):
+  every OBS browser source with URL, size, connected-client dot, Copy and Test. The
+  README list is generated from the same registry (`tools/gen_readme_sources.py`).
+  Fixed a July-old doc error: the economy overlays are `/overlays/economy_*.html`
+  (static), not `/overlay/economy_*`.
+- **Hatmaster Alert Box** (`core/alert_box.py`, `core/alert_web.py`,
+  `overlays/alerts.html` + `overlays/alerts/`): one full-scene source
+  (`/overlay/alerts?box=main`) that plays the transient overlays as kinds: gamble,
+  tts, voiceline, cocaster, dividend, match_end, leaderboard, tradefeed,
+  tradefeed_rolling (sticky panel), portfolio, spin, bingo_open / bingo_call /
+  bingo_claim / bingo_closed. Per box and kind: enabled, lane (queue), duration cap,
+  sound, volume, placement + anchor; per box a master volume. Config
+  `data/alerts.json` (`ALERTS_FILE`). Every migrated kind starts off; the legacy
+  routes stay served with `TODO(alertbox)` markers until James has switched.
+- **Layout editor** (`overlays/alerts_layout.html`, `/alerts/layout`): the 1080p scene
+  to scale, drag / resize / nudge, per-kind fields, eye (editor-only hide), live
+  preview iframe of the real box, scene screenshot background, lanes, Recent + Replay,
+  Test.
+- **Bingo on stream**: "Show my card on stream" (prefs table, `POST /api/bingo/prefs`),
+  the `/overlay/bingo_cards` carousel (one card at a time, name over the grid, line
+  ring), and the **manual claim**: a completed line emits `bingo_line` and a chat
+  nudge; `POST /api/bingo/claim` re-checks the line server-side, first accepted press
+  pays and closes (`bingo_claim`). `overlay_client.js` now connects to the host that
+  served it, so the dev host (`tools/bingo_devserver.py`, real OverlayManager) runs all
+  of it on :8088.
+- Tests: `tests/test_alert_box.py`; `test_bingo.py` / `test_bingo_control.py` updated.
+
 ## Session log — 2026-09-04 → 2026-09-06
 
 What this stretch produced, newest last (each has its own section above):
@@ -2845,7 +2878,8 @@ What this stretch produced, newest last (each has its own section above):
 | `5c06dde` | Clip windows doubled and made event-centred; `?len=short|normal|long` + page selector |
 | `4171aa1`, `7b8ba58` | Stream Deck: VOD REVIEW / VOD SEARCH buttons + icons; vertical-tab fix in `tools/vod_index.py` |
 | `be7c097`, `b96fc81` | Stream Bingo (v2.13), on hold |
-| v2.14 (9/6, uncommitted) | Ask the VOD for any Twitch channel: downloader, per-channel detector profiles, channel-scoped index and page (local-only rows) |
+| v2.14 (9/6, `b295e2a`) | Ask the VOD for any Twitch channel: downloader, per-channel detector profiles, channel-scoped index and page (local-only rows) |
+| v2.15 (9/12) | Hatmaster Alert Box + layout editor, Sources page, bingo carousel + manual Bingo! claim (`docs/ALERT_BOX.md`) |
 
 Standing state: `web_vod` and `cocaster` toggles OFF, every recording `private`,
 nothing pushed, bot not restarted since before v2.11 (restart needed to serve any of

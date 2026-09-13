@@ -5,6 +5,8 @@ core/bingo_web.py — Stream Bingo routes for the public site.
     GET  /api/bingo/round      public round state: cards, pot, calls, leaders
     GET  /api/bingo/me         the session viewer's cards + next card price
     POST /api/bingo/card       claim the free card / buy the next one (Hats)
+    POST /api/bingo/claim      {card_id}: the Bingo! button (server re-checks the line)
+    POST /api/bingo/prefs      {on_stream}: "Show my card on stream"
     GET  /ws/bingo             live: bingo_open / bingo_call / bingo_win /
                                bingo_closed / card_added, straight from the plugin
 
@@ -41,6 +43,8 @@ class BingoWeb:
         r.add_get("/api/bingo/round", self.handle_round)
         r.add_get("/api/bingo/me", self.handle_me)
         r.add_post("/api/bingo/card", self.handle_card)
+        r.add_post("/api/bingo/claim", self.handle_claim)
+        r.add_post("/api/bingo/prefs", self.handle_prefs)
         r.add_get("/ws/bingo", self.handle_ws)
 
     # ── plumbing ──────────────────────────────────────────────────────
@@ -137,6 +141,52 @@ class BingoWeb:
         return web.json_response(res, status=200 if res.get("ok") else 400,
                                  headers={"Cache-Control": "no-store"})
 
+    async def _viewer(self, request: web.Request):
+        """Twitch identity + origin/rate checks for the POSTs, or an error response."""
+        if not self._enabled():
+            raise web.HTTPNotFound()
+        ident = self._identity(request)
+        if ident is None:
+            return None, web.json_response({"ok": False, "error": "Log in with Twitch first."}, status=401)
+        if _ws.provider(ident) != "tw" or not ident.get("login"):
+            return None, web.json_response({"ok": False, "error": "Bingo needs a Twitch login."}, status=403)
+        origin_ok = getattr(self.server, "_origin_ok", None)
+        if callable(origin_ok) and not origin_ok(request):
+            return None, web.json_response({"ok": False, "error": "Bad origin."}, status=403)
+        rate_ok = getattr(self.server, "_ip_rate_ok", None)
+        if callable(rate_ok) and not rate_ok(request):
+            return None, web.json_response({"ok": False, "error": "Too many requests."}, status=429)
+        plugin = self._plugin()
+        if plugin is None or plugin.store is None:
+            return None, web.json_response({"ok": False, "error": "Bingo is starting up."}, status=503)
+        return (ident, plugin), None
+
+    async def handle_claim(self, request: web.Request):
+        """POST {card_id}: the Bingo! button. Server-side line check."""
+        ok, err = await self._viewer(request)
+        if err is not None:
+            return err
+        ident, plugin = ok
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        res = await plugin.claim_bingo(ident["login"], (body or {}).get("card_id"))
+        return web.json_response(res, status=200 if res.get("ok") else 400, headers={"Cache-Control": "no-store"})
+
+    async def handle_prefs(self, request: web.Request):
+        """POST {on_stream: bool}: "Show my card on stream"."""
+        ok, err = await self._viewer(request)
+        if err is not None:
+            return err
+        ident, plugin = ok
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        res = await plugin.set_on_stream(ident["login"], bool((body or {}).get("on_stream")))
+        return web.json_response(res, status=200 if res.get("ok") else 400, headers={"Cache-Control": "no-store"})
+
     async def handle_ws(self, request: web.Request) -> web.WebSocketResponse:
         if not self._enabled():
             raise web.HTTPNotFound()
@@ -169,6 +219,8 @@ class BingoControl:
         POST     /api/bingo/pool/save           {id?, label, source, weight} add or update
         POST     /api/bingo/pool/delete?id=<id> remove a square (round must be closed)
         POST     /api/bingo/pool/reload         re-read pool.json after a hand edit
+        GET      /api/bingo/cards_on_stream     the carousel's data (opted-in cards)
+        GET      /overlay/bingo_cards           the carousel OBS source
 
     `get_plugin` returns the BingoPlugin (or None while the bot is starting).
     """
@@ -188,6 +240,8 @@ class BingoControl:
         router.add_post("/api/bingo/pool/save", self.handle_pool_save)
         router.add_post("/api/bingo/pool/delete", self.handle_pool_delete)
         router.add_post("/api/bingo/pool/reload", self.handle_pool_reload)
+        router.add_get("/api/bingo/cards_on_stream", self.handle_cards_on_stream)
+        router.add_get("/overlay/bingo_cards", self.handle_cards_overlay)
 
     def _plugin(self):
         p = self._get_plugin()
@@ -272,3 +326,12 @@ class BingoControl:
 
     async def handle_pool_reload(self, request):
         return self._reply(self._plugin().reload_pool())
+
+    async def handle_cards_on_stream(self, request):
+        """What the carousel shows: opted-in cards of the open round."""
+        return self._reply(self._plugin().cards_on_stream())
+
+    async def handle_cards_overlay(self, request):
+        resp = web.FileResponse(PUBLIC_DIR.parent / "overlays" / "bingo_cards.html")
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return resp

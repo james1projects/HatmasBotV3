@@ -132,12 +132,27 @@
     "show_on": [
       "bingo_open",
       "bingo_call",
-      "bingo_win",
+      "bingo_line",
+      "bingo_claim",
       "bingo_uncall",
       "card_added"
     ],
     "hide_on": [
       "bingo_closed"
+    ]
+  },
+  "bingo_cards": {
+    "show_on": [
+      "bingo_open",
+      "card_added",
+      "bingo_call",
+      "bingo_line",
+      "bingo_uncall",
+      "bingo_prefs"
+    ],
+    "hide_on": [
+      "bingo_closed",
+      "bingo_claim"
     ]
   }
 }

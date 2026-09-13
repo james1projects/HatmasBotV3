@@ -218,26 +218,66 @@ def test_fire_marks_pays_and_closes():
     card = asyncio.run(p.claim_card("dyna", "Dyna"))["card"]
     ids = [s["id"] for s in card["squares"]]
     res = asyncio.run(p.fire(ids[0], source="manual"))
-    assert res["ok"] and res["changed"] == 1 and not res["winners"]
+    assert res["ok"] and res["changed"] == 1 and not res["lines"]
     assert ov.events[-1][0] == "bingo_call" and ov.events[-1][1]["call"]["event_id"] == ids[0]
     assert any("Bingo call" in t for t in bot.chat)
     assert asyncio.run(p.fire(ids[0]))["already"] is True
     for sid in ids[1:4]:
         asyncio.run(p.fire(sid))
     assert p.my_cards("dyna")["cards"][0]["to_bingo"] == 1
-    win = asyncio.run(p.fire(ids[4]))
-    assert win["winners"][0]["login"] == "dyna" and win["summary"]["status"] == "closed"
+    # a claim before the line is complete is refused
+    assert "Not a bingo yet" in asyncio.run(p.claim_bingo("dyna", card["id"]))["error"]
+    line = asyncio.run(p.fire(ids[4]))
+    # a completed line does NOT win: the round stays open, chat is told to press Bingo!
+    assert line["lines"][0]["login"] == "dyna" and line["summary"]["status"] == "open" and p.current() is not None
+    assert not eco.adjustments
+    assert ov.events[-1][0] == "bingo_line" and ov.events[-1][1]["lines"][0]["card_id"] == card["id"]
+    assert any("Press Bingo!" in t for t in bot.chat)
+    mine = p.my_cards("dyna")["cards"][0]
+    assert mine["bingo"] and mine["line"] == [0, 1, 2, 3, 4] and not mine["claimed"]
+    # wrong card / wrong owner / bad id
+    assert "not your card" in asyncio.run(p.claim_bingo("bob", card["id"]))["error"]
+    assert "not in this round" in asyncio.run(p.claim_bingo("dyna", 9999))["error"]
+    assert "Which card" in asyncio.run(p.claim_bingo("dyna", "x"))["error"]
+    # the press: paid, closed, announced
+    win = asyncio.run(p.claim_bingo("dyna", card["id"]))
+    assert win["ok"] and win["winner"]["login"] == "dyna" and win["winner"]["prize"] == 500 and win["winner"]["paid"]
+    assert win["summary"]["status"] == "closed" and win["card"]["claimed"]
     assert eco.adjustments[-1] == ("dyna", 500)                     # base prize, no sales
-    assert ov.events[-1][0] == "bingo_win" and ov.events[-1][1]["winner"]["paid"] is True
-    assert any("BINGO! Dyna wins" in t for t in bot.chat)
+    assert ov.events[-1][0] == "bingo_claim" and ov.events[-1][1]["winner"]["line"] == [0, 1, 2, 3, 4]
+    assert any("BINGO! Dyna claimed" in t for t in bot.chat)
     assert p.current() is None and p.public_state()["last"]["winner"]["login"] == "dyna"
-    # the winning card stays visible after the round closes, nothing to claim
+    # a second press after the round is over
+    assert "already claimed" in asyncio.run(p.claim_bingo("dyna", card["id"]))["error"]
+    # the winning card stays visible after the round closes, nothing to buy
     after = p.my_cards("dyna")
-    assert after["open"] is False and after["cards"][0]["bingo"] and after["cards"][0]["line"] == [0, 1, 2, 3, 4]
-    assert after["can_claim"] is False and after["next_price"] is None
+    assert after["open"] is False and after["cards"][0]["bingo"] and after["cards"][0]["claimed"]
+    assert after["can_claim"] is False and after["next_price"] is None and after["winner"]["login"] == "dyna"
     # after the round: firing is refused, ending is a no-op
     assert asyncio.run(p.fire("kill"))["error"] == "no open round"
     assert asyncio.run(p.end_round()) is None
+
+
+def test_show_my_card_on_stream():
+    p, bot, eco, ov = _plugin({"dyna": 0, "bob": 0})
+    assert p.cards_on_stream() == {"open": False, "round": None, "cards": []}
+    assert not asyncio.run(p.set_on_stream("", True))["ok"]
+    asyncio.run(p.start_round())
+    asyncio.run(p.claim_card("dyna", "Dyna"))
+    asyncio.run(p.claim_card("bob", "Bob"))
+    assert p.my_cards("dyna")["on_stream"] is False and p.cards_on_stream()["cards"] == []
+    assert asyncio.run(p.set_on_stream("Dyna", True)) == {"ok": True, "on_stream": True}
+    assert ov.events[-1][0] == "bingo_prefs" and ov.events[-1][1]["login"] == "dyna"
+    assert p.my_cards("dyna")["on_stream"] is True
+    shown = p.cards_on_stream()
+    assert shown["open"] and [c["login"] for c in shown["cards"]] == ["dyna"] and shown["cards"][0]["squares"][12]["free"]
+    # the preference outlives the round
+    asyncio.run(p.end_round("manual"))
+    asyncio.run(p.start_round())
+    asyncio.run(p.claim_card("dyna", "Dyna"))
+    assert p.on_stream("dyna") and [c["login"] for c in p.cards_on_stream()["cards"]] == ["dyna"]
+    asyncio.run(p.set_on_stream("dyna", False))
+    assert p.cards_on_stream()["cards"] == []
 
 
 def test_auto_squares_from_detector_and_economy():

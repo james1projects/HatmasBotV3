@@ -91,7 +91,7 @@
       <div id="calls"></div>
     </div>
     <div class="box">
-      <h3>Cards in play</h3>
+      <h3>Cards in play <span style="font-weight:400;color:var(--muted)">(a LINE only wins once the viewer presses Bingo! on the site)</span></h3>
       <div id="cards"></div>
     </div>
   </div>
@@ -192,8 +192,8 @@
       // cards
       const cards = state.round_cards || [];
       $("cards").innerHTML = cards.length
-        ? `<table><thead><tr><th>Player</th><th class="num">Card</th><th class="num">Paid</th><th class="num">Marked</th><th class="num">To go</th></tr></thead><tbody>` +
-          cards.map((c) => `<tr class="${c.bingo ? "bingo" : ""}"><td>${esc(c.display || c.login)}</td><td class="num">#${c.seq}</td><td class="num">${c.price || "free"}</td><td class="num">${c.marked}/25</td><td class="num">${c.bingo ? "BINGO" : c.to_bingo}</td></tr>`).join("") +
+        ? `<table><thead><tr><th>Player</th><th class="num">Card</th><th class="num">Paid</th><th class="num">Marked</th><th class="num">To go</th><th>On stream</th></tr></thead><tbody>` +
+          cards.map((c) => `<tr class="${c.bingo ? "bingo" : ""}"><td>${esc(c.display || c.login)}</td><td class="num">#${c.seq}</td><td class="num">${c.price || "free"}</td><td class="num">${c.marked}/25</td><td class="num">${c.claimed ? "BINGO (claimed)" : c.bingo ? "LINE, not claimed" : c.to_bingo}</td><td>${c.on_stream ? "yes" : ""}</td></tr>`).join("") +
           `</tbody></table>`
         : `<div class="empty">${r ? "No cards yet. Viewers claim them at hatmaster.tv/bingo." : "No open round."}</div>`;
 

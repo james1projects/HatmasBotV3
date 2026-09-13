@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Bingo cards</title>
+<link rel="stylesheet" href="/overlays/hatmas_theme.css">
+<style>
+  /* OBS browser source (420x520): rotates through the cards of viewers who
+     ticked "Show my card on stream", one at a time, name over the grid, no
+     fill count (the marks show it). A card holding a complete line gets a
+     ring so chat can see who is sitting on one. Hides itself when nobody
+     opted in or no round is open. Data: /api/bingo/cards_on_stream on the
+     dashboard; refetched on every bingo event (rule "bingo_cards") and
+     every 15 s as a safety net. */
+  html, body { background: transparent; margin: 0; font-family: 'Inter', 'Segoe UI', sans-serif; -webkit-font-smoothing: antialiased; user-select: none; }
+  #wrap { position: fixed; left: 20px; top: 20px; width: 380px; opacity: 0; transition: opacity 0.35s ease; }
+  #wrap.visible { opacity: 1; }
+  .card { background: var(--hm-bg, rgba(32,44,57,0.94)); border-radius: 10px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.45); border: 2px solid transparent; transition: border-color 0.3s, box-shadow 0.3s; }
+  .card.line { border-color: var(--hm-gold-bright, #E8B583); box-shadow: 0 0 0 3px rgba(232,181,131,0.25), 0 4px 20px rgba(0,0,0,0.45); }
+  .head { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 14px; background: var(--hm-gold, #DFA06E); color: #202C39;
+    font-family: 'BigNoodleTitling', 'Bebas Neue', 'Inter', sans-serif; font-size: 26px; letter-spacing: 0.06em; text-transform: uppercase; line-height: 1; }
+  .head .who { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .head .n { font-size: 14px; font-family: 'JetBrains Mono', Consolas, monospace; letter-spacing: 0; text-transform: none; opacity: 0.8; }
+  .grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; padding: 10px; }
+  .sq { aspect-ratio: 1 / 1; min-width: 0; min-height: 0; box-sizing: border-box; overflow: hidden; display: flex; align-items: center; justify-content: center; text-align: center;
+    padding: 3px; font-size: 10.5px; line-height: 1.15; border-radius: 4px; overflow-wrap: anywhere; hyphens: auto;
+    background: rgba(255,255,255,0.05); color: var(--hm-text-secondary, #AFC2C9); border: 1px solid var(--hm-border-subtle, rgba(223,160,110,0.08)); }
+  .sq span { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+  .sq.marked { background: var(--hm-gold, #DFA06E); color: #202C39; border-color: var(--hm-gold, #DFA06E); font-weight: 700; }
+  .sq.free { font-family: 'BigNoodleTitling', 'Bebas Neue', 'Inter', sans-serif; font-size: 15px; letter-spacing: 0.06em; color: #fff; background: rgba(255,255,255,0.1); }
+  .sq.free.marked { color: #202C39; background: var(--hm-gold, #DFA06E); }
+  .sq.win { outline: 2px solid #fff; outline-offset: -2px; }
+  .foot { display: flex; justify-content: space-between; padding: 6px 14px 10px; font-size: 12px; color: var(--hm-text-secondary, #AFC2C9); }
+  .foot b { color: var(--hm-gold-bright, #E8B583); }
+  .fade { animation: swap 0.35s ease; }
+  @keyframes swap { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+</style>
+</head>
+<body>
+  <div id="wrap"><div class="card" id="card"></div></div>
+  <script src="/overlays/overlay_client.js"></script>
+  <script>
+    const DWELL_MS = 8000, POLL_MS = 15000;
+    const wrap = document.getElementById('wrap'), cardEl = document.getElementById('card');
+    let cards = [], idx = -1, state = null, timer = null;
+    function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
+    function draw(c) {
+      const line = new Set(c.line || []);
+      cardEl.className = 'card fade' + (c.bingo ? ' line' : '');
+      cardEl.innerHTML =
+        '<div class="head"><span class="who">' + esc(c.display || c.login) + '</span><span class="n">card ' + esc(c.seq) + (cards.length > 1 ? ' &middot; ' + (idx + 1) + '/' + cards.length : '') + '</span></div>' +
+        '<div class="grid">' + c.squares.map((s, i) => '<div class="sq' + (s.marked ? ' marked' : '') + (s.free ? ' free' : '') + (line.has(i) ? ' win' : '') + '"><span>' + esc(s.label) + '</span></div>').join('') + '</div>' +
+        '<div class="foot"><span>' + (c.bingo ? '<b>Has a line!</b> Press Bingo! on hatmaster.tv/bingo' : 'hatmaster.tv/bingo') + '</span><span>' + (state && state.pot != null ? state.pot + ' Hats' : '') + '</span></div>';
+      void cardEl.offsetWidth;
+    }
+    function show(i) {
+      if (!cards.length) { wrap.classList.remove('visible'); return; }
+      idx = ((i % cards.length) + cards.length) % cards.length;
+      draw(cards[idx]);
+      wrap.classList.add('visible');
+    }
+    function tick() { clearTimeout(timer); timer = setTimeout(() => { show(idx + 1); tick(); }, DWELL_MS); }
+
+    async function refresh() {
+      try {
+        const j = await (await fetch('/api/bingo/cards_on_stream', {cache: 'no-store'})).json();
+        state = j;
+        const before = cards[idx] && cards[idx].id;
+        cards = (j.open && j.cards) ? j.cards : [];
+        if (!cards.length) { wrap.classList.remove('visible'); return; }
+        // keep the card on screen if it is still there (re-marked live), else start over
+        const keep = cards.findIndex((c) => c.id === before);
+        show(keep >= 0 ? keep : 0);
+      } catch (_) { /* dashboard down: keep what we have */ }
+    }
+    HatmasOverlay.connect('bingo_cards', {
+      container: '#wrap',
+      onShow() { refresh(); tick(); },
+      onUpdate() { refresh(); },
+      onHide() { cards = []; wrap.classList.remove('visible'); clearTimeout(timer); }
+    });
+    // the overlay client hides the container until a show; we also manage it ourselves
+    const mo = new MutationObserver(() => { if (cards.length && wrap.style.display === 'none') wrap.style.display = ''; });
+    mo.observe(wrap, {attributes: true, attributeFilter: ['style']});
+    refresh().then(() => { wrap.style.display = ''; tick(); });
+    setInterval(refresh, POLL_MS);
+  </script>
+</body>
+</html>

@@ -1,7 +1,9 @@
 # Hatmaster Alert Box, Sources page, and Bingo on stream
 
-Spec agreed 2026-09-12. Status: **not built yet**. This page is the reference
-while it is; each phase below gets a status line as it lands.
+Spec agreed 2026-09-12. Status: **built 2026-09-12, verified on the dev host,
+not yet run on the live dashboard** (the bot needs a restart to serve any of
+it on :8069). The "As built" section at the end lists what differs from the
+plan below.
 
 ## Goals
 
@@ -186,5 +188,49 @@ Tests per phase in the house style (`tests/test_sources.py`,
 
 - A "Later" idea James raised: per-lane special rules (priority, preemption).
   The lane model leaves room; not in this pass.
-- Scene screenshot upload for the layout editor is a nice-to-have, not
-  required for phase 2.
+
+## As built (2026-09-12)
+
+Everything above landed the same day, plus these additions and differences:
+
+- **Volume**: every kind has a 0..100 slider, and every box has a master
+  slider that scales it (`boxes.<box>.volume`); an alert carries the
+  effective `volume` plus `kind_volume` / `box_volume`. Synthesised sounds
+  (gamble, spin, bingo claim) run through a WebAudio gain; clips (TTS,
+  voicelines) set the element volume.
+- **Rolling trade feed** (`tradefeed_rolling`, lane `feed`): a *sticky* kind.
+  While it is on screen a new alert of the same kind updates the panel
+  (newest on top, eight kept) and restarts its timer instead of queueing.
+  `HatmasAlerts.define(kind, {sticky: true, render, update})`. The
+  one-card-per-trade `tradefeed` kind stays for those who prefer it.
+- **Layout editor extras**: an eye per kind hides it in the editor only
+  (never saved; for placing two kinds that share a spot); a "live preview"
+  iframe of the real box behind the stage so Test plays in place; a scene
+  screenshot upload (`POST /api/alerts/background`, multipart `image`,
+  png/jpg/webp, stored as `data/alerts_background.<ext>`, `clear` to
+  remove) drawn behind the layout; remove-box; arrow-key nudge.
+- **Sources page fix**: the economy overlays were listed at
+  `/overlay/economy_*` (a README error since July); they are static files at
+  `/overlays/economy_*.html`. `tools/gen_readme_sources.py` rewrites the
+  README list from `core/sources.py` (`--check` for CI).
+- **Bingo**: `bingo_line` is a new event (a card completed a line; chat is
+  told to press Bingo!), `bingo_claim` replaces `bingo_win` (the alert kind
+  listens to both), `bingo_prefs` fires on the opt-in toggle. The store's
+  `mark_event` still reports cards that completed a line under the key
+  `winners`, but nothing pays until `check_claim` passes. The carousel polls
+  `/api/bingo/cards_on_stream` on the dashboard and refetches on every bingo
+  event (rule `bingo_cards`). The control page's cards table shows
+  "LINE, not claimed" / "BINGO (claimed)" and the on-stream flag.
+- **Dev host**: `tools/bingo_devserver.py` (:8088) now runs the real
+  `OverlayManager` with `/ws/overlays`, the alert box on
+  `data/alerts_dev.json`, `/sources`, `/alerts/layout`, and the carousel, so
+  the whole thing is testable without the bot. `overlay_client.js` connects
+  to the host that served the page instead of a hard-coded :8069.
+- Tests: `tests/test_alert_box.py` (7), `tests/test_bingo.py` +
+  `tests/test_bingo_control.py` updated for the claim flow (9 + 7).
+
+Verified 9/12 on the dev host from the browser: three kinds in three lanes at
+their placements; sticky feed took three trades into one panel; eye, live
+preview, drag, save; a viewer's line showed the Bingo! button, the opt-in
+put the card on the carousel, the press paid and closed the round and fired
+the claim alert. Not yet: a real round on stream, OBS audio through the box.

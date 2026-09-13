@@ -11,6 +11,11 @@ Tables
   cards   one per viewer card: 25 square ids, the called-square marks,
           price paid, and when it hit bingo.
   calls   every square call in a round, with its source.
+  prefs   per viewer: "Show my card on stream" (kept across rounds).
+
+A completed line does NOT win by itself: `mark_event` records it
+(`bingo_at`), the viewer presses Bingo! on the site, and `claim`
+re-checks the line against the round's calls before the plugin pays.
 """
 
 from __future__ import annotations
@@ -62,6 +67,11 @@ CREATE TABLE IF NOT EXISTS calls (
     ts        REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_calls_round ON calls(round_id);
+CREATE TABLE IF NOT EXISTS prefs (
+    login      TEXT PRIMARY KEY,
+    on_stream  INTEGER NOT NULL DEFAULT 0,          -- "Show my card on stream"
+    updated_at REAL
+);
 """
 
 
@@ -178,6 +188,7 @@ class BingoStore:
         d["squares"] = json.loads(d["squares"])
         d["marks"] = json.loads(d["marks"] or "[]")
         d["to_bingo"] = squares_to_bingo(set(d["marks"]))
+        d["has_line"] = d["bingo_at"] is not None
         return d
 
     # ── calls / marking ───────────────────────────────────────────────
@@ -198,6 +209,8 @@ class BingoStore:
                    now: Optional[float] = None) -> dict:
         """Record a call and mark it on every card in the round.
         -> {"already": bool, "changed": [card...], "winners": [card...]}
+        "winners" = cards that just completed a line (bingo_at set). They
+        have NOT won yet: the viewer must claim (check_claim) first.
         A square called twice in a round is a no-op the second time."""
         now = time.time() if now is None else now
         result = {"already": False, "changed": [], "winners": []}
@@ -213,8 +226,7 @@ class BingoStore:
                 result["already"] = True
                 return result
             rows = self.conn.execute(
-                "SELECT * FROM cards WHERE round_id=? AND bingo_at IS NULL ORDER BY id",
-                (int(round_id),)).fetchall()
+                "SELECT * FROM cards WHERE round_id=? ORDER BY id", (int(round_id),)).fetchall()
             for row in rows:
                 squares = json.loads(row["squares"])
                 marks: Set[int] = set(json.loads(row["marks"] or "[]"))
@@ -223,11 +235,12 @@ class BingoStore:
                     continue
                 marks |= hits
                 bingo = has_bingo(marks)
+                new_line = bingo and row["bingo_at"] is None
                 self.conn.execute("UPDATE cards SET marks=?, bingo_at=? WHERE id=?",
-                                  (json.dumps(sorted(marks)), now if bingo else None, row["id"]))
+                                  (json.dumps(sorted(marks)), (row["bingo_at"] or now) if bingo else None, row["id"]))
                 card = self._card(self.conn.execute("SELECT * FROM cards WHERE id=?", (row["id"],)).fetchone())
                 result["changed"].append(card)
-                if bingo:
+                if new_line:
                     result["winners"].append(card)
             self.conn.commit()
         return result
@@ -260,6 +273,52 @@ class BingoStore:
             self.conn.commit()
         return result
 
+    # ── prefs + the claim ─────────────────────────────────────────────
+
+    def on_stream(self, login: str) -> bool:
+        with self._lock:
+            row = self.conn.execute("SELECT on_stream FROM prefs WHERE login=?", (login.lower(),)).fetchone()
+        return bool(row and row[0])
+
+    def set_on_stream(self, login: str, on: bool, now: Optional[float] = None) -> bool:
+        now = time.time() if now is None else now
+        with self._lock:
+            self.conn.execute(
+                "INSERT INTO prefs (login, on_stream, updated_at) VALUES (?,?,?)"
+                " ON CONFLICT(login) DO UPDATE SET on_stream=excluded.on_stream, updated_at=excluded.updated_at",
+                (login.lower(), int(bool(on)), now))
+            self.conn.commit()
+        return bool(on)
+
+    def cards_on_stream(self, round_id: int) -> List[dict]:
+        """Cards of viewers who opted in, closest to bingo first."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT c.* FROM cards c JOIN prefs p ON p.login = c.login"
+                " WHERE c.round_id=? AND p.on_stream=1 ORDER BY c.id", (int(round_id),)).fetchall()
+        cards = [self._card(r) for r in rows]
+        return sorted(cards, key=lambda c: (c["to_bingo"], c["created_at"]))
+
+    def check_claim(self, round_id: int, card_id: int, login: str) -> dict:
+        """Is this a valid Bingo! press? The line is recomputed from the
+        round's calls, never trusted from the card row.
+        -> {"ok": True, "card": card, "line": (i..)} or {"ok": False, "error"}"""
+        with self._lock:
+            row = self.conn.execute("SELECT * FROM cards WHERE id=?", (int(card_id),)).fetchone()
+            called = {r[0] for r in self.conn.execute(
+                "SELECT DISTINCT event_id FROM calls WHERE round_id=?", (int(round_id),)).fetchall()}
+        if row is None or int(row["round_id"]) != int(round_id):
+            return {"ok": False, "error": "That card is not in this round."}
+        if row["login"] != login.lower():
+            return {"ok": False, "error": "That is not your card."}
+        card = self._card(row)
+        marks = marked_indexes(card["squares"], called)
+        from .pool import winning_lines
+        lines = winning_lines(marks)
+        if not lines:
+            return {"ok": False, "error": "Not a bingo yet: you need a full row, column, or diagonal."}
+        return {"ok": True, "card": card, "line": lines[0]}
+
     # ── summaries ─────────────────────────────────────────────────────
 
     def rounds(self, limit: int = 20) -> List[dict]:
@@ -270,9 +329,11 @@ class BingoStore:
 
     def card_list(self, round_id: int) -> List[dict]:
         """Compact view of every card in a round for the control page."""
+        r = self.get_round(round_id) or {}
         return [{"id": c["id"], "login": c["login"], "display": c["display"], "seq": c["seq"],
                  "price": c["price"], "marked": len(c["marks"]), "to_bingo": c["to_bingo"],
-                 "bingo": c["bingo_at"] is not None, "created_at": c["created_at"]}
+                 "bingo": c["bingo_at"] is not None, "claimed": r.get("winner_card") == c["id"],
+                 "on_stream": self.on_stream(c["login"]), "created_at": c["created_at"]}
                 for c in self.all_cards(round_id)]
 
     def leaders(self, round_id: int, limit: int = 5) -> List[dict]:
