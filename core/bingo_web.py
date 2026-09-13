@@ -111,45 +111,48 @@ class BingoWeb:
             return web.json_response({"logged_in": ident is not None, "twitch": False,
                                       "round": None, "cards": [], "next_price": None, "can_claim": False},
                                      headers={"Cache-Control": "no-store"})
-        twitch = _ws.provider(ident) == "tw" and bool(ident.get("login"))
-        out = plugin.my_cards(ident.get("login") or "") if twitch else \
+        user_uuid = await self._user_uuid(request, ident)
+        out = plugin.my_cards(user_uuid) if user_uuid else \
             {"round": None, "cards": [], "next_price": None, "can_claim": False}
-        out.update({"logged_in": True, "twitch": twitch, "login": ident.get("login"),
+        out.update({"logged_in": True, "twitch": _ws.provider(ident) == "tw",
+                    "user_uuid": user_uuid, "login": ident.get("login"),
                     "display": ident.get("name") or ident.get("login")})
-        if not twitch:
-            out["error"] = "Bingo cards need a Twitch login."
+        if not user_uuid:
+            out["error"] = "Your account is still loading. Try again in a moment."
         return web.json_response(out, headers={"Cache-Control": "no-store"})
 
     async def handle_card(self, request: web.Request):
         if not self._enabled():
             raise web.HTTPNotFound()
-        ident = self._identity(request)
-        if ident is None:
-            return web.json_response({"ok": False, "error": "Log in with Twitch first."}, status=401)
-        if _ws.provider(ident) != "tw" or not ident.get("login"):
-            return web.json_response({"ok": False, "error": "Bingo cards need a Twitch login."}, status=403)
-        origin_ok = getattr(self.server, "_origin_ok", None)
-        if callable(origin_ok) and not origin_ok(request):
-            return web.json_response({"ok": False, "error": "Bad origin."}, status=403)
-        rate_ok = getattr(self.server, "_ip_rate_ok", None)
-        if callable(rate_ok) and not rate_ok(request):
-            return web.json_response({"ok": False, "error": "Too many requests."}, status=429)
-        plugin = self._plugin()
-        if plugin is None or plugin.store is None:
-            return web.json_response({"ok": False, "error": "Bingo is starting up."}, status=503)
-        res = await plugin.claim_card(ident["login"], ident.get("name") or ident["login"])
+        ok, err = await self._viewer(request)
+        if err is not None:
+            return err
+        ident, plugin, user_uuid = ok
+        res = await plugin.claim_card(user_uuid, ident.get("name") or ident.get("login") or "viewer",
+                                      login=ident.get("login"))
         return web.json_response(res, status=200 if res.get("ok") else 400,
                                  headers={"Cache-Control": "no-store"})
 
+    async def _user_uuid(self, request: web.Request, ident: dict) -> Optional[str]:
+        fn = getattr(self.server, "_ident_user_uuid", None)
+        if callable(fn):
+            try:
+                return await fn(ident)
+            except Exception:
+                return None
+        return None
+
     async def _viewer(self, request: web.Request):
-        """Twitch identity + origin/rate checks for the POSTs, or an error response."""
+        """Session identity (Twitch or YouTube) + origin/rate checks for
+        the POSTs, or an error response. -> ((ident, plugin, user_uuid), None)"""
         if not self._enabled():
             raise web.HTTPNotFound()
         ident = self._identity(request)
         if ident is None:
-            return None, web.json_response({"ok": False, "error": "Log in with Twitch first."}, status=401)
-        if _ws.provider(ident) != "tw" or not ident.get("login"):
-            return None, web.json_response({"ok": False, "error": "Bingo needs a Twitch login."}, status=403)
+            return None, web.json_response({"ok": False, "error": "Log in first."}, status=401)
+        user_uuid = await self._user_uuid(request, ident)
+        if not user_uuid:
+            return None, web.json_response({"ok": False, "error": "Your account is still loading."}, status=503)
         origin_ok = getattr(self.server, "_origin_ok", None)
         if callable(origin_ok) and not origin_ok(request):
             return None, web.json_response({"ok": False, "error": "Bad origin."}, status=403)
@@ -159,19 +162,19 @@ class BingoWeb:
         plugin = self._plugin()
         if plugin is None or plugin.store is None:
             return None, web.json_response({"ok": False, "error": "Bingo is starting up."}, status=503)
-        return (ident, plugin), None
+        return (ident, plugin, user_uuid), None
 
     async def handle_claim(self, request: web.Request):
         """POST {card_id}: the Bingo! button. Server-side line check."""
         ok, err = await self._viewer(request)
         if err is not None:
             return err
-        ident, plugin = ok
+        ident, plugin, user_uuid = ok
         try:
             body = await request.json()
         except Exception:
             body = {}
-        res = await plugin.claim_bingo(ident["login"], (body or {}).get("card_id"))
+        res = await plugin.claim_bingo(user_uuid, (body or {}).get("card_id"))
         return web.json_response(res, status=200 if res.get("ok") else 400, headers={"Cache-Control": "no-store"})
 
     async def handle_prefs(self, request: web.Request):
@@ -179,12 +182,12 @@ class BingoWeb:
         ok, err = await self._viewer(request)
         if err is not None:
             return err
-        ident, plugin = ok
+        ident, plugin, user_uuid = ok
         try:
             body = await request.json()
         except Exception:
             body = {}
-        res = await plugin.set_on_stream(ident["login"], bool((body or {}).get("on_stream")))
+        res = await plugin.set_on_stream(user_uuid, bool((body or {}).get("on_stream")))
         return web.json_response(res, status=200 if res.get("ok") else 400, headers={"Cache-Control": "no-store"})
 
     async def handle_ws(self, request: web.Request) -> web.WebSocketResponse:

@@ -447,12 +447,20 @@ async def cmd_stats() -> int:
         n_tagged = await count("SELECT COUNT(*) FROM youtube_video_gods")
         n_manual = await count(
             "SELECT COUNT(*) FROM youtube_video_gods WHERE set_by='manual'")
-        n_portfolios = await count("SELECT COUNT(*) FROM youtube_portfolios")
+        # YouTube viewers are users with a youtube identity; their
+        # shares live in portfolios / transactions like everyone else's
+        # (core/users.py, docs/USER_IDENTITY_PLAN.md).
+        n_portfolios = await count(
+            "SELECT COUNT(DISTINCT user_uuid) FROM user_identities "
+            "WHERE provider = 'youtube'")
         n_holdings = await count(
-            "SELECT COUNT(*) FROM youtube_holdings WHERE shares > 0.001")
+            "SELECT COUNT(*) FROM portfolios p WHERE p.shares > 0.001 "
+            "AND p.user_uuid IN (SELECT user_uuid FROM user_identities "
+            "WHERE provider = 'youtube')")
         n_processed = await count(
             "SELECT COUNT(*) FROM youtube_processed_comments")
-        n_txns = await count("SELECT COUNT(*) FROM youtube_transactions")
+        n_txns = await count(
+            "SELECT COUNT(*) FROM transactions WHERE channel = 'youtube'")
 
         print("─── YouTube portfolio system stats ───")
         print(f"Videos tagged:      {n_tagged} ({n_manual} manual, "
@@ -478,9 +486,11 @@ async def cmd_stats() -> int:
         if n_portfolios > 0:
             print("Most recent portfolios:")
             async with db.execute("""
-                SELECT yt_channel_id, yt_display_name, last_seen_at
-                  FROM youtube_portfolios
-                 ORDER BY last_seen_at DESC LIMIT 10
+                SELECT i.provider_id, u.display_name, u.last_seen_at
+                  FROM user_identities i
+                  JOIN users u ON u.uuid = i.user_uuid
+                 WHERE i.provider = 'youtube'
+                 ORDER BY u.last_seen_at DESC LIMIT 10
             """) as cur:
                 async for r in cur:
                     print(f"  {r[1]}  ({r[0]})  last seen {r[2]}")
@@ -489,11 +499,11 @@ async def cmd_stats() -> int:
         if n_txns > 0:
             print("Most recent share grants:")
             async with db.execute("""
-                SELECT t.timestamp, p.yt_display_name, t.god_name,
-                       t.type, t.shares, t.yt_video_id
-                  FROM youtube_transactions t
-                  LEFT JOIN youtube_portfolios p
-                    ON p.yt_channel_id = t.yt_channel_id
+                SELECT t.timestamp, u.display_name, t.god_name,
+                       t.type, t.shares, t.ref
+                  FROM transactions t
+                  LEFT JOIN users u ON u.uuid = t.user_uuid
+                 WHERE t.channel = 'youtube'
                  ORDER BY t.timestamp DESC LIMIT 10
             """) as cur:
                 async for r in cur:

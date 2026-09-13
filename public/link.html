@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#202C39">
+<meta name="robots" content="noindex">
+<title>Link accounts: Hatmas Market</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="stylesheet" href="/theme.css">
+<style>
+  .wrap { max-width: 720px; margin: 0 auto; padding: 16px 14px 80px; }
+  .brand-band {
+    display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 1px solid var(--border);
+    padding: 8px 0 12px; margin-bottom: 16px;
+    font-family: var(--font-sans); font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim);
+  }
+  .brand-band a.left { color: var(--accent); font-weight: 700; }
+  h1 { font-family: var(--font-display); text-transform: uppercase; font-size: 40px; line-height: 1; margin: 0 0 10px; }
+  p.lead { color: var(--text-dim); margin: 0 0 18px; }
+  .sides { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 18px; }
+  @media (max-width: 560px) { .sides { grid-template-columns: 1fr; } }
+  .side { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; background: var(--panel); }
+  .side h2 { font-family: var(--font-display); text-transform: uppercase; font-size: 16px; letter-spacing: 0.04em; margin: 0 0 6px; }
+  .side .who { font-weight: 700; margin-bottom: 8px; }
+  .side ul { margin: 0; padding-left: 18px; color: var(--text-dim); font-size: 14px; }
+  .side .bal { font-family: var(--font-mono); margin-top: 8px; }
+  .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .btn { border: 1px solid var(--border); background: var(--panel); color: var(--text); padding: 10px 16px; border-radius: var(--radius); cursor: pointer; font: inherit; }
+  .btn.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 700; }
+  .btn[disabled] { opacity: .5; cursor: default; }
+  .note { color: var(--text-dim); font-size: 13px; margin-top: 14px; }
+  .err { color: var(--red); margin-top: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand-band"><a class="left" href="/">Hatmaster.tv</a><span id="auth-chip"></span></div>
+  <header>
+    <h1>Link your YouTube account</h1>
+    <p class="lead" id="lead">Checking what would be combined&hellip;</p>
+  </header>
+  <div class="sides" id="sides" hidden>
+    <div class="side">
+      <h2>Twitch account (kept)</h2>
+      <div class="who" id="tw-who"></div>
+      <ul id="tw-holdings"></ul>
+      <div class="bal" id="tw-bal"></div>
+    </div>
+    <div class="side">
+      <h2>YouTube account (merged in)</h2>
+      <div class="who" id="yt-who"></div>
+      <ul id="yt-holdings"></ul>
+      <div class="bal" id="yt-bal"></div>
+    </div>
+  </div>
+  <div class="actions" id="actions" hidden>
+    <button class="btn primary" id="confirm">Combine them</button>
+    <a class="btn" href="/me">Not now</a>
+  </div>
+  <div class="note" id="note" hidden>Shares of the same god are combined at a weighted average cost. Hats add together. This cannot be undone from the site.</div>
+  <div class="err" id="err" hidden></div>
+</div>
+<script src="/auth.js"></script>
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  function fill(prefix, side) {
+    $(prefix + "-who").textContent = side.display_name || "(unnamed)";
+    const ul = $(prefix + "-holdings");
+    ul.innerHTML = side.holdings.length
+      ? side.holdings.map((h) => "<li>" + esc(h.shares) + " " + esc(h.god) + "</li>").join("")
+      : "<li>no shares</li>";
+    $(prefix + "-bal").textContent = side.balance == null ? "" : side.balance.toLocaleString() + " Hats";
+  }
+  async function load() {
+    let r, d;
+    try { r = await fetch("/api/link/preview", { cache: "no-store" }); d = await r.json(); }
+    catch (e) { $("lead").textContent = "Could not load the link preview."; return; }
+    if (r.status === 401) { $("lead").innerHTML = 'Log in with Twitch first, then link YouTube from your profile.'; return; }
+    if (r.status === 404) { $("lead").innerHTML = 'No link is waiting. Start from <a href="/me">your profile</a>.'; return; }
+    if (!r.ok) { $("lead").textContent = "Something went wrong (" + r.status + ")."; return; }
+    if (d.done) { window.location.href = "/me?linked=ok"; return; }
+    $("lead").textContent = "This YouTube channel (" + (d.channel_title || d.channel_id) + ") already has its own portfolio here. Linking combines it into your Twitch account.";
+    fill("tw", d.twitch); fill("yt", d.youtube);
+    $("sides").hidden = false; $("actions").hidden = false; $("note").hidden = false;
+  }
+  $("confirm").addEventListener("click", async () => {
+    $("confirm").disabled = true; $("err").hidden = true;
+    try {
+      const r = await fetch("/api/link/confirm", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const d = await r.json();
+      if (d.ok) { window.location.href = d.next || "/me"; return; }
+      $("err").textContent = d.error || d.reason || "Link failed."; $("err").hidden = false;
+    } catch (e) { $("err").textContent = "Link failed."; $("err").hidden = false; }
+    $("confirm").disabled = false;
+  });
+  load();
+})();
+</script>
+</body>
+</html>

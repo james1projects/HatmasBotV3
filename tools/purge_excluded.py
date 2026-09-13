@@ -70,13 +70,26 @@ async def cmd_purge(dry_run: bool, skip_confirm: bool) -> int:
         print(f"Database not found: {db_path}")
         return 1
 
-    placeholders = ",".join("?" for _ in excluded)
-
     async with aiosqlite.connect(str(db_path)) as db:
+        # Bot accounts are users too (core/users.py); their rows in
+        # portfolios / transactions carry the user_uuid, so resolve the
+        # excluded logins to uuids first.
+        login_ph = ",".join("?" for _ in excluded)
+        async with db.execute(
+            f"SELECT DISTINCT user_uuid FROM user_identities "
+            f"WHERE provider = 'twitch' AND login IN ({login_ph})",
+            excluded
+        ) as cur:
+            uuids = [r[0] for r in await cur.fetchall()]
+        if not uuids:
+            print("None of the excluded accounts has a user row. Already clean.")
+            return 0
+        placeholders = ",".join("?" for _ in uuids)
+        excluded = uuids
         # Count what we'd delete and report it.
         async with db.execute(
             f"SELECT COUNT(*), COALESCE(SUM(shares), 0) FROM portfolios "
-            f"WHERE LOWER(username) IN ({placeholders})",
+            f"WHERE user_uuid IN ({placeholders})",
             excluded
         ) as cur:
             row = await cur.fetchone()
@@ -85,7 +98,7 @@ async def cmd_purge(dry_run: bool, skip_confirm: bool) -> int:
 
         async with db.execute(
             f"SELECT COUNT(*) FROM transactions "
-            f"WHERE LOWER(username) IN ({placeholders})",
+            f"WHERE user_uuid IN ({placeholders})",
             excluded
         ) as cur:
             row = await cur.fetchone()
@@ -94,11 +107,12 @@ async def cmd_purge(dry_run: bool, skip_confirm: bool) -> int:
         # Per-user breakdown so you can see which bots have the most
         # accumulated cruft. Useful debug info.
         async with db.execute(
-            f"SELECT username, COUNT(DISTINCT god_name) as gods, "
-            f"  COALESCE(SUM(shares), 0) as total_shares "
-            f"FROM portfolios "
-            f"WHERE LOWER(username) IN ({placeholders}) "
-            f"GROUP BY username ORDER BY total_shares DESC",
+            f"SELECT COALESCE(u.display_name, p.user_uuid), "
+            f"  COUNT(DISTINCT p.god_name) as gods, "
+            f"  COALESCE(SUM(p.shares), 0) as total_shares "
+            f"FROM portfolios p LEFT JOIN users u ON u.uuid = p.user_uuid "
+            f"WHERE p.user_uuid IN ({placeholders}) "
+            f"GROUP BY p.user_uuid ORDER BY total_shares DESC",
             excluded
         ) as cur:
             per_user = await cur.fetchall()
@@ -137,12 +151,12 @@ async def cmd_purge(dry_run: bool, skip_confirm: bool) -> int:
 
         await db.execute(
             f"DELETE FROM portfolios "
-            f"WHERE LOWER(username) IN ({placeholders})",
+            f"WHERE user_uuid IN ({placeholders})",
             excluded
         )
         await db.execute(
             f"DELETE FROM transactions "
-            f"WHERE LOWER(username) IN ({placeholders})",
+            f"WHERE user_uuid IN ({placeholders})",
             excluded
         )
         await db.commit()

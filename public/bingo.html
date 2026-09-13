@@ -260,7 +260,7 @@
         }
       }
       else if (msg.event === "bingo_win" || msg.event === "bingo_claim") { if (state) state.round = d; renderRound(); loadMe(); }
-      else if (msg.event === "bingo_line") { if (state) state.round = d; renderRound(); if (me && (d.lines || []).some((l) => l.login === me.login)) loadMe(); }
+      else if (msg.event === "bingo_line") { if (state) state.round = d; renderRound(); if (me && (d.lines || []).some((l) => l.user_uuid === me.user_uuid)) loadMe(); }
       else if (msg.event === "bingo_uncall") { if (state) state.round = d; chimed.clear(); renderRound(); loadMe(); }
       else if (msg.event === "bingo_prefs") { if (state) state.round = d; renderRound(); }
       else if (msg.event === "bingo_closed") { if (state) { state.round = null; state.last = d; } renderRound(); loadMe(); }

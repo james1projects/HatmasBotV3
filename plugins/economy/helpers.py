@@ -29,6 +29,7 @@ from core.config import (
     ECONOMY_STARTING_PRICE, ECONOMY_FREE_SHARE_COUNT,
     ECONOMY_EXCLUDED_USERNAMES,
 )
+from core import users as _users
 
 
 def _build_excluded_set():
@@ -120,12 +121,31 @@ class _HelpersMixin:
             print(f"[Economy] Failed to fetch profile image for {username}: {e}")
         return None
 
+    async def _excluded_uuids(self) -> set:
+        """uuids of the bot accounts on the exclusion list (for SQL
+        filters); empty when the DB is down or none of them ever
+        appeared."""
+        db = getattr(self, "_db", None)
+        if db is None:
+            return set()
+        try:
+            return await _users.excluded_uuids(db, EXCLUDED_USERS_LOWER)
+        except Exception as e:
+            print(f"[Economy] excluded-uuid lookup failed: {e}")
+            return set()
+
     async def _get_chatters(self) -> List[str]:
+        """Current chatter logins (see _get_chatter_identities)."""
+        return [login for _tid, login in await self._get_chatter_identities()]
+
+    async def _get_chatter_identities(self) -> List[tuple]:
         """
-        Get list of current chatters via the Twitch Helix API.
+        Get current chatters via the Twitch Helix API as
+        (twitch_user_id, login) pairs.
         Uses GET /helix/chat/chatters with pagination to get ALL chatters
         (including lurkers connected to chat), not just those who typed.
-        Falls back to TwitchIO channel.chatters if the API call fails.
+        Falls back to TwitchIO channel.chatters (ids unknown -> None)
+        if the API call fails.
         """
         # Try Helix API first (requires moderator:read:chatters scope)
         if self.token_manager:
@@ -170,7 +190,8 @@ class _HelpersMixin:
                             for user in data.get("data", []):
                                 name = user.get("user_login", "").lower()
                                 if name and name != "hatmasbot":
-                                    chatters.append(name)
+                                    chatters.append(
+                                        (str(user.get("user_id") or ""), name))
 
                             # Check for more pages
                             cursor = data.get("pagination", {}).get("cursor")
@@ -190,7 +211,7 @@ class _HelpersMixin:
         try:
             channel = self.bot.get_channel(TWITCH_CHANNEL)
             if channel and channel.chatters:
-                names = [c.name for c in channel.chatters
+                names = [(None, c.name.lower()) for c in channel.chatters
                          if c.name.lower() != "hatmasbot"]
                 print(f"[Economy] TwitchIO fallback chatters: {len(names)} users")
                 return names
@@ -214,18 +235,32 @@ class _HelpersMixin:
         itself, etc.) are filtered out so bots don't accumulate shares.
         """
         # Get live chatters from Twitch (Helix API with TwitchIO fallback)
-        all_chatters = await self._get_chatters()
-        viewers = {u for u in all_chatters if not self.is_excluded_user(u)}
+        all_chatters = await self._get_chatter_identities()
+        viewers = {}
+        for tid, login in all_chatters:
+            if self.is_excluded_user(login) or login in viewers:
+                continue
+            viewers[login] = tid
         skipped = len(all_chatters) - len(viewers)
 
         price = self._prices.get(god_name, ECONOMY_STARTING_PRICE)
 
-        for username in viewers:
-            await self._add_shares(username, god_name, ECONOMY_FREE_SHARE_COUNT, 0)  # Cost basis 0 for free shares
+        for login, tid in viewers.items():
+            try:
+                if tid:
+                    user_uuid = await _users.get_or_create_twitch(
+                        self._db, tid, login, commit=False)
+                else:
+                    user_uuid = await _users.get_or_create_twitch_login(
+                        self._db, login, commit=False)
+            except Exception as e:
+                print(f"[Economy] free share: cannot resolve {login}: {e}")
+                continue
+            await self._add_shares(user_uuid, god_name, ECONOMY_FREE_SHARE_COUNT, 0)  # Cost basis 0 for free shares
             await self._db.execute("""
-                INSERT INTO transactions (username, god_name, type, shares, price, total, fee)
+                INSERT INTO transactions (user_uuid, god_name, type, shares, price, total, fee)
                 VALUES (?, ?, 'free_share', ?, ?, 0, 0)
-            """, (username, god_name, ECONOMY_FREE_SHARE_COUNT, price))
+            """, (user_uuid, god_name, ECONOMY_FREE_SHARE_COUNT, price))
 
         await self._db.commit()
 

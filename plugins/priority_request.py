@@ -221,11 +221,30 @@ class PriorityRequestPlugin:
             await self._db.execute(
                 "ALTER TABLE priority_payments "
                 "ADD COLUMN use_aspect INTEGER NOT NULL DEFAULT 0")
+        #   user_uuid — the payer's user row (core/users.py). The typed
+        #       twitch_username stays for the chat shoutout + queue
+        #       entry; the uuid is what the /me profile keys on.
+        from core import users as _users
+        await _users.attach_user_uuid(
+            self._db, "priority_payments", "twitch_username", "twitch")
         await self._db.commit()
 
     # ──────────────────────────────────────────────────────────────────
     #   PUBLIC HELPERS (called from public_webserver handlers)
     # ──────────────────────────────────────────────────────────────────
+
+    async def _payer_uuid(self, twitch_username: str):
+        """user_uuid for a typed Twitch username (placeholder identity
+        until that person is seen with an id). None when it cannot be
+        resolved -- the payment row still works without it."""
+        from core import users as _users
+        try:
+            return await _users.get_or_create_twitch_login(
+                self._db, twitch_username, commit=False)
+        except Exception as e:
+            print(f"[PriorityRequest] payer uuid failed for "
+                  f"{twitch_username}: {e}")
+            return None
 
     def is_enabled(self) -> bool:
         """True if the feature can actually function right now.
@@ -332,16 +351,18 @@ class PriorityRequestPlugin:
         # create and the user reaching Stripe doesn't leave us with
         # an un-tracked attempt.
         try:
+            user_uuid = await self._payer_uuid(uname)
             await self._db.execute("""
                 INSERT INTO priority_payments
                        (stripe_session_id, twitch_username, god, message,
-                        amount_cents, currency, use_aspect, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
+                        amount_cents, currency, use_aspect, status,
+                        user_uuid)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
                 ON CONFLICT(stripe_session_id) DO NOTHING
             """, (session.id, uname, canon, msg,
                   PRIORITY_REQUEST_PRICE_CENTS,
                   PRIORITY_REQUEST_CURRENCY,
-                  1 if use_aspect else 0))
+                  1 if use_aspect else 0, user_uuid))
             await self._db.commit()
         except Exception as e:
             # Non-fatal: the webhook handler will still queue from
@@ -467,14 +488,14 @@ class PriorityRequestPlugin:
                     INSERT INTO priority_payments
                            (stripe_session_id, twitch_username, god,
                             message, amount_cents, currency, use_aspect,
-                            payment_intent, paid_at, status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), 'paid')
+                            payment_intent, paid_at, status, user_uuid)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), 'paid', ?)
                     ON CONFLICT(stripe_session_id) DO NOTHING
                 """, (session_id, uname, god, msg,
                       session.get("amount_total", 0),
                       session.get("currency", PRIORITY_REQUEST_CURRENCY),
                       1 if use_aspect else 0,
-                      payment_intent))
+                      payment_intent, await self._payer_uuid(uname)))
             else:
                 await self._db.execute("""
                     UPDATE priority_payments

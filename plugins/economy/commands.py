@@ -51,6 +51,16 @@ class _CommandsMixin:
     _get_profile_image), _OverlaysMixin (_emit_overlay_event).
     """
 
+    async def _viewer_uuid(self, message, whisper=False) -> Optional[str]:
+        """Resolve the chatter to a user uuid (core/users.py). Replies
+        "still loading" and returns None when the DB is not up."""
+        user_uuid = await self.bot.user_uuid_for(message.chatter)
+        if not user_uuid:
+            await self.bot.send_reply(
+                message, "Economy is still loading. Try again in a moment.",
+                whisper)
+        return user_uuid
+
     def _check_cooldown(self, username: str, command: str, cooldown: float) -> Optional[int]:
         """Check if a command is on cooldown. Returns remaining seconds or None."""
         now = time.time()
@@ -78,6 +88,9 @@ class _CommandsMixin:
         if remaining:
             await self.bot.send_reply(message, f"Trade cooldown: {remaining}s", whisper)
             return
+        user_uuid = await self._viewer_uuid(message, whisper)
+        if not user_uuid:
+            return
 
         parts = args.strip().split() if args else []
         if len(parts) < 2:
@@ -90,7 +103,7 @@ class _CommandsMixin:
         try:
             amount_str = parts[-1].lower().replace(",", "")
             if amount_str == "all":
-                balance = await self._get_balance(username)
+                balance = await self._get_balance(user_uuid)
                 if not balance or balance <= 0:
                     await self.bot.send_reply(message, "You have no hats!", whisper)
                     return
@@ -104,7 +117,7 @@ class _CommandsMixin:
             return
 
         god_input = " ".join(parts[:-1])
-        result = await self.execute_buy(username, god_input, hat_amount)
+        result = await self.execute_buy(user_uuid, god_input, hat_amount)
 
         if result["success"]:
             await self.bot.send_reply(
@@ -133,6 +146,9 @@ class _CommandsMixin:
         if remaining:
             await self.bot.send_reply(message, f"Trade cooldown: {remaining}s", whisper)
             return
+        user_uuid = await self._viewer_uuid(message, whisper)
+        if not user_uuid:
+            return
 
         parts = args.strip().split() if args else []
         if len(parts) < 2:
@@ -150,7 +166,7 @@ class _CommandsMixin:
             return
 
         if amount_str == "all":
-            holding = await self._get_holding(username, god_name)
+            holding = await self._get_holding(user_uuid, god_name)
             if not holding or holding["shares"] <= 0:
                 await self.bot.send_reply(message, f"You don't own any {god_name} shares", whisper)
                 return
@@ -169,7 +185,7 @@ class _CommandsMixin:
                 )
                 return
 
-        result = await self.execute_sell(username, god_input, hat_amount)
+        result = await self.execute_sell(user_uuid, god_input, hat_amount)
 
         if result["success"]:
             await self.bot.send_reply(
@@ -196,8 +212,11 @@ class _CommandsMixin:
         if remaining:
             await self.bot.send_reply(message, f"Cooldown: {remaining}s", whisper)
             return
+        user_uuid = await self._viewer_uuid(message, whisper)
+        if not user_uuid:
+            return
 
-        holdings = await self._get_full_portfolio(username)
+        holdings = await self._get_full_portfolio(user_uuid)
         if not holdings:
             await self.bot.send_reply(
                 message, "You don't own any shares yet. Use !buy [god] [amount] to get started.", whisper
@@ -206,7 +225,7 @@ class _CommandsMixin:
 
         # Sort by current value descending, show top 3
         total_value = sum(h["value"] for h in holdings)
-        balance = await self._get_balance(username) or 0
+        balance = await self._get_balance(user_uuid) or 0
         net_worth = total_value + balance
         by_value = sorted(holdings, key=lambda h: h["value"], reverse=True)
 
@@ -225,6 +244,7 @@ class _CommandsMixin:
         pfp_url = await self._get_profile_image(username)
         self._emit_overlay_event("portfolio_requested", {
             "username": username,
+            "user_uuid": user_uuid,
             "display_name": message.chatter.display_name,
             "profile_image_url": pfp_url,
             "holdings": holdings,

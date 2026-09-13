@@ -29,12 +29,12 @@ What it does
      - god_prices (PK god_name)
          Clean row wins. Dirty row is dropped — we don't try to
          reconcile two parallel price histories.
-     - youtube_holdings (PK yt_channel_id + god_name)
+     - portfolios (PK user_uuid + god_name)
          Shares sum, avg_cost becomes share-weighted across the
          dirty + clean rows. Dirty row is then deleted.
      - god_pool (PK god_name)
          vote_count sums. Dirty row deleted.
-     - god_pool_votes / price_history / youtube_transactions /
+     - god_pool_votes / price_history / transactions /
        youtube_video_gods / pending_yt_nominations: simple UPDATE,
        no merge needed (no UNIQUE on god_name in those tables, or
        collision is implausible).
@@ -115,23 +115,23 @@ def _merge_god_prices(conn, dirty, clean_name):
             (clean_name, dirty))
 
 
-def _merge_youtube_holdings(conn, dirty, clean_name):
-    """Composite PK is (yt_channel_id, god_name). Per holder, if a
+def _merge_portfolios(conn, dirty, clean_name):
+    """Composite PK is (user_uuid, god_name). Per holder, if a
     clean row exists alongside the dirty one, sum shares and use a
     share-weighted average cost. Then delete the dirty row."""
     rows = conn.execute(
-        "SELECT yt_channel_id, shares, avg_cost "
-        "  FROM youtube_holdings WHERE god_name = ?",
+        "SELECT user_uuid, shares, avg_cost "
+        "  FROM portfolios WHERE god_name = ?",
         (dirty,)).fetchall()
     for chan, dshares, davg in rows:
         clean_row = conn.execute(
-            "SELECT shares, avg_cost FROM youtube_holdings "
-            " WHERE yt_channel_id = ? AND god_name = ?",
+            "SELECT shares, avg_cost FROM portfolios "
+            " WHERE user_uuid = ? AND god_name = ?",
             (chan, clean_name)).fetchone()
         if clean_row is None:
             conn.execute(
-                "UPDATE youtube_holdings SET god_name = ? "
-                " WHERE yt_channel_id = ? AND god_name = ?",
+                "UPDATE portfolios SET god_name = ? "
+                " WHERE user_uuid = ? AND god_name = ?",
                 (clean_name, chan, dirty))
             continue
         cshares, cavg = clean_row
@@ -143,12 +143,12 @@ def _merge_youtube_holdings(conn, dirty, clean_name):
         new_avg = ((dshares * davg) + (cshares * cavg)) / total \
                   if total > 0 else 0.0
         conn.execute(
-            "UPDATE youtube_holdings SET shares = ?, avg_cost = ? "
-            " WHERE yt_channel_id = ? AND god_name = ?",
+            "UPDATE portfolios SET shares = ?, avg_cost = ? "
+            " WHERE user_uuid = ? AND god_name = ?",
             (total, new_avg, chan, clean_name))
         conn.execute(
-            "DELETE FROM youtube_holdings "
-            " WHERE yt_channel_id = ? AND god_name = ?",
+            "DELETE FROM portfolios "
+            " WHERE user_uuid = ? AND god_name = ?",
             (chan, dirty))
 
 
@@ -178,7 +178,7 @@ def _merge_god_pool(conn, dirty, clean_name):
 
 MERGE_HANDLERS = {
     "god_prices":         _merge_god_prices,
-    "youtube_holdings":   _merge_youtube_holdings,
+    "portfolios":         _merge_portfolios,
     "god_pool":           _merge_god_pool,
 }
 

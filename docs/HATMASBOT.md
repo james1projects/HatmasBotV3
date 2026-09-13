@@ -225,7 +225,8 @@ core/
   nsfw_check.py             Album art NSFW classification.
   god_matcher.py            Portrait-based god identification via HSV histogram matching.
   digit_matcher.py          Template-based digit recognition for KDA numbers. XOR distance + hole-count pre-filter.
-  web_session.py            Stateless HMAC-signed session tokens for hatmaster.tv login (stdlib only). Rotating WEB_SESSION_SECRET logs everyone out.
+  web_session.py            Stateless HMAC-signed session tokens for hatmaster.tv login (stdlib only). Rotating WEB_SESSION_SECRET logs everyone out. "sub" = the viewer's user_uuid.
+  users.py                  One uuid per viewer across Twitch + YouTube (users / user_identities / user_merges): find-or-create, link, merge, per-table backfill. docs/USER_IDENTITY_PLAN.md.
 plugins/
   basic.py                  !hello, !uptime, !socials, !suggest, !suggestions, !clearsuggestions
   smite.py                  Match tracking, god detection, predictions, title, record, commands.
@@ -312,6 +313,7 @@ tools/
   import_god_icons.py       Auto-imports candidate images from Custom_Icons_Inbox/ into Custom God Icons/. Smart-crops to 1:1 (top-biased), resizes to 512x512 PNG, and names per the build_thumbnail.py convention (<God>.png primary, <God>-1.png variants). Fuzzy-matches god names from filenames. Use --list-missing to see which gods lack a primary icon.
   youtube_live_badge.py     Apply/revert "LIVE NOW" badge on the last N YouTube thumbnails. Subcommands: apply (stream start), revert (stream end), status, auth. Caches originals locally at data/youtube_thumbnails/<video_id>.png. Requires one-time OAuth setup (downloads google-auth-oauthlib + google-api-python-client). Stream Deck pair: streamdeck/go_live.bat / go_offline.bat.
   test_web_session.py       11-test suite for core/web_session.py (tamper, expiry, forgery).
+  test_users.py             core/users.py: placeholder upgrade + renames, link/merge rules, backfill helper, and the economy's login-era -> user_uuid migration on a legacy DB.
   discord_test.py           Standalone Discord send tester. Connects with DISCORD_BOT_TOKEN WITHOUT starting the bot, lists visible channels (--list), and sends a test message to a given channel id (defaults to DISCORD_DEFAULT_CHANNEL_ID). Exit 0 = sent. Use it to confirm the bot can post to a specific (e.g. private) channel. Wrapper: streamdeck/discord_test.bat.
   test_web_trade.py         19-test suite for website login + /api/trade (every guard, lock serialization, OAuth redirect).
   check_factorio_rcon.py    Standalone probe for the Factorio bridge: connects RCON, pings the hatmas-events mod, verifies remote calls round-trip. Run after hosting the save; exit 0 = bridge working.
@@ -1414,15 +1416,17 @@ tags (set_by='manual') even with `--overwrite`.
   `(video_id, channel_id)` so re-comments on the same video don't pay
   out twice).
 
-**Schema:** `youtube_portfolios`, `youtube_holdings`, `youtube_video_gods`,
-`youtube_processed_comments`, `youtube_transactions`. All in `economy.db`,
-parallel to the Twitch-side `portfolios` / `transactions` tables.
-Schema definitions live in `core/youtube_schema.py` as the single
-source of truth — `plugins/economy/db.py:_init_schema()` imports
-`YOUTUBE_SCHEMA_SQL` from there, and standalone CLI tools (e.g.
-`tools/mark_youtube_video.py`) call `ensure_youtube_schema()` from the
-same module. `IF NOT EXISTS` everywhere so first launch on an existing
-DB just adds the new tables.
+**Schema (since the 2026-09-12 identity work):** a commenter is a
+`users` row with a `youtube` identity (core/users.py); their shares
+live in the same `portfolios` / `transactions` tables as everyone
+else's, keyed on `user_uuid` (grants are `transactions` rows with
+type `comment_share`, channel `youtube`, ref = video id). Only the
+video/comment bookkeeping tables remain YouTube-specific:
+`youtube_video_gods` and `youtube_processed_comments`, defined in
+`core/youtube_schema.py`. The old `youtube_portfolios` /
+`youtube_holdings` / `youtube_transactions` tables were folded in by
+`plugins/economy/db.py:_migrate_to_user_uuid()` and parked as
+`_legacy_youtube_*` for one release.
 
 **Dividends compound for YouTube holders as fractional bonus shares.**
 A YouTube viewer with 3 shares of Sylvanus gets 0.15 extra shares
@@ -2376,6 +2380,12 @@ Idempotent; a channel linked to a different login gets
 "linked_elsewhere" and no writes. Suite:
 tools/test_account_linking.py (18 tests).
 
+**Superseded 2026-09-12** by the identity layer (next section): the
+link is now `core.users.link_youtube()`, a standalone YouTube user is
+*merged* into the Twitch one under the rules in
+docs/USER_IDENTITY_PLAN.md, and a merge that would combine two
+portfolios goes through a preview page (`/link/confirm`) first.
+
 ### Stripe test-mode state (2026-07-10)
 
 The two stale duplicate TEST webhook endpoints (checkout-only events)
@@ -2910,3 +2920,64 @@ nothing pushed, bot not restarted since before v2.11 (restart needed to serve an
 it publicly). Next topic opened 9/6: recording storage (D:\Recordings\Palworld holds
 every SMITE recording since spring; trim dead time vs. keep the K/D/A reader's inputs
 safe; see the storage section when it lands).
+
+## v2.16 Update — One uuid per viewer (2026-09-12)
+
+Design: docs/USER_IDENTITY_PLAN.md (approved, implemented). Every
+viewer-keyed table now carries `user_uuid` — deliberately not
+`user_id`, so nobody reads it as a login.
+
+**Tables (economy.db):** `users` (uuid, display_name, avatar_url,
+created_at, last_seen_at, merged_into, leaderboard_opt_out),
+`user_identities` ((provider, provider_id) -> user_uuid, login,
+display_name), `user_merges` (audit log with a per-table JSON summary).
+`portfolios` is re-keyed to PRIMARY KEY (user_uuid, god_name);
+`transactions` gained `user_uuid` + `ref` and had `username` made
+nullable (legacy rows keep it); `god_pool_votes` is PRIMARY KEY
+(user_uuid, vote_date); `god_pool.added_by_uuid`,
+`priority_payments.user_uuid`, `pending_yt_nominations.user_uuid` added.
+The YouTube cluster and `account_links` are folded in and parked as
+`_legacy_*`. bingo.db (`cards.user_uuid`, `prefs.user_uuid`,
+`rounds.winner_uuid`) and chat_log.db (`messages.user_uuid`) follow;
+their login-era bingo tables are parked too (0 rows at the time).
+
+**Migration** runs inside the schema callbacks on the next launch —
+no tool to run. Twitch logins become placeholder identities
+(`provider_id = "login:<login>"`) that the first sighting with a real
+id upgrades in place (`users.get_or_create_twitch`), so chat, the site
+login and the Helix chatters list all heal the table as people show
+up. Verified on a copy of the live DB: 3 s, idempotent, share totals
+conserved (portfolios 3350.7 + YouTube 1573.9 -> 4924.6), 742 Twitch +
+210 YouTube identities, the one `account_links` row became a merge.
+
+**Resolution paths:** chat -> `bot.user_uuid_for(chatter)` (Twitch id
++ login + display, cached in core/users); site -> the session cookie's
+`sub` (cookies from before it are resolved from prov + uid once and
+cached per process). `_session_user(request)` on the public server
+returns (ident, user_uuid).
+
+**Behaviour changes:** a YouTube login now trades, nominates, buys
+bingo cards and toggles leaderboard visibility like a Twitch login
+(one person, one row). Hats still live in MixItUp, so a YouTube-only
+viewer's balance is None and dividends compound as bonus shares until
+docs/WALLET_PLAN.md lands (`_pay_bonus_shares`). `/twitch/<login>` and
+`/yt/<channel>` URLs stay; both resolve to the person and show the
+merged portfolio. Leaderboard, search, god top-holders and the
+activity feed are one row per person. `/api/me` and `/api/me/profile`
+carry `user_uuid`.
+
+**Merges:** `users.link_youtube(survivor, channel)`. Channel unknown
+-> identity added; on this user -> no-op; on a standalone YouTube user
+-> `users.merge()` (Twitch survives; positions weighted-average with a
+`merge_in` transaction; summable rows re-pointed; daily-vote
+singletons keep the survivor's; absorbed row kept with `merged_into`;
+`register_merge_hook` re-points bingo.db and chat_log.db); on a user
+that already has a Twitch identity -> refused `linked_elsewhere`. The
+Google callback in link mode sends a would-merge case to
+`/link/confirm` (GET /api/link/preview, POST /api/link/confirm) first.
+Unlinking / splitting a bad merge is deliberately not built (decision
+2026-09-12): handle case by case from `user_merges`.
+
+**Tests:** tests/test_users.py (7), plus test_economy, test_bingo,
+test_web_trade, test_web_nominate, test_web_profile_live updated to the
+uuid key (harness cookies carry `user_uuid=login`).

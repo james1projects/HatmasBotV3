@@ -160,20 +160,24 @@ class _OverlaysMixin:
         """Emit leaderboard data to the overlay."""
         leaderboard = []
         async with self._db.execute("""
-            SELECT p.username, SUM(p.shares * gp.price) as portfolio_value
+            SELECT p.user_uuid, COALESCE(u.display_name, p.user_uuid),
+                   SUM(p.shares * gp.price) as portfolio_value
             FROM portfolios p
             JOIN god_prices gp ON p.god_name = gp.god_name
+            LEFT JOIN users u ON u.uuid = p.user_uuid
             WHERE p.shares > 0.001
-            GROUP BY p.username
+              AND COALESCE(u.leaderboard_opt_out, 0) = 0
+            GROUP BY p.user_uuid
             ORDER BY portfolio_value DESC
             LIMIT 10
         """) as cursor:
             rank = 1
             async for row in cursor:
-                username, value = row
+                user_uuid, name, value = row
                 leaderboard.append({
                     "rank": rank,
-                    "username": username,
+                    "user_uuid": user_uuid,
+                    "username": name,
                     "portfolio_value": round(value),
                 })
                 rank += 1

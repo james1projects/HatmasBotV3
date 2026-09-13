@@ -27,6 +27,7 @@ from core.public_webserver import PublicWebServer
 from core.cloudflared import CloudflaredTunnel
 from core.token_manager import TokenManager
 from core import db as shared_db
+from core import users as _users
 from core.config import (
     TWITCH_BOT_TOKEN, TWITCH_BOT_REFRESH_TOKEN,
     TWITCH_BROADCASTER_TOKEN, TWITCH_BROADCASTER_REFRESH_TOKEN,
@@ -88,6 +89,11 @@ async def main():
     )
     web.bot = bot
     web.token_manager = token_mgr  # read by GET /health
+
+    # Identity tables (core/users.py) come first: every plugin schema
+    # that backfills a user_uuid column relies on them existing.
+    if shared_db.is_available():
+        shared_db.register_schema(_users.ensure_schema)
 
     # Register plugins (uncomment as you set them up)
     bot.register_plugin("basic", BasicPlugin())

@@ -60,6 +60,12 @@ class MockBot:
     def is_mod(self, chatter):
         return False
 
+    async def user_uuid_for(self, chatter):
+        # The real bot resolves chatters through core/users.py; here the
+        # lowercase name doubles as the uuid so every mock keyed on
+        # "viewer1" (balances, portfolios) lines up.
+        return (getattr(chatter, "name", "") or "").lower() or None
+
     async def send_reply(self, message, text, whisper=False):
         print(f"  💬 [{message.chatter.display_name}] {text}")
         self._replies.append(text)
@@ -429,11 +435,11 @@ async def run_tests():
     # Check leaderboard query
     leaders = []
     async with economy._db.execute("""
-        SELECT p.username, SUM(p.shares * gp.price) as portfolio_value
+        SELECT p.user_uuid, SUM(p.shares * gp.price) as portfolio_value
         FROM portfolios p
         JOIN god_prices gp ON p.god_name = gp.god_name
         WHERE p.shares > 0.001
-        GROUP BY p.username
+        GROUP BY p.user_uuid
         ORDER BY portfolio_value DESC
         LIMIT 5
     """) as cursor:

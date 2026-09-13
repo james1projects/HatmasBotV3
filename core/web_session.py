@@ -7,7 +7,12 @@ Implements the session cookie described in WEBSITE_TRADING_DESIGN.md
 
     token   = base64url(canonical-json payload) + "." + hex(HMAC-SHA256(body, secret))
     payload = {"uid": ..., "login": ..., "name": ..., "img": ...,
+               "prov": "tw"|"yt", "sub": <user_uuid>,
                "iat": <unix>, "exp": <unix>}
+
+  "sub" is the viewer's user_uuid (core/users.py) -- the key every
+  table uses. Cookies minted before it existed lack it; the webserver
+  resolves those from prov + uid on first use.
 
 Design notes:
   * Stdlib only (hmac, hashlib, base64, json, secrets, time). No
@@ -103,15 +108,16 @@ def verify(token: Optional[str], secret, now: Optional[float] = None
 
 def issue(uid: str, login: str, display_name: str = "",
           profile_image: str = "", secret=None,
-          max_age: int = DEFAULT_MAX_AGE) -> str:
+          max_age: int = DEFAULT_MAX_AGE,
+          user_uuid: Optional[str] = None) -> str:
     """Build + sign a session token for a Twitch identity. login is
-    stored lowercase — it's the key MixItUp balances and portfolios
-    rows use, and Helix logins are lowercase already.
+    stored lowercase (Helix logins are lowercase already) and is
+    display/legacy data; user_uuid ("sub") is the key.
 
     "prov": "tw" marks the provider. Cookies issued before the field
     existed lack it — treat missing prov as Twitch."""
     now = int(time.time())
-    return sign({
+    payload = {
         "uid": str(uid),
         "login": (login or "").lower(),
         "name": display_name or login,
@@ -119,20 +125,23 @@ def issue(uid: str, login: str, display_name: str = "",
         "prov": "tw",
         "iat": now,
         "exp": now + int(max_age),
-    }, secret)
+    }
+    if user_uuid:
+        payload["sub"] = str(user_uuid)
+    return sign(payload, secret)
 
 
 def issue_youtube(channel_id: str, display_name: str = "",
                   profile_image: str = "", secret=None,
-                  max_age: int = DEFAULT_MAX_AGE) -> str:
+                  max_age: int = DEFAULT_MAX_AGE,
+                  user_uuid: Optional[str] = None) -> str:
     """Build + sign a session token for a YouTube identity. uid is
-    the UC... channel id — the key youtube_portfolios/holdings rows
-    use. login stays empty ON PURPOSE: it's the MixItUp/portfolios
-    key, and a YouTube session must never alias a Twitch account, so
-    every login-keyed guard (trade, nominate, mod) rejects these
-    sessions naturally."""
+    the UC... channel id. login stays empty: a YouTube session never
+    carries a Twitch login of its own (the mod page, which is
+    login-gated, stays Twitch-only); everything keyed on the person
+    goes through "sub", the user_uuid."""
     now = int(time.time())
-    return sign({
+    payload = {
         "uid": str(channel_id),
         "login": "",
         "name": display_name or "",
@@ -140,7 +149,10 @@ def issue_youtube(channel_id: str, display_name: str = "",
         "prov": "yt",
         "iat": now,
         "exp": now + int(max_age),
-    }, secret)
+    }
+    if user_uuid:
+        payload["sub"] = str(user_uuid)
+    return sign(payload, secret)
 
 
 def provider(payload: dict) -> str:

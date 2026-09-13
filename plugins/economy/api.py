@@ -20,6 +20,8 @@ calling these.
 
 from __future__ import annotations
 
+from core import users as _users
+
 
 class _APIMixin:
     """
@@ -52,15 +54,22 @@ class _APIMixin:
             return web.json_response({"gods": gods, "match_active": self._match_active})
 
         async def handle_portfolio(request):
-            """GET /api/economy/portfolio?user=username — User portfolio."""
+            """GET /api/economy/portfolio?user=<twitch login>|uuid=<user_uuid>"""
             username = request.query.get("user", "").lower()
-            if not username:
-                return web.json_response({"error": "user parameter required"}, status=400)
-            holdings = await self._get_full_portfolio(username)
+            user_uuid = request.query.get("uuid", "")
+            if not username and not user_uuid:
+                return web.json_response({"error": "user or uuid parameter required"}, status=400)
+            if not user_uuid:
+                user_uuid = await _users.find_twitch_login(self._db, username)
+            if not user_uuid:
+                return web.json_response({"error": "unknown user"}, status=404)
+            holdings = await self._get_full_portfolio(user_uuid)
             total_value = sum(h["value"] for h in holdings)
-            balance = await self._get_balance(username)
+            balance = await self._get_balance(user_uuid)
             return web.json_response({
                 "username": username,
+                "user_uuid": user_uuid,
+                "display_name": await _users.display_name_of(self._db, user_uuid),
                 "holdings": holdings,
                 "total_value": round(total_value),
                 "hat_balance": balance or 0,
@@ -70,11 +79,13 @@ class _APIMixin:
             """GET /api/economy/leaderboard — Top investors."""
             leaderboard = []
             async with self._db.execute("""
-                SELECT p.username, SUM(p.shares * gp.price) as portfolio_value
+                SELECT p.user_uuid, COALESCE(u.display_name, p.user_uuid),
+                       SUM(p.shares * gp.price) as portfolio_value
                 FROM portfolios p
                 JOIN god_prices gp ON p.god_name = gp.god_name
+                LEFT JOIN users u ON u.uuid = p.user_uuid
                 WHERE p.shares > 0.001
-                GROUP BY p.username
+                GROUP BY p.user_uuid
                 ORDER BY portfolio_value DESC
                 LIMIT 20
             """) as cursor:
@@ -82,8 +93,9 @@ class _APIMixin:
                 async for row in cursor:
                     leaderboard.append({
                         "rank": rank,
-                        "username": row[0],
-                        "portfolio_value": round(row[1]),
+                        "user_uuid": row[0],
+                        "username": row[1],
+                        "portfolio_value": round(row[2]),
                     })
                     rank += 1
             return web.json_response({"leaderboard": leaderboard})

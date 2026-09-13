@@ -68,7 +68,7 @@ from core.config import (
     YOUTUBE_DEEP_SCAN_INTERVAL,
     YOUTUBE_DEEP_SCAN_VIDEOS,
 )
-from core import account_linking as _account_links
+from core import users as _users
 from core.youtube_parser import parse_my_god, load_known_gods
 from core.youtube_schema import ensure_youtube_schema
 
@@ -137,7 +137,6 @@ class YouTubeRewardsPlugin:
             self._enabled = False
             return
         await ensure_youtube_schema(self._db)
-        await _account_links.ensure_schema(self._db)
         await self._ensure_pending_nominations_schema()
 
         self._known_gods = load_known_gods(BASE_DIR)
@@ -519,6 +518,9 @@ class YouTubeRewardsPlugin:
             CREATE INDEX IF NOT EXISTS idx_pending_yt_status
                 ON pending_yt_nominations (status, created_at DESC);
         """)
+        await _users.attach_user_uuid(
+            self._db, "pending_yt_nominations", "yt_channel_id", "youtube",
+            display_column="yt_display_name")
         await self._db.commit()
 
     @staticmethod
@@ -584,14 +586,17 @@ class YouTubeRewardsPlugin:
         if len(snippet) > 280:
             snippet = snippet[:277] + "..."
 
+        user_uuid = await _users.get_or_create_youtube(
+            self._db, channel_id, display_name, commit=False)
         await self._db.execute("""
             INSERT INTO pending_yt_nominations
                 (yt_video_id, yt_comment_id, yt_channel_id,
-                 yt_display_name, god_name, comment_snippet, status)
-            VALUES (?, ?, ?, ?, ?, ?, 'pending')
+                 yt_display_name, god_name, comment_snippet, status,
+                 user_uuid)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
             ON CONFLICT(yt_channel_id, god_name, yt_video_id) DO NOTHING
         """, (video_id, comment_id, channel_id,
-              display_name, god, snippet))
+              display_name, god, snippet, user_uuid))
 
     # ──────────────────────────────────────────────────────────────────
     #   ECONOMY HOOKS (price lookup, portfolio metadata, grants)
@@ -626,55 +631,32 @@ class YouTubeRewardsPlugin:
             row = await cur2.fetchone()
         return float(row[0]) if row else float(ECONOMY_STARTING_PRICE)
 
-    async def _upsert_portfolio(self, channel_id: str, display_name: str):
-        await self._db.execute("""
-            INSERT INTO youtube_portfolios
-                (yt_channel_id, yt_display_name, first_seen_at, last_seen_at)
-            VALUES (?, ?, datetime('now'), datetime('now'))
-            ON CONFLICT(yt_channel_id) DO UPDATE SET
-                yt_display_name = excluded.yt_display_name,
-                last_seen_at    = excluded.last_seen_at
-        """, (channel_id, display_name))
+    async def _upsert_portfolio(self, channel_id: str, display_name: str) -> str:
+        """The commenter's user row (core/users.py), created on first
+        sight with the YouTube display name. Returns the user_uuid."""
+        return await _users.get_or_create_youtube(
+            self._db, channel_id, display_name, commit=False)
 
     async def _grant_shares(self, channel_id: str, god: str,
                             shares: float, price: float,
                             video_id: Optional[str] = None,
                             txn_type: str = "comment_share"):
         """
-        Add `shares` of `god` to the channel's holdings, updating
-        avg_cost as a weighted average. Records a row in
-        `youtube_transactions` for history.
+        Add `shares` of `god` to the commenter's portfolio (keyed on
+        their user_uuid), updating avg_cost as a weighted average, and
+        record a `transactions` row (channel 'youtube', ref = video id).
 
-        Linked channels (account_links, set when a viewer merges
-        their YouTube identity into their Twitch account on the
-        website) get the grant in their Twitch portfolio instead —
-        real shares that trade and earn hat dividends. The
-        youtube_transactions ledger still records the grant against
-        the channel so per-video history stays complete.
+        A channel that was linked to a Twitch account resolves to that
+        same user_uuid, so the grant lands in the one portfolio the
+        viewer actually has -- no separate "linked" path any more.
         """
-        try:
-            target = await _account_links.grant_target(
-                self._db, channel_id)
-        except Exception:
-            target = None  # table may not exist yet — normal path
-        if target:
-            await _account_links.grant_to_twitch(
-                self._db, target, god, shares, price,
-                txn_type="yt_comment_share")
-            await self._db.execute("""
-                INSERT INTO youtube_transactions
-                    (yt_channel_id, god_name, type, shares, price,
-                     yt_video_id)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (channel_id, god, f"{txn_type}_linked", shares,
-                  price, video_id))
-            return
+        user_uuid = await _users.get_or_create_youtube(
+            self._db, channel_id, None, commit=False)
 
-        # Read current position to compute new avg_cost.
         async with self._db.execute("""
-            SELECT shares, avg_cost FROM youtube_holdings
-             WHERE yt_channel_id = ? AND god_name = ?
-        """, (channel_id, god)) as cur:
+            SELECT shares, avg_cost FROM portfolios
+             WHERE user_uuid = ? AND god_name = ?
+        """, (user_uuid, god)) as cur:
             row = await cur.fetchone()
 
         if row is None:
@@ -684,22 +666,22 @@ class YouTubeRewardsPlugin:
 
         new_shares = old_shares + shares
         if new_shares > 0:
-            # Weighted-average cost basis.
             new_avg = ((old_shares * old_avg) + (shares * price)) / new_shares
         else:
             new_avg = 0.0
 
         await self._db.execute("""
-            INSERT INTO youtube_holdings
-                (yt_channel_id, god_name, shares, avg_cost)
+            INSERT INTO portfolios (user_uuid, god_name, shares, avg_cost)
             VALUES (?, ?, ?, ?)
-            ON CONFLICT(yt_channel_id, god_name) DO UPDATE SET
+            ON CONFLICT(user_uuid, god_name) DO UPDATE SET
                 shares   = excluded.shares,
                 avg_cost = excluded.avg_cost
-        """, (channel_id, god, new_shares, new_avg))
+        """, (user_uuid, god, new_shares, new_avg))
 
         await self._db.execute("""
-            INSERT INTO youtube_transactions
-                (yt_channel_id, god_name, type, shares, price, yt_video_id)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (channel_id, god, txn_type, shares, price, video_id))
+            INSERT INTO transactions
+                (user_uuid, god_name, type, shares, price, total, fee,
+                 channel, ref)
+            VALUES (?, ?, ?, ?, ?, ?, 0, 'youtube', ?)
+        """, (user_uuid, god, txn_type, shares, price, shares * price,
+              video_id))

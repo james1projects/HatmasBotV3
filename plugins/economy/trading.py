@@ -1,14 +1,15 @@
 """
 plugins/economy/trading.py
 ==========================
-Buy / sell + portfolio queries.
+Buy / sell + portfolio queries. Every viewer is a `user_uuid`
+(core/users.py) — never a login.
 
 Public surface:
-  * `execute_buy(username, god_name, hat_amount)` -
+  * `execute_buy(user_uuid, god_name, hat_amount)` -
         deduct hats from MixItUp, add the equivalent share count to
         the portfolio (weighted average cost basis), record the
         transaction row, emit a trade-feed event.
-  * `execute_sell(username, god_name, hat_amount)` -
+  * `execute_sell(user_uuid, god_name, hat_amount)` -
         the inverse. hat_amount is the desired hat value to receive;
         we compute shares from current price.
   * `_get_holding`, `_get_position_value`, `_get_portfolio_value`,
@@ -17,14 +18,13 @@ Public surface:
         leaderboard query.
 
 The actual user-facing chat commands live in commands.py - those
-parse args (amount/all/half/quarter), enforce cooldowns, then call
-execute_buy / execute_sell here.
+parse args (amount/all/half/quarter), enforce cooldowns, resolve the
+chatter to a uuid, then call execute_buy / execute_sell here.
 
 Both execute_* paths are idempotent in the sense that they validate
 balance + cooldown before mutating MixItUp; if anything fails between
-the balance deduction and the portfolio update we'd have a problem,
-but in practice MixItUp's API is local + reliable so it's not
-something we currently guard against.
+the balance deduction and the portfolio update we unwind (see
+execute_buy).
 
 Post-airtight-economy pass: transaction fees are removed. The `fee`
 column in `transactions` is preserved at 0 for schema compatibility.
@@ -34,6 +34,8 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any, Dict, List, Optional
+
+from core import users as _users
 
 
 class _TradingMixin:
@@ -47,7 +49,7 @@ class _TradingMixin:
       Overlay emit from _OverlaysMixin (_emit_trade_event)
     """
 
-    def _user_trade_lock(self, username: str) -> asyncio.Lock:
+    def _user_trade_lock(self, user_uuid: str) -> asyncio.Lock:
         """Per-user lock serializing the balance-check -> deduct ->
         portfolio-write sequence across every trade entry point (chat
         commands, website /api/trade, tests). Without it, two
@@ -58,13 +60,19 @@ class _TradingMixin:
         if locks is None:
             locks = {}
             self._trade_locks_by_user = locks
-        key = (username or "").lower()
+        key = user_uuid or ""
         lock = locks.get(key)
         if lock is None:
             lock = locks[key] = asyncio.Lock()
         return lock
 
-    async def execute_buy(self, username: str, god_name: str,
+    async def _display_name(self, user_uuid: str) -> str:
+        try:
+            return await _users.display_name_of(self._db, user_uuid) or user_uuid
+        except Exception:
+            return user_uuid
+
+    async def execute_buy(self, user_uuid: str, god_name: str,
                           hat_amount: int,
                           channel: str = "chat") -> Dict[str, Any]:
         """
@@ -81,6 +89,8 @@ class _TradingMixin:
         god_name = self._resolve_god_name(god_name)
         if not god_name:
             return {"success": False, "error": "Unknown god"}
+        if not user_uuid:
+            return {"success": False, "error": "Unknown viewer"}
 
         await self._ensure_god_exists(god_name)
         price = self._prices[god_name]
@@ -94,16 +104,16 @@ class _TradingMixin:
         if shares <= 0:
             return {"success": False, "error": "Amount too small"}
 
-        async with self._user_trade_lock(username):
+        async with self._user_trade_lock(user_uuid):
             # Check balance
-            balance = await self._get_balance(username)
+            balance = await self._get_balance(user_uuid)
             if balance is None:
                 return {"success": False, "error": "Could not check balance"}
             if balance < hat_amount:
                 return {"success": False, "error": f"Not enough hats (have {balance:,})"}
 
             # Execute: deduct hats
-            success = await self._adjust_balance(username, -hat_amount)
+            success = await self._adjust_balance(user_uuid, -hat_amount)
             if not success:
                 return {"success": False, "error": "Transaction failed"}
 
@@ -114,33 +124,34 @@ class _TradingMixin:
             shares_added = False
             try:
                 # Update portfolio (commits internally)
-                await self._add_shares(username, god_name, shares, price)
+                await self._add_shares(user_uuid, god_name, shares, price)
                 shares_added = True
 
                 # Record transaction (fee column kept at 0 for schema compat)
                 await self._db.execute("""
-                    INSERT INTO transactions (username, god_name, type, shares, price, total, fee, channel)
+                    INSERT INTO transactions (user_uuid, god_name, type, shares, price, total, fee, channel)
                     VALUES (?, ?, 'buy', ?, ?, ?, 0, ?)
-                """, (username, god_name, shares, price, hat_amount, channel))
+                """, (user_uuid, god_name, shares, price, hat_amount, channel))
                 await self._db.commit()
             except Exception as e:
                 print(f"[Economy] Buy failed after deduct - unwinding "
-                      f"for {username} ({god_name}, {hat_amount} hats): {e}")
+                      f"for {user_uuid} ({god_name}, {hat_amount} hats): {e}")
                 if shares_added:
                     try:
-                        await self._remove_shares(username, god_name, shares)
+                        await self._remove_shares(user_uuid, god_name, shares)
                     except Exception as e2:
                         print(f"[Economy] CRITICAL: share rollback failed - "
-                              f"{username} kept {shares:.3f} {god_name} "
+                              f"{user_uuid} kept {shares:.3f} {god_name} "
                               f"shares: {e2}")
-                refunded = await self._adjust_balance(username, hat_amount)
+                refunded = await self._adjust_balance(user_uuid, hat_amount)
                 if not refunded:
-                    print(f"[Economy] CRITICAL: refund failed - {username} "
+                    print(f"[Economy] CRITICAL: refund failed - {user_uuid} "
                           f"is owed {hat_amount} hats (buy {god_name})")
                 return {"success": False, "error": "Trade failed"}
 
         # Emit overlay event
-        self._emit_trade_event("buy", username, god_name, shares, price, hat_amount, 0)
+        self._emit_trade_event("buy", await self._display_name(user_uuid),
+                               god_name, shares, price, hat_amount, 0)
 
         return {
             "success": True,
@@ -151,7 +162,7 @@ class _TradingMixin:
             "god_name": god_name,
         }
 
-    async def execute_sell(self, username: str, god_name: str,
+    async def execute_sell(self, user_uuid: str, god_name: str,
                            hat_amount: int,
                            channel: str = "chat") -> Dict[str, Any]:
         """
@@ -164,14 +175,16 @@ class _TradingMixin:
         god_name = self._resolve_god_name(god_name)
         if not god_name:
             return {"success": False, "error": "Unknown god"}
+        if not user_uuid:
+            return {"success": False, "error": "Unknown viewer"}
 
         price = self._prices.get(god_name, 0)
         if price <= 0:
             return {"success": False, "error": "No market data for this god"}
 
-        async with self._user_trade_lock(username):
+        async with self._user_trade_lock(user_uuid):
             # How many shares does user hold?
-            holding = await self._get_holding(username, god_name)
+            holding = await self._get_holding(user_uuid, god_name)
             if holding is None or holding["shares"] <= 0:
                 return {"success": False, "error": f"You don't own any {god_name} shares"}
 
@@ -192,11 +205,11 @@ class _TradingMixin:
             # credit hats via MixItUp HTTP (the flaky side). If the
             # credit fails, restore the shares at their original avg
             # cost so the seller ends up exactly where they started.
-            await self._remove_shares(username, god_name, shares_to_sell)
+            await self._remove_shares(user_uuid, god_name, shares_to_sell)
 
-            success = await self._adjust_balance(username, net_received)
+            success = await self._adjust_balance(user_uuid, net_received)
             if not success:
-                await self._add_shares(username, god_name, shares_to_sell,
+                await self._add_shares(user_uuid, god_name, shares_to_sell,
                                        holding["avg_cost"])
                 return {"success": False, "error": "Transaction failed"}
 
@@ -206,17 +219,18 @@ class _TradingMixin:
             try:
                 # Record transaction (fee column kept at 0 for schema compat)
                 await self._db.execute("""
-                    INSERT INTO transactions (username, god_name, type, shares, price, total, fee, channel)
+                    INSERT INTO transactions (user_uuid, god_name, type, shares, price, total, fee, channel)
                     VALUES (?, ?, 'sell', ?, ?, ?, 0, ?)
-                """, (username, god_name, shares_to_sell, price, net_received, channel))
+                """, (user_uuid, god_name, shares_to_sell, price, net_received, channel))
                 await self._db.commit()
             except Exception as e:
-                print(f"[Economy] Sell ledger write failed for {username} "
+                print(f"[Economy] Sell ledger write failed for {user_uuid} "
                       f"({god_name}, {net_received} hats) - trade itself "
                       f"completed: {e}")
 
         # Emit overlay event
-        self._emit_trade_event("sell", username, god_name, shares_to_sell, price, net_received, 0)
+        self._emit_trade_event("sell", await self._display_name(user_uuid),
+                               god_name, shares_to_sell, price, net_received, 0)
 
         return {
             "success": True,
@@ -227,94 +241,72 @@ class _TradingMixin:
             "god_name": god_name,
         }
 
-    async def _add_shares(self, username: str, god_name: str, shares: float, price: float):
+    async def _add_shares(self, user_uuid: str, god_name: str, shares: float, price: float):
         """Add shares to a user's portfolio, updating average cost basis."""
-        existing = await self._get_holding(username, god_name)
+        existing = await self._get_holding(user_uuid, god_name)
         if existing and existing["shares"] > 0:
             # Weighted average cost
             total_shares = existing["shares"] + shares
             avg_cost = ((existing["avg_cost"] * existing["shares"]) + (price * shares)) / total_shares
             await self._db.execute("""
-                UPDATE portfolios SET shares = ?, avg_cost = ? WHERE username = ? AND god_name = ?
-            """, (total_shares, avg_cost, username, god_name))
+                UPDATE portfolios SET shares = ?, avg_cost = ? WHERE user_uuid = ? AND god_name = ?
+            """, (total_shares, avg_cost, user_uuid, god_name))
         else:
-            # New rows inherit the user's leaderboard visibility from
-            # their existing holdings — otherwise a hidden user buying
-            # a new god would silently reappear on that god's holder
-            # list (the opt-out flag is per-row).
             await self._db.execute("""
-                INSERT INTO portfolios (username, god_name, shares,
-                                        avg_cost, leaderboard_opt_out)
-                VALUES (?, ?, ?, ?,
-                        COALESCE((SELECT MAX(leaderboard_opt_out)
-                                    FROM portfolios
-                                   WHERE LOWER(username) = LOWER(?)), 0))
-                ON CONFLICT(username, god_name) DO UPDATE SET
+                INSERT INTO portfolios (user_uuid, god_name, shares, avg_cost)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(user_uuid, god_name) DO UPDATE SET
                     shares = excluded.shares, avg_cost = excluded.avg_cost
-            """, (username, god_name, shares, price, username))
+            """, (user_uuid, god_name, shares, price))
         await self._db.commit()
 
     # ── leaderboard visibility (website account toggle) ──
-    # The leaderboard_opt_out column + query filters have existed
-    # since the airtight pass, but nothing ever flipped the flag —
-    # the documented !hideme chat command was never implemented.
-    # The website toggle (POST /api/me/visibility) is the first
-    # real control. Applies to all current rows; _add_shares
-    # inheritance keeps future buys consistent.
+    # The flag lives on users.leaderboard_opt_out (one per person, every
+    # platform), set from POST /api/me/visibility.
 
-    async def get_leaderboard_hidden(self, username: str) -> bool:
-        async with self._db.execute(
-            "SELECT COALESCE(MAX(leaderboard_opt_out), 0) "
-            "FROM portfolios WHERE LOWER(username) = LOWER(?)",
-            (username,)
-        ) as cursor:
-            row = await cursor.fetchone()
-        return bool(row and row[0])
+    async def get_leaderboard_hidden(self, user_uuid: str) -> bool:
+        return await _users.get_leaderboard_opt_out(self._db, user_uuid)
 
-    async def set_leaderboard_hidden(self, username: str,
+    async def set_leaderboard_hidden(self, user_uuid: str,
                                      hidden: bool) -> None:
-        await self._db.execute(
-            "UPDATE portfolios SET leaderboard_opt_out = ? "
-            "WHERE LOWER(username) = LOWER(?)",
-            (1 if hidden else 0, username))
-        await self._db.commit()
+        await _users.set_leaderboard_opt_out(self._db, user_uuid, hidden)
 
-    async def _remove_shares(self, username: str, god_name: str, shares: float):
+    async def _remove_shares(self, user_uuid: str, god_name: str, shares: float):
         """Remove shares from a user's portfolio."""
         await self._db.execute("""
             UPDATE portfolios SET shares = MAX(shares - ?, 0)
-            WHERE username = ? AND god_name = ?
-        """, (shares, username, god_name))
+            WHERE user_uuid = ? AND god_name = ?
+        """, (shares, user_uuid, god_name))
         # Clean up zero holdings
         await self._db.execute("""
-            DELETE FROM portfolios WHERE username = ? AND god_name = ? AND shares < 0.001
-        """, (username, god_name))
+            DELETE FROM portfolios WHERE user_uuid = ? AND god_name = ? AND shares < 0.001
+        """, (user_uuid, god_name))
         await self._db.commit()
 
-    async def _get_holding(self, username: str, god_name: str) -> Optional[Dict]:
+    async def _get_holding(self, user_uuid: str, god_name: str) -> Optional[Dict]:
         """Get a user's holding for a specific god."""
         async with self._db.execute(
-            "SELECT shares, avg_cost FROM portfolios WHERE username = ? AND god_name = ?",
-            (username, god_name)
+            "SELECT shares, avg_cost FROM portfolios WHERE user_uuid = ? AND god_name = ?",
+            (user_uuid, god_name)
         ) as cursor:
             row = await cursor.fetchone()
             if row:
                 return {"shares": row[0], "avg_cost": row[1]}
         return None
 
-    async def _get_position_value(self, username: str, god_name: str) -> float:
+    async def _get_position_value(self, user_uuid: str, god_name: str) -> float:
         """Get value of a user's position in a specific god."""
-        holding = await self._get_holding(username, god_name)
+        holding = await self._get_holding(user_uuid, god_name)
         if not holding:
             return 0.0
         return holding["shares"] * self._prices.get(god_name, 0)
 
-    async def _get_portfolio_value(self, username: str) -> float:
+    async def _get_portfolio_value(self, user_uuid: str) -> float:
         """Get total portfolio value for a user."""
         total = 0.0
         async with self._db.execute(
-            "SELECT god_name, shares FROM portfolios WHERE username = ?",
-            (username,)
+            "SELECT god_name, shares FROM portfolios WHERE user_uuid = ?",
+            (user_uuid,)
         ) as cursor:
             async for row in cursor:
                 god_name, shares = row
@@ -322,12 +314,12 @@ class _TradingMixin:
                 total += shares * price
         return total
 
-    async def _get_full_portfolio(self, username: str) -> List[Dict]:
+    async def _get_full_portfolio(self, user_uuid: str) -> List[Dict]:
         """Get all holdings for a user with current values."""
         holdings = []
         async with self._db.execute(
-            "SELECT god_name, shares, avg_cost FROM portfolios WHERE username = ? AND shares > 0.001 ORDER BY shares * avg_cost DESC",
-            (username,)
+            "SELECT god_name, shares, avg_cost FROM portfolios WHERE user_uuid = ? AND shares > 0.001 ORDER BY shares * avg_cost DESC",
+            (user_uuid,)
         ) as cursor:
             async for row in cursor:
                 god_name, shares, avg_cost = row

@@ -81,29 +81,35 @@ class _DBMixin:
             CREATE INDEX IF NOT EXISTS idx_price_history_god
                 ON price_history(god_name, timestamp DESC);
 
+            -- Viewer-keyed tables use user_uuid (core/users.py,
+            -- docs/USER_IDENTITY_PLAN.md). Databases from the
+            -- login-keyed era are rebuilt by _migrate_to_user_uuid().
             CREATE TABLE IF NOT EXISTS portfolios (
-                username  TEXT NOT NULL,
+                user_uuid TEXT NOT NULL,
                 god_name  TEXT NOT NULL,
                 shares    REAL NOT NULL DEFAULT 0,
                 avg_cost  REAL NOT NULL DEFAULT 0,
-                PRIMARY KEY (username, god_name),
+                PRIMARY KEY (user_uuid, god_name),
                 FOREIGN KEY (god_name) REFERENCES god_prices(god_name)
             );
+            CREATE INDEX IF NOT EXISTS idx_portfolios_god
+                ON portfolios(god_name);
 
             CREATE TABLE IF NOT EXISTS transactions (
                 id        INTEGER PRIMARY KEY AUTOINCREMENT,
-                username  TEXT NOT NULL,
+                username  TEXT,             -- legacy login (pre-uuid rows only)
+                user_uuid TEXT,             -- NULL only on rows the backfill could not map
                 god_name  TEXT NOT NULL,
-                type      TEXT NOT NULL,  -- 'buy', 'sell', 'dividend', 'free_share'
+                type      TEXT NOT NULL,  -- 'buy', 'sell', 'dividend', 'free_share', 'comment_share', 'dividend_share', 'merge_in'
                 shares    REAL NOT NULL,
                 price     REAL NOT NULL,
                 total     REAL NOT NULL,
                 fee       REAL NOT NULL DEFAULT 0,
-                timestamp TEXT NOT NULL DEFAULT (datetime('now'))
+                timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+                channel   TEXT NOT NULL DEFAULT 'chat',
+                ref       TEXT              -- yt video id for comment grants, absorbed uuid for merges
             );
 
-            CREATE INDEX IF NOT EXISTS idx_transactions_user
-                ON transactions(username, timestamp DESC);
 
             CREATE TABLE IF NOT EXISTS dividends (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -172,6 +178,7 @@ class _DBMixin:
         # independent.
         await self._migrate_god_prices_kda_columns()
         await self._migrate_transactions_channel_column()
+        await self._migrate_to_user_uuid()
 
         await self._db.commit()
         print("[Economy] Database initialized")
@@ -217,19 +224,23 @@ class _DBMixin:
                 "PRAGMA table_info(portfolios)") as cur:
             async for row in cur:
                 portfolio_cols.add(row[1])
-        if "leaderboard_opt_out" not in portfolio_cols:
+        if ("leaderboard_opt_out" not in portfolio_cols
+                and "username" in portfolio_cols):
+            # Legacy shape only; the uuid-keyed portfolios table keeps
+            # the flag on users.leaderboard_opt_out instead.
             await self._db.execute(
                 "ALTER TABLE portfolios ADD COLUMN "
                 "leaderboard_opt_out INTEGER NOT NULL DEFAULT 0")
             print("[Economy] Migration: added portfolios.leaderboard_opt_out")
 
-        # youtube_portfolios opt-out
+        # youtube_portfolios opt-out (legacy table; absent once the
+        # uuid migration has folded it into users)
         yt_cols: set = set()
         async with self._db.execute(
                 "PRAGMA table_info(youtube_portfolios)") as cur:
             async for row in cur:
                 yt_cols.add(row[1])
-        if "leaderboard_opt_out" not in yt_cols:
+        if yt_cols and "leaderboard_opt_out" not in yt_cols:
             await self._db.execute(
                 "ALTER TABLE youtube_portfolios ADD COLUMN "
                 "leaderboard_opt_out INTEGER NOT NULL DEFAULT 0")
@@ -299,6 +310,253 @@ class _DBMixin:
                 "ALTER TABLE transactions ADD COLUMN channel "
                 "TEXT NOT NULL DEFAULT 'chat'")
             print("[Economy] Migration: added transactions.channel")
+
+    async def _migrate_to_user_uuid(self):
+        """
+        One-shot re-key from Twitch logins / YouTube channel ids to
+        user_uuid (docs/USER_IDENTITY_PLAN.md). Idempotent: every step
+        checks the on-disk shape first, so a database that has already
+        been migrated (or was created fresh on the new schema) passes
+        straight through.
+
+          1. transactions gains user_uuid (+ ref) and is backfilled
+             from `username` through placeholder Twitch identities.
+          2. portfolios is rebuilt with PRIMARY KEY (user_uuid,
+             god_name); leaderboard_opt_out moves to users. The old
+             table is kept as _legacy_portfolios for one release.
+          3. youtube_portfolios / youtube_holdings / youtube_transactions
+             fold into users + portfolios + transactions and are renamed
+             _legacy_youtube_*. youtube_processed_comments and
+             youtube_video_gods stay (they are about videos, not people).
+          4. account_links rows become identity links (merging a
+             standalone YouTube user into the Twitch one) and the table
+             is renamed _legacy_account_links.
+        """
+        from core import users as _users
+
+        db = self._db
+        await _users.ensure_schema(db)
+
+        # -- 1. transactions --
+        await _users.attach_user_uuid(db, "transactions", "username", "twitch")
+        tx_cols = await self._columns("transactions")
+        if "ref" not in tx_cols:
+            await db.execute("ALTER TABLE transactions ADD COLUMN ref TEXT")
+            print("[Economy] Migration: added transactions.ref")
+        # Legacy shape declared username NOT NULL; new rows carry only
+        # user_uuid, so the table is rebuilt once with username nullable
+        # (ids preserved so nothing referencing transactions.id moves).
+        notnull_user = False
+        async with db.execute("PRAGMA table_info(transactions)") as cur:
+            async for r in cur:
+                if r[1] == "username" and r[3]:
+                    notnull_user = True
+        if notnull_user:
+            await db.executescript("""
+                CREATE TABLE transactions_v2 (
+                    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username  TEXT,
+                    user_uuid TEXT,
+                    god_name  TEXT NOT NULL,
+                    type      TEXT NOT NULL,
+                    shares    REAL NOT NULL,
+                    price     REAL NOT NULL,
+                    total     REAL NOT NULL,
+                    fee       REAL NOT NULL DEFAULT 0,
+                    timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+                    channel   TEXT NOT NULL DEFAULT 'chat',
+                    ref       TEXT
+                );
+                INSERT INTO transactions_v2 (id, username, user_uuid, god_name,
+                    type, shares, price, total, fee, timestamp, channel, ref)
+                SELECT id, username, user_uuid, god_name, type, shares, price,
+                       total, fee, timestamp, channel, ref FROM transactions;
+                DROP TABLE transactions;
+                ALTER TABLE transactions_v2 RENAME TO transactions;
+            """)
+            print("[Economy] Migration: transactions rebuilt (username nullable)")
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_transactions_user_uuid_time "
+            "ON transactions(user_uuid, timestamp DESC)")
+
+        # -- 2. portfolios rebuild --
+        pf_cols = await self._columns("portfolios")
+        if "username" in pf_cols and "user_uuid" not in pf_cols:
+            rows = []
+            async with db.execute(
+                    "SELECT username, god_name, shares, avg_cost, "
+                    "COALESCE(leaderboard_opt_out, 0) FROM portfolios") as cur:
+                async for r in cur:
+                    rows.append(r)
+            await db.execute("""
+                CREATE TABLE portfolios_v2 (
+                    user_uuid TEXT NOT NULL,
+                    god_name  TEXT NOT NULL,
+                    shares    REAL NOT NULL DEFAULT 0,
+                    avg_cost  REAL NOT NULL DEFAULT 0,
+                    PRIMARY KEY (user_uuid, god_name),
+                    FOREIGN KEY (god_name) REFERENCES god_prices(god_name)
+                )""")
+            merged: dict = {}
+            hidden: set = set()
+            uuid_by_login: dict = {}
+            for username, god, shares, avg_cost, opt_out in rows:
+                login = (username or "").lower().strip()
+                if not login:
+                    continue
+                uid = uuid_by_login.get(login)
+                if uid is None:
+                    uid = await _users.get_or_create_twitch_login(
+                        db, login, commit=False)
+                    uuid_by_login[login] = uid
+                if opt_out:
+                    hidden.add(uid)
+                key = (uid, god)
+                old_s, old_a = merged.get(key, (0.0, 0.0))
+                shares = float(shares or 0)
+                avg_cost = float(avg_cost or 0)
+                tot = old_s + shares
+                new_a = (((old_s * old_a) + (shares * avg_cost)) / tot
+                         if tot > 0 else 0.0)
+                merged[key] = (tot, new_a)
+            for (uid, god), (shares, avg_cost) in merged.items():
+                await db.execute(
+                    "INSERT INTO portfolios_v2 (user_uuid, god_name, shares, "
+                    "avg_cost) VALUES (?, ?, ?, ?)",
+                    (uid, god, shares, avg_cost))
+            for uid in hidden:
+                await _users.set_leaderboard_opt_out(db, uid, True,
+                                                     commit=False)
+            await db.execute("ALTER TABLE portfolios RENAME TO _legacy_portfolios")
+            await db.execute("ALTER TABLE portfolios_v2 RENAME TO portfolios")
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_portfolios_god "
+                "ON portfolios(god_name)")
+            print(f"[Economy] Migration: portfolios re-keyed on user_uuid "
+                  f"({len(rows)} rows -> {len(merged)}, "
+                  f"{len(uuid_by_login)} Twitch users, {len(hidden)} hidden)")
+
+        # -- 3. YouTube cluster --
+        if await self._table_exists("youtube_holdings"):
+            n_users = n_hold = n_tx = 0
+            uuid_by_channel: dict = {}
+            if await self._table_exists("youtube_portfolios"):
+                async with db.execute(
+                        "SELECT yt_channel_id, yt_display_name, first_seen_at, "
+                        "last_seen_at, COALESCE(leaderboard_opt_out, 0) "
+                        "FROM youtube_portfolios") as cur:
+                    yps = await cur.fetchall()
+                for cid, name, first_seen, last_seen, opt_out in yps:
+                    uid = await _users.get_or_create_youtube(
+                        db, cid, name, commit=False)
+                    uuid_by_channel[cid] = uid
+                    await db.execute(
+                        "UPDATE users SET created_at = COALESCE(?, created_at), "
+                        "last_seen_at = COALESCE(?, last_seen_at) WHERE uuid = ?",
+                        (first_seen, last_seen, uid))
+                    if opt_out:
+                        await _users.set_leaderboard_opt_out(
+                            db, uid, True, commit=False)
+                    n_users += 1
+
+            async def _uid_for(cid):
+                uid = uuid_by_channel.get(cid)
+                if uid is None:
+                    uid = await _users.get_or_create_youtube(
+                        db, cid, None, commit=False)
+                    uuid_by_channel[cid] = uid
+                return uid
+
+            async with db.execute(
+                    "SELECT yt_channel_id, god_name, shares, avg_cost "
+                    "FROM youtube_holdings WHERE shares > 0.001") as cur:
+                holds = await cur.fetchall()
+            for cid, god, shares, avg_cost in holds:
+                uid = await _uid_for(cid)
+                async with db.execute(
+                        "SELECT shares, avg_cost FROM portfolios "
+                        "WHERE user_uuid = ? AND god_name = ?",
+                        (uid, god)) as cur:
+                    have = await cur.fetchone()
+                shares = float(shares or 0)
+                avg_cost = float(avg_cost or 0)
+                if have:
+                    old_s, old_a = float(have[0] or 0), float(have[1] or 0)
+                    tot = old_s + shares
+                    new_a = (((old_s * old_a) + (shares * avg_cost)) / tot
+                             if tot > 0 else 0.0)
+                    await db.execute(
+                        "UPDATE portfolios SET shares = ?, avg_cost = ? "
+                        "WHERE user_uuid = ? AND god_name = ?",
+                        (tot, new_a, uid, god))
+                else:
+                    await db.execute(
+                        "INSERT INTO portfolios (user_uuid, god_name, shares, "
+                        "avg_cost) VALUES (?, ?, ?, ?)",
+                        (uid, god, shares, avg_cost))
+                n_hold += 1
+
+            if await self._table_exists("youtube_transactions"):
+                async with db.execute(
+                        "SELECT yt_channel_id, god_name, type, shares, price, "
+                        "yt_video_id, timestamp FROM youtube_transactions "
+                        "ORDER BY id") as cur:
+                    ytx = await cur.fetchall()
+                for cid, god, ttype, shares, price, vid, ts in ytx:
+                    uid = await _uid_for(cid)
+                    shares = float(shares or 0)
+                    price = float(price or 0)
+                    await db.execute(
+                        "INSERT INTO transactions (user_uuid, god_name, type, "
+                        "shares, price, total, fee, timestamp, channel, ref) "
+                        "VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'youtube', ?)",
+                        (uid, god, ttype, shares, price, shares * price,
+                         ts, vid))
+                    n_tx += 1
+                await db.execute("ALTER TABLE youtube_transactions "
+                                 "RENAME TO _legacy_youtube_transactions")
+            await db.execute("ALTER TABLE youtube_holdings "
+                             "RENAME TO _legacy_youtube_holdings")
+            if await self._table_exists("youtube_portfolios"):
+                await db.execute("ALTER TABLE youtube_portfolios "
+                                 "RENAME TO _legacy_youtube_portfolios")
+            print(f"[Economy] Migration: YouTube cluster folded in "
+                  f"({n_users} users, {n_hold} holdings, {n_tx} transactions)")
+
+        # -- 4. account_links -> identity links --
+        if await self._table_exists("account_links"):
+            async with db.execute(
+                    "SELECT yt_channel_id, twitch_login FROM account_links") as cur:
+                links = await cur.fetchall()
+            for cid, login in links:
+                try:
+                    tw = await _users.get_or_create_twitch_login(
+                        db, login, commit=False)
+                    res = await _users.link_youtube(
+                        db, tw, cid, initiated_by="migration")
+                    print(f"[Economy] Migration: link yt:{cid} -> "
+                          f"twitch:{login}: {res.get('ok')} "
+                          f"{res.get('reason', '')}")
+                except Exception as e:
+                    print(f"[Economy] Migration: link yt:{cid} -> "
+                          f"twitch:{login} failed: {e}")
+            await db.execute("ALTER TABLE account_links "
+                             "RENAME TO _legacy_account_links")
+
+        await db.commit()
+
+    async def _columns(self, table: str) -> set:
+        cols: set = set()
+        async with self._db.execute(f"PRAGMA table_info({table})") as cur:
+            async for row in cur:
+                cols.add(row[1])
+        return cols
+
+    async def _table_exists(self, table: str) -> bool:
+        async with self._db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+                "AND name = ?", (table,)) as cur:
+            return await cur.fetchone() is not None
 
     async def _load_prices(self):
         """Load all god prices into memory cache."""

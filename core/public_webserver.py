@@ -56,7 +56,7 @@ from core.config import (
     TIKTOK_USERNAME, TIKTOK_LATEST_VIDEO_URL, BLUESKY_HANDLE,
     SOCIAL_FEED_CACHE_TTL,
 )
-from core import account_linking as _links
+from core import users as _users
 from core import aspect_roster
 from core.aspect_roster import display_god
 from core.vod_web import VodWeb
@@ -186,7 +186,7 @@ class PublicWebServer:
         # account_links schema is ensured once, lazily (first request
         # that needs it) — youtube_rewards.on_ready also creates it,
         # but the webserver must not depend on that plugin being on.
-        self._links_schema_done = False
+        self._ident_uuid_cache: Dict[tuple, str] = {}
 
         # Per-portfolio WebSocket client sets, keyed on yt_channel_id.
         self._ws_clients: Dict[str, Set[web.WebSocketResponse]] = {}
@@ -340,6 +340,13 @@ class PublicWebServer:
         self.app.router.add_get("/auth/google/callback",
                                 self._handle_google_callback)
         self.app.router.add_post("/auth/logout", self._handle_auth_logout)
+        # Account link: preview both sides, then confirm (merge rules in
+        # docs/USER_IDENTITY_PLAN.md).
+        self.app.router.add_get("/link/confirm", self._handle_link_page)
+        self.app.router.add_get("/api/link/preview",
+                                 self._handle_api_link_preview)
+        self.app.router.add_post("/api/link/confirm",
+                                 self._handle_api_link_confirm)
         self.app.router.add_get("/api/me", self._handle_api_me)
         self.app.router.add_get("/api/me/balance",
                                 self._handle_api_me_balance)
@@ -564,21 +571,19 @@ class PublicWebServer:
         display_name = "viewer"
         rank_blurb = ""
         try:
+            user_uuid = None
             if url_path.startswith("/yt/"):
                 cid = url_path[len("/yt/"):]
-                async with self._db.execute(
-                        "SELECT yt_display_name FROM youtube_portfolios "
-                        " WHERE yt_channel_id = ?", (cid,)) as cur:
-                    row = await cur.fetchone()
-                if row and row[0]:
-                    display_name = row[0]
-                rank, total = await self._portfolio_rank("youtube", cid)
-                if rank and total:
-                    rank_blurb = f" — ranked #{rank} of {total}"
+                user_uuid = await _users.find_youtube(self._db, cid)
             elif url_path.startswith("/twitch/"):
                 display_name = url_path[len("/twitch/"):] or "viewer"
-                rank, total = await self._portfolio_rank(
-                    "twitch", display_name)
+                user_uuid = await _users.find_twitch_login(
+                    self._db, display_name)
+            if user_uuid:
+                name = await _users.display_name_of(self._db, user_uuid)
+                if name:
+                    display_name = name
+                rank, total = await self._portfolio_rank_uuid(user_uuid)
                 if rank and total:
                     rank_blurb = f" — ranked #{rank} of {total}"
         except Exception as e:
@@ -599,32 +604,18 @@ class PublicWebServer:
     #   JSON API
     # ──────────────────────────────────────────────────────────────────
 
-    async def _handle_api_portfolio(self, request: web.Request) -> web.Response:
-        """Return holdings + current value for a YouTube channel ID."""
-        channel_id = request.match_info["channel_id"]
-        if not channel_id or len(channel_id) > 64:
-            return web.json_response({"error": "bad channel id"}, status=400)
-
-        # Look up display name + first/last seen.
-        async with self._db.execute("""
-            SELECT yt_display_name, first_seen_at, last_seen_at
-              FROM youtube_portfolios
-             WHERE yt_channel_id = ?
-        """, (channel_id,)) as cur:
-            row = await cur.fetchone()
-        if row is None:
-            return web.json_response({"error": "not found"}, status=404)
-        display_name, first_seen, last_seen = row
-
-        # Holdings + current price for each.
+    async def _portfolio_payload(self, user_uuid: str) -> Dict[str, Any]:
+        """Holdings, recent transactions, totals and rank for one user.
+        Shared by /api/yt/{channel_id}, /api/twitch/{username} and the
+        /me profile."""
         holdings: List[Dict[str, Any]] = []
         async with self._db.execute("""
             SELECT h.god_name, h.shares, h.avg_cost, p.price
-              FROM youtube_holdings h
+              FROM portfolios h
               LEFT JOIN god_prices p ON p.god_name = h.god_name
-             WHERE h.yt_channel_id = ? AND h.shares > 0.001
+             WHERE h.user_uuid = ? AND h.shares > 0.001
              ORDER BY h.god_name
-        """, (channel_id,)) as cur:
+        """, (user_uuid,)) as cur:
             async for r in cur:
                 god, shares, avg_cost, price = r
                 # If god_prices has no row yet (god never played on
@@ -634,65 +625,80 @@ class PublicWebServer:
                 # in this case, so P&L renders as 0% — neutral.
                 price = (float(price) if price is not None
                          else float(ECONOMY_STARTING_PRICE))
+                shares = float(shares or 0)
+                avg_cost = float(avg_cost or 0)
                 value = shares * price
                 cost_basis = shares * avg_cost
                 pl = value - cost_basis
                 pl_pct = (pl / cost_basis * 100.0) if cost_basis > 0 else 0.0
                 holdings.append({
                     "god": god,
-                    "shares": round(float(shares), 4),
-                    "avg_cost": round(float(avg_cost), 2),
+                    "shares": round(shares, 4),
+                    "avg_cost": round(avg_cost, 2),
                     "price": round(price, 2),
                     "value": round(value, 2),
                     "pl": round(pl, 2),
                     "pl_pct": round(pl_pct, 2),
                 })
 
-        # Recent transactions for the activity feed.
         recent: List[Dict[str, Any]] = []
         async with self._db.execute("""
-            SELECT god_name, type, shares, price, yt_video_id, timestamp
-              FROM youtube_transactions
-             WHERE yt_channel_id = ?
-             ORDER BY timestamp DESC LIMIT 20
-        """, (channel_id,)) as cur:
+            SELECT god_name, type, shares, price, total, fee, timestamp,
+                   channel, ref
+              FROM transactions
+             WHERE user_uuid = ?
+             ORDER BY timestamp DESC, id DESC LIMIT 20
+        """, (user_uuid,)) as cur:
             async for r in cur:
                 recent.append({
                     "god": r[0], "type": r[1],
-                    "shares": round(float(r[2]), 4),
-                    "price": round(float(r[3]), 2),
-                    "video_id": r[4],
-                    "timestamp": r[5],
+                    "shares": round(float(r[2] or 0), 4),
+                    "price": round(float(r[3] or 0), 2),
+                    "total": round(float(r[4] or 0), 2),
+                    "timestamp": r[6],
+                    "channel": r[7] or "chat",
+                    "video_id": r[8] if (r[7] == "youtube") else None,
                 })
 
         total_value = sum(h["value"] for h in holdings)
         total_cost = sum(h["shares"] * h["avg_cost"] for h in holdings)
-        total_pl = total_value - total_cost
-
-        # Rank in the cross-platform leaderboard.
-        rank, total_traders = await self._portfolio_rank("youtube", channel_id)
-
-        return web.json_response({
-            "channel_id":    channel_id,
-            "display_name":  display_name,
-            "first_seen_at": first_seen,
-            "last_seen_at":  last_seen,
+        rank, total_traders = await self._portfolio_rank_uuid(user_uuid)
+        return {
+            "user_uuid":     user_uuid,
             "holdings":      holdings,
             "recent":        recent,
             "total_value":   round(total_value, 2),
             "total_cost":    round(total_cost, 2),
-            "total_pl":      round(total_pl, 2),
+            "total_pl":      round(total_value - total_cost, 2),
             "rank":          rank,
             "total_traders": total_traders,
+        }
+
+    async def _handle_api_portfolio(self, request: web.Request) -> web.Response:
+        """Return holdings + current value for a YouTube channel ID."""
+        channel_id = request.match_info["channel_id"]
+        if not channel_id or len(channel_id) > 64:
+            return web.json_response({"error": "bad channel id"}, status=400)
+        user_uuid = await _users.find_youtube(self._db, channel_id)
+        if user_uuid is None:
+            return web.json_response({"error": "not found"}, status=404)
+        user = await _users.get_user(self._db, user_uuid) or {}
+        slot = (await self._identity_map([user_uuid])).get(user_uuid, {})
+        payload = await self._portfolio_payload(user_uuid)
+        payload.update({
+            "platform":      "youtube",
+            "channel_id":    channel_id,
+            "display_name":  user.get("display_name") or channel_id,
+            "first_seen_at": user.get("created_at"),
+            "last_seen_at":  user.get("last_seen_at"),
+            "twitch_login":  slot.get("login"),
         })
+        return web.json_response(payload)
 
     async def _handle_api_twitch_portfolio(self, request: web.Request
                                             ) -> web.Response:
-        """Same shape as _handle_api_portfolio but reads the Twitch
-        side: portfolios + transactions tables, filtered against the
-        bot/excluded list. Username is the unique key; we lowercase
-        for the lookup but preserve whatever case is stored for
-        display."""
+        """Same shape as _handle_api_portfolio but looked up by Twitch
+        login. Excluded bot accounts and unknown logins 404."""
         username_raw = request.match_info["username"]
         if not username_raw or len(username_raw) > 64:
             return web.json_response({"error": "bad username"}, status=400)
@@ -700,90 +706,27 @@ class PublicWebServer:
 
         if username in EXCLUDED_USERS_LOWER:
             return web.json_response({"error": "not found"}, status=404)
-
-        # Confirm user exists (has at least one portfolio row OR
-        # transaction history). Otherwise 404 — mirrors the YouTube
-        # portfolio's "no shares earned yet" path.
-        async with self._db.execute(
-                "SELECT 1 FROM portfolios WHERE LOWER(username) = ? "
-                "AND shares > 0.001 LIMIT 1", (username,)) as cur:
-            row = await cur.fetchone()
-        if row is None:
-            async with self._db.execute(
-                    "SELECT 1 FROM transactions WHERE LOWER(username) = ? "
-                    "LIMIT 1", (username,)) as cur:
-                row = await cur.fetchone()
-            if row is None:
-                return web.json_response({"error": "not found"}, status=404)
-
-        # Holdings
-        holdings: List[Dict[str, Any]] = []
-        async with self._db.execute("""
-            SELECT h.god_name, h.shares, h.avg_cost, p.price
-              FROM portfolios h
-              LEFT JOIN god_prices p ON p.god_name = h.god_name
-             WHERE LOWER(h.username) = ? AND h.shares > 0.001
-             ORDER BY h.god_name
-        """, (username,)) as cur:
-            async for r in cur:
-                god, shares, avg_cost, price = r
-                price = (float(price) if price is not None
-                         else float(ECONOMY_STARTING_PRICE))
-                value = shares * price
-                cost_basis = shares * avg_cost
-                pl = value - cost_basis
-                pl_pct = (pl / cost_basis * 100.0) if cost_basis > 0 else 0.0
-                holdings.append({
-                    "god": god,
-                    "shares": round(float(shares), 4),
-                    "avg_cost": round(float(avg_cost), 2),
-                    "price": round(price, 2),
-                    "value": round(value, 2),
-                    "pl": round(pl, 2),
-                    "pl_pct": round(pl_pct, 2),
-                })
-
-        # Recent transactions
-        recent: List[Dict[str, Any]] = []
-        async with self._db.execute("""
-            SELECT god_name, type, shares, price, total, fee, timestamp
-              FROM transactions
-             WHERE LOWER(username) = ?
-             ORDER BY timestamp DESC LIMIT 20
-        """, (username,)) as cur:
-            async for r in cur:
-                recent.append({
-                    "god": r[0], "type": r[1],
-                    "shares": round(float(r[2]), 4),
-                    "price": round(float(r[3]), 2),
-                    "total": round(float(r[4] or 0), 2),
-                    "timestamp": r[6],
-                })
-
-        total_value = sum(h["value"] for h in holdings)
-        total_cost = sum(h["shares"] * h["avg_cost"] for h in holdings)
-        total_pl = total_value - total_cost
-
-        # Rank in the cross-platform leaderboard.
-        rank, total_traders = await self._portfolio_rank("twitch", username)
-
-        return web.json_response({
+        user_uuid = await _users.find_twitch_login(self._db, username)
+        if user_uuid is None:
+            return web.json_response({"error": "not found"}, status=404)
+        user = await _users.get_user(self._db, user_uuid) or {}
+        slot = (await self._identity_map([user_uuid])).get(user_uuid, {})
+        payload = await self._portfolio_payload(user_uuid)
+        payload.update({
             "platform":      "twitch",
             "channel_id":    username,           # for symmetry with YT
-            "display_name":  username_raw,       # preserve case from URL
-            "holdings":      holdings,
-            "recent":        recent,
-            "total_value":   round(total_value, 2),
-            "total_cost":    round(total_cost, 2),
-            "total_pl":      round(total_pl, 2),
-            "rank":          rank,
-            "total_traders": total_traders,
+            "display_name":  user.get("display_name") or username_raw,
+            "first_seen_at": user.get("created_at"),
+            "last_seen_at":  user.get("last_seen_at"),
+            "yt_channel_id": slot.get("channel_id"),
         })
+        return web.json_response(payload)
 
     async def _handle_api_search(self, request: web.Request) -> web.Response:
-        """Search portfolios by display name (partial, case-insensitive),
-        across BOTH platforms. Each result includes a 'platform' field
-        so the UI can badge them clearly."""
+        """Search portfolios by display name or Twitch login (partial,
+        case-insensitive). Each result carries a 'platform' field so the
+        UI can badge it: twitch when the person has a Twitch login,
+        youtube otherwise."""
         q = request.query.get("q", "").strip()
         if len(q) < 2:
             return web.json_response({"results": []})
@@ -791,52 +734,34 @@ class PublicWebServer:
             return web.json_response({"error": "query too long"}, status=400)
 
         like = f"%{q.lower()}%"
+        excluded = await self._excluded_uuids()
+        not_excl, params = _users.sql_not_excluded("u.uuid", excluded)
+        rows = []
+        async with self._db.execute(f"""
+            SELECT u.uuid, u.display_name, u.last_seen_at
+              FROM users u
+             WHERE u.merged_into IS NULL
+               AND (LOWER(u.display_name) LIKE ?
+                    OR u.uuid IN (SELECT user_uuid FROM user_identities
+                                   WHERE login LIKE ?))
+               AND EXISTS (SELECT 1 FROM portfolios p
+                            WHERE p.user_uuid = u.uuid AND p.shares > 0.001)
+               {not_excl}
+             ORDER BY u.last_seen_at DESC LIMIT 20
+        """, (like, like) + params) as cur:
+            rows = await cur.fetchall()
+        idmap = await self._identity_map([r[0] for r in rows])
         results: List[Dict[str, Any]] = []
-
-        # YouTube — joined to youtube_portfolios for display name + last seen.
-        async with self._db.execute("""
-            SELECT yt_channel_id, yt_display_name, last_seen_at
-              FROM youtube_portfolios
-             WHERE LOWER(yt_display_name) LIKE ?
-             ORDER BY last_seen_at DESC LIMIT 20
-        """, (like,)) as cur:
-            async for r in cur:
-                results.append({
-                    "platform": "youtube",
-                    "channel_id": r[0],
-                    "display_name": r[1],
-                    "last_seen_at": r[2],
-                    "url": f"/yt/{r[0]}",
-                })
-
-        # Twitch — DISTINCT usernames from portfolios, filtered against
-        # the excluded list so bot accounts never surface in search.
-        excluded = list(EXCLUDED_USERS_LOWER)
-        if excluded:
-            placeholders = ",".join("?" for _ in excluded)
-            twitch_sql = (f"SELECT DISTINCT username FROM portfolios "
-                          f"WHERE LOWER(username) LIKE ? "
-                          f"AND shares > 0.001 "
-                          f"AND LOWER(username) NOT IN ({placeholders}) "
-                          f"ORDER BY username LIMIT 20")
-            twitch_params = (like,) + tuple(excluded)
-        else:
-            twitch_sql = ("SELECT DISTINCT username FROM portfolios "
-                          "WHERE LOWER(username) LIKE ? "
-                          "AND shares > 0.001 "
-                          "ORDER BY username LIMIT 20")
-            twitch_params = (like,)
-        async with self._db.execute(twitch_sql, twitch_params) as cur:
-            async for r in cur:
-                username = r[0]
-                results.append({
-                    "platform": "twitch",
-                    "channel_id": username,         # symmetry with YT shape
-                    "display_name": username,
-                    "last_seen_at": None,
-                    "url": f"/twitch/{username}",
-                })
-
+        for uuid_, name, last_seen in rows:
+            platform, ident, url = self._public_ref(idmap.get(uuid_, {}), uuid_)
+            results.append({
+                "platform": platform,
+                "channel_id": ident,
+                "user_uuid": uuid_,
+                "display_name": name or ident,
+                "last_seen_at": last_seen,
+                "url": url,
+            })
         return web.json_response({"results": results})
 
     async def _handle_api_prices(self, request: web.Request) -> web.Response:
@@ -1122,50 +1047,40 @@ class PublicWebServer:
         # query + another key in the response.
         twitch_holders: List[Dict[str, Any]] = []
         youtube_holders: List[Dict[str, Any]] = []
-        excluded_list = list(EXCLUDED_USERS_LOWER)
-        if excluded_list:
-            placeholders = ",".join("?" for _ in excluded_list)
-            twitch_sql = (f"SELECT username, shares, avg_cost "
-                          f"FROM portfolios "
-                          f"WHERE god_name = ? AND shares > 0.001 "
-                          f"AND COALESCE(leaderboard_opt_out, 0) = 0 "
-                          f"AND LOWER(username) NOT IN ({placeholders}) "
-                          f"ORDER BY shares DESC LIMIT 25")
-            twitch_params = (canonical,) + tuple(excluded_list)
-        else:
-            twitch_sql = ("SELECT username, shares, avg_cost FROM portfolios "
-                          "WHERE god_name = ? AND shares > 0.001 "
-                          "AND COALESCE(leaderboard_opt_out, 0) = 0 "
-                          "ORDER BY shares DESC LIMIT 25")
-            twitch_params = (canonical,)
-        async with self._db.execute(twitch_sql, twitch_params) as cur:
-            async for r in cur:
-                twitch_holders.append({
-                    "platform": "twitch",
-                    "name": r[0],
-                    "shares": round(float(r[1]), 3),
-                    "value": round(float(r[1]) * float(price), 2),
-                    "avg_cost": round(float(r[2]), 2),
-                })
-        async with self._db.execute("""
-            SELECT yp.yt_display_name, yh.shares, yh.avg_cost,
-                   yp.yt_channel_id
-              FROM youtube_holdings yh
-              JOIN youtube_portfolios yp
-                ON yp.yt_channel_id = yh.yt_channel_id
-             WHERE yh.god_name = ? AND yh.shares > 0.001
-                   AND COALESCE(yp.leaderboard_opt_out, 0) = 0
-             ORDER BY yh.shares DESC LIMIT 25
-        """, (canonical,)) as cur:
-            async for r in cur:
-                youtube_holders.append({
-                    "platform": "youtube",
-                    "name": r[0],
-                    "shares": round(float(r[1]), 3),
-                    "value": round(float(r[1]) * float(price), 2),
-                    "avg_cost": round(float(r[2]), 2),
-                    "channel_id": r[3],
-                })
+        excluded = await self._excluded_uuids()
+        not_excl, params = _users.sql_not_excluded("p.user_uuid", excluded)
+        holder_rows = []
+        async with self._db.execute(f"""
+            SELECT p.user_uuid, COALESCE(u.display_name, p.user_uuid),
+                   p.shares, p.avg_cost
+              FROM portfolios p
+              LEFT JOIN users u ON u.uuid = p.user_uuid
+             WHERE p.god_name = ? AND p.shares > 0.001
+               AND COALESCE(u.leaderboard_opt_out, 0) = 0
+               {not_excl}
+             ORDER BY p.shares DESC LIMIT 50
+        """, (canonical,) + params) as cur:
+            holder_rows = await cur.fetchall()
+        idmap = await self._identity_map([r[0] for r in holder_rows])
+        for uuid_, name, shares, avg_cost in holder_rows:
+            slot = idmap.get(uuid_, {})
+            entry = {
+                "user_uuid": uuid_,
+                "name": name,
+                "shares": round(float(shares), 3),
+                "value": round(float(shares) * float(price), 2),
+                "avg_cost": round(float(avg_cost), 2),
+            }
+            if slot.get("login"):
+                entry["platform"] = "twitch"
+                entry["login"] = slot["login"]
+                if len(twitch_holders) < 25:
+                    twitch_holders.append(entry)
+            else:
+                entry["platform"] = "youtube"
+                entry["channel_id"] = slot.get("channel_id")
+                if len(youtube_holders) < 25:
+                    youtube_holders.append(entry)
         all_holders = (twitch_holders + youtube_holders)
         all_holders.sort(key=lambda h: h["value"], reverse=True)
         top_holders = {
@@ -1375,71 +1290,45 @@ class PublicWebServer:
     async def _compute_leaderboard(self) -> List[Dict[str, Any]]:
         """Full ranked portfolio list, sorted by total_value DESC.
         Each entry gets a 1-based `rank` field. Empty portfolios
-        (total_value <= 0) and excluded bot accounts are filtered."""
+        (total_value <= 0) and excluded bot accounts are filtered.
+        One row per person (a linked Twitch + YouTube viewer is one
+        entry); `platform`/`id`/`url` come from their identities."""
         starting_price = float(ECONOMY_STARTING_PRICE)
         results: List[Dict[str, Any]] = []
-
-        # Twitch side
+        excluded = await self._excluded_uuids()
+        rows = []
         try:
             async with self._db.execute("""
-                SELECT p.username,
+                SELECT p.user_uuid, u.display_name,
                        COUNT(DISTINCT p.god_name) AS holdings_count,
                        SUM(p.shares * COALESCE(gp.price, ?)) AS total_value
                   FROM portfolios p
                   LEFT JOIN god_prices gp ON gp.god_name = p.god_name
+                  LEFT JOIN users u ON u.uuid = p.user_uuid
                  WHERE p.shares > 0.001
-                 GROUP BY p.username
+                 GROUP BY p.user_uuid
             """, (starting_price,)) as cur:
-                async for r in cur:
-                    username, count, total = r
-                    if not username:
-                        continue
-                    if username.lower() in EXCLUDED_USERS_LOWER:
-                        continue
-                    total_val = float(total or 0)
-                    if total_val <= 0:
-                        continue
-                    results.append({
-                        "platform":       "twitch",
-                        "id":             username,
-                        "display_name":   username,
-                        "holdings_count": int(count or 0),
-                        "total_value":    round(total_val, 2),
-                        "url":            "/twitch/" + username,
-                    })
+                rows = await cur.fetchall()
         except Exception as e:
-            print(f"[PublicWebServer] twitch leaderboard scan failed: {e}")
-
-        # YouTube side
-        try:
-            async with self._db.execute("""
-                SELECT yp.yt_channel_id, yp.yt_display_name,
-                       COUNT(DISTINCT h.god_name) AS holdings_count,
-                       SUM(h.shares * COALESCE(gp.price, ?)) AS total_value
-                  FROM youtube_portfolios yp
-                  JOIN youtube_holdings h
-                    ON h.yt_channel_id = yp.yt_channel_id
-                  LEFT JOIN god_prices gp ON gp.god_name = h.god_name
-                 WHERE h.shares > 0.001
-                 GROUP BY yp.yt_channel_id, yp.yt_display_name
-            """, (starting_price,)) as cur:
-                async for r in cur:
-                    cid, name, count, total = r
-                    if not cid:
-                        continue
-                    total_val = float(total or 0)
-                    if total_val <= 0:
-                        continue
-                    results.append({
-                        "platform":       "youtube",
-                        "id":             cid,
-                        "display_name":   name or cid,
-                        "holdings_count": int(count or 0),
-                        "total_value":    round(total_val, 2),
-                        "url":            "/yt/" + cid,
-                    })
-        except Exception as e:
-            print(f"[PublicWebServer] yt leaderboard scan failed: {e}")
+            print(f"[PublicWebServer] leaderboard scan failed: {e}")
+            return results
+        idmap = await self._identity_map([r[0] for r in rows])
+        for uuid_, name, count, total in rows:
+            if not uuid_ or uuid_ in excluded:
+                continue
+            total_val = float(total or 0)
+            if total_val <= 0:
+                continue
+            platform, ident, url = self._public_ref(idmap.get(uuid_, {}), uuid_)
+            results.append({
+                "platform":       platform,
+                "id":             ident,
+                "user_uuid":      uuid_,
+                "display_name":   name or ident,
+                "holdings_count": int(count or 0),
+                "total_value":    round(total_val, 2),
+                "url":            url,
+            })
 
         # Sort DESC by value; id ASC as deterministic tiebreaker.
         results.sort(key=lambda r: (-r["total_value"], (r["id"] or "").lower()))
@@ -1447,19 +1336,26 @@ class PublicWebServer:
             r["rank"] = i + 1
         return results
 
-    async def _portfolio_rank(self, platform: str, identifier: str):
-        """Return (rank, total_traders) for a portfolio. rank is None
-        if the portfolio has no positive-value holdings (and therefore
-        doesn't appear in the leaderboard)."""
+    async def _portfolio_rank_uuid(self, user_uuid: Optional[str]):
+        """(rank, total_traders) for a user. rank is None if the user
+        has no positive-value holdings (and therefore doesn't appear
+        in the leaderboard)."""
         full = await self._compute_leaderboard()
         total = len(full)
-        if not identifier:
+        if not user_uuid:
             return None, total
-        target = identifier.lower()
         for r in full:
-            if r["platform"] == platform and (r["id"] or "").lower() == target:
+            if r["user_uuid"] == user_uuid:
                 return r["rank"], total
         return None, total
+
+    async def _portfolio_rank(self, platform: str, identifier: str):
+        """Legacy (platform, identifier) form of _portfolio_rank_uuid."""
+        if platform == "youtube":
+            user_uuid = await _users.find_youtube(self._db, identifier)
+        else:
+            user_uuid = await _users.find_twitch_login(self._db, identifier)
+        return await self._portfolio_rank_uuid(user_uuid)
 
     async def _handle_api_leaderboard(
             self, request: web.Request) -> web.Response:
@@ -1532,11 +1428,10 @@ class PublicWebServer:
         # shares of a god. Join to portfolios for the display name.
         try:
             async with self._db.execute("""
-                SELECT yp.yt_display_name, t.god_name, t.shares,
-                       t.timestamp
-                  FROM youtube_transactions t
-                  JOIN youtube_portfolios  yp
-                    ON yp.yt_channel_id = t.yt_channel_id
+                SELECT COALESCE(u.display_name, t.user_uuid), t.god_name,
+                       t.shares, t.timestamp
+                  FROM transactions t
+                  LEFT JOIN users u ON u.uuid = t.user_uuid
                  WHERE t.type = 'comment_share'
                  ORDER BY t.timestamp DESC
                  LIMIT 30
@@ -1574,9 +1469,13 @@ class PublicWebServer:
         # New portfolios — viewer showed up for the first time.
         try:
             async with self._db.execute("""
-                SELECT yt_display_name, first_seen_at
-                  FROM youtube_portfolios
-                 ORDER BY first_seen_at DESC
+                SELECT u.display_name, u.created_at
+                  FROM users u
+                 WHERE u.merged_into IS NULL
+                   AND EXISTS (SELECT 1 FROM user_identities i
+                                WHERE i.user_uuid = u.uuid
+                                  AND i.provider = 'youtube')
+                 ORDER BY u.created_at DESC
                  LIMIT 20
             """) as cur:
                 async for r in cur:
@@ -1590,28 +1489,28 @@ class PublicWebServer:
 
         # Twitch-side trades (buys / sells). Filter the known bot
         # accounts out so the feed isn't full of system actors.
-        excluded = {u.lower() for u in (ECONOMY_EXCLUDED_USERNAMES or [])}
-        if TWITCH_BOT_USERNAME:
-            excluded.add(TWITCH_BOT_USERNAME.lower())
+        excluded = await self._excluded_uuids()
         try:
             async with self._db.execute("""
-                SELECT username, god_name, type, shares, price, timestamp
-                  FROM transactions
-                 WHERE type IN ('buy', 'sell')
-                 ORDER BY timestamp DESC
+                SELECT t.user_uuid, COALESCE(u.display_name, t.username),
+                       t.god_name, t.type, t.shares, t.price, t.timestamp
+                  FROM transactions t
+                  LEFT JOIN users u ON u.uuid = t.user_uuid
+                 WHERE t.type IN ('buy', 'sell')
+                 ORDER BY t.timestamp DESC
                  LIMIT 30
             """) as cur:
                 async for r in cur:
-                    if (r[0] or "").lower() in excluded:
+                    if r[0] in excluded:
                         continue
                     events.append({
-                        "ts":     r[5],
+                        "ts":     r[6],
                         "kind":   "trade",
-                        "actor":  r[0],
-                        "god":    r[1],
-                        "trade":  r[2],
-                        "shares": float(r[3] or 0),
-                        "price":  float(r[4] or 0),
+                        "actor":  r[1],
+                        "god":    r[2],
+                        "trade":  r[3],
+                        "shares": float(r[4] or 0),
+                        "price":  float(r[5] or 0),
                     })
         except Exception as e:
             print(f"[PublicWebServer] trade feed failed: {e}")
@@ -1714,7 +1613,8 @@ class PublicWebServer:
         # if the user clicks Approve twice, the second one finds
         # status='approved' and bails.
         async with self._db.execute("""
-            SELECT yt_display_name, god_name, status
+            SELECT yt_display_name, god_name, status, yt_channel_id,
+                   user_uuid
               FROM pending_yt_nominations
              WHERE id = ?
         """, (nid,)) as cur:
@@ -1722,7 +1622,7 @@ class PublicWebServer:
         if row is None:
             return web.json_response({"error": "not found"}, status=404)
 
-        display_name, god_name, status = row[0], row[1], row[2]
+        display_name, god_name, status, channel_id, user_uuid = row
         if status != "pending":
             return web.json_response(
                 {"error": f"already {status}"}, status=409)
@@ -1732,30 +1632,31 @@ class PublicWebServer:
         # because cmd_nominate is wired to a chat-message context we
         # don't have here. The semantics match:
         #   - god_pool: insert or +1 vote_count
-        #   - god_pool_votes: record the daily vote, namespaced with
-        #     "yt:" so a YT viewer and a Twitch viewer of the same
-        #     name don't collide on the (voter_username, vote_date) PK
+        #   - god_pool_votes: record the daily vote for the commenter's
+        #     user_uuid (a linked viewer shares the cap with chat)
         from datetime import date as _date
         today_iso = _date.today().isoformat()
-        voter_key = f"yt:{display_name.lower()}"
 
         try:
+            if not user_uuid:
+                user_uuid = await _users.get_or_create_youtube(
+                    self._db, channel_id, display_name, commit=False)
             # YT comment nominations are always base-kit (use_aspect
             # 0) — the comment scanner matches god names only. The PK
             # is (god_name, use_aspect) since the aspect feature.
             await self._db.execute("""
                 INSERT INTO god_pool (god_name, use_aspect, added_by,
-                                      vote_count)
-                VALUES (?, 0, ?, 1)
+                                      added_by_uuid, vote_count)
+                VALUES (?, 0, ?, ?, 1)
                 ON CONFLICT(god_name, use_aspect) DO UPDATE SET
                     vote_count = vote_count + 1
-            """, (god_name, display_name))
+            """, (god_name, display_name, user_uuid))
             await self._db.execute("""
                 INSERT INTO god_pool_votes
-                    (voter_username, vote_date, god_name)
-                VALUES (?, ?, ?)
-                ON CONFLICT(voter_username, vote_date) DO NOTHING
-            """, (voter_key, today_iso, god_name))
+                    (user_uuid, vote_date, god_name, voter_username)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(user_uuid, vote_date) DO NOTHING
+            """, (user_uuid, today_iso, god_name, display_name))
             await self._db.execute("""
                 UPDATE pending_yt_nominations
                    SET status = 'approved',
@@ -2179,20 +2080,98 @@ class PublicWebServer:
         return web.json_response({"ok": True, "action": "deleted"},
                                  headers=self._NO_STORE)
 
-    async def _ensure_links_schema(self):
-        """Create the account_links table on first use (once per
-        process — youtube_rewards.on_ready also ensures it, but the
-        webserver must not depend on that plugin being enabled)."""
-        if not self._links_schema_done and self._db is not None:
-            await _links.ensure_schema(self._db)
-            self._links_schema_done = True
-
     def _session_identity(self, request: web.Request) -> Optional[dict]:
         """Verified session payload, or None (= logged out)."""
         if not self._login_enabled:
             return None
         return _ws.verify(request.cookies.get(_ws.SESSION_COOKIE),
                           WEB_SESSION_SECRET)
+
+    async def _ident_user_uuid(self, ident: Optional[dict]) -> Optional[str]:
+        """The viewer's user_uuid (core/users.py) for a verified session
+        payload. Cookies issued since the identity work carry it as
+        "sub"; older cookies are resolved from the provider id (creating
+        the user on first sight) and cached for the process."""
+        if not ident:
+            return None
+        sub = ident.get("sub")
+        db = self._db
+        if db is None:
+            return sub or None
+        try:
+            if sub:
+                live = await _users.resolve(db, sub)
+                if live:
+                    return live
+            prov = _ws.provider(ident)
+            uid = str(ident.get("uid") or "")
+            if not uid:
+                return None
+            key = (prov, uid)
+            hit = self._ident_uuid_cache.get(key)
+            if hit:
+                return await _users.resolve(db, hit) or hit
+            if prov == "yt":
+                user_uuid = await _users.get_or_create_youtube(
+                    db, uid, ident.get("name"), ident.get("img"))
+            else:
+                user_uuid = await _users.get_or_create_twitch(
+                    db, uid, ident.get("login", ""), ident.get("name"),
+                    ident.get("img"))
+            self._ident_uuid_cache[key] = user_uuid
+            return user_uuid
+        except Exception as e:
+            print(f"[PublicWebServer] session uuid lookup failed: {e}")
+            return None
+
+    async def _session_user(self, request: web.Request):
+        """(ident, user_uuid) for the request; (None, None) when logged
+        out, (ident, None) when the identity could not be resolved."""
+        ident = self._session_identity(request)
+        if ident is None:
+            return None, None
+        return ident, await self._ident_user_uuid(ident)
+
+    async def _identity_map(self, user_uuids) -> Dict[str, Dict[str, str]]:
+        """{user_uuid: {"login": twitch login or None,
+                        "channel_id": youtube channel or None}}
+        in one query, for handlers that decorate many rows."""
+        ids = [u for u in set(user_uuids) if u]
+        out: Dict[str, Dict[str, str]] = {u: {"login": None, "channel_id": None}
+                                          for u in ids}
+        if not ids or self._db is None:
+            return out
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            ph = ",".join("?" for _ in chunk)
+            async with self._db.execute(
+                    f"SELECT user_uuid, provider, provider_id, login "
+                    f"FROM user_identities WHERE user_uuid IN ({ph}) "
+                    f"ORDER BY linked_at", tuple(chunk)) as cur:
+                async for uu, prov, pid, login in cur:
+                    slot = out.setdefault(uu, {"login": None, "channel_id": None})
+                    if prov == "twitch" and login and not slot["login"]:
+                        slot["login"] = login
+                    elif prov == "youtube" and not slot["channel_id"]:
+                        slot["channel_id"] = pid
+        return out
+
+    @staticmethod
+    def _public_ref(slot: Dict[str, str], user_uuid: str):
+        """(platform, id, url) for a leaderboard/search row."""
+        if slot.get("login"):
+            return "twitch", slot["login"], "/twitch/" + slot["login"]
+        if slot.get("channel_id"):
+            return "youtube", slot["channel_id"], "/yt/" + slot["channel_id"]
+        return "user", user_uuid, "/me"
+
+    async def _excluded_uuids(self) -> Set[str]:
+        if self._db is None:
+            return set()
+        try:
+            return await _users.excluded_uuids(self._db, EXCLUDED_USERS_LOWER)
+        except Exception:
+            return set()
 
     @staticmethod
     def _client_ip(request: web.Request) -> str:
@@ -2339,10 +2318,18 @@ class PublicWebServer:
         if not data:
             return web.HTTPFound("/?login=failed")
         u = data[0]
+        user_uuid = None
+        if self._db is not None:
+            try:
+                user_uuid = await _users.get_or_create_twitch(
+                    self._db, u.get("id", ""), u.get("login", ""),
+                    u.get("display_name", ""), u.get("profile_image_url", ""))
+            except Exception as e:
+                print(f"[PublicWebServer] user upsert failed: {e}")
         token = _ws.issue(
             u.get("id", ""), u.get("login", ""),
             u.get("display_name", ""), u.get("profile_image_url", ""),
-            secret=WEB_SESSION_SECRET)
+            secret=WEB_SESSION_SECRET, user_uuid=user_uuid)
         nxt = (request.cookies.get("hm_next") or "").strip()
         if not (nxt.startswith("/") and not nxt.startswith("//")):
             nxt = f"/twitch/{u.get('login', '')}"
@@ -2376,10 +2363,11 @@ class PublicWebServer:
             return web.Response(status=429, text="Too many requests.")
 
         link_login = ""
+        link_uuid = ""
         if request.query.get("link") == "1":
-            ident = self._session_identity(request)
+            ident, link_uuid = await self._session_user(request)
             if ident is None or _ws.provider(ident) != "tw" \
-                    or not ident.get("login"):
+                    or not ident.get("login") or not link_uuid:
                 return web.Response(
                     status=403,
                     text="Log in with Twitch first, then link YouTube.")
@@ -2408,7 +2396,7 @@ class PublicWebServer:
         if link_login:
             now = int(time.time())
             link_token = _ws.sign(
-                {"login": link_login, "mode": "link",
+                {"login": link_login, "sub": link_uuid, "mode": "link",
                  "iat": now, "exp": now + 600},
                 WEB_SESSION_SECRET)
             resp.set_cookie(
@@ -2493,54 +2481,172 @@ class PublicWebServer:
             WEB_SESSION_SECRET)
 
         if link_claim and link_claim.get("mode") == "link" \
-                and link_claim.get("login"):
+                and link_claim.get("sub"):
             # ── link mode: both identities proven ──
-            login = link_claim["login"]
+            # Nothing to combine (channel unknown, or already on this
+            # account) -> link right away. A standalone YouTube account
+            # with its own data -> preview page, then POST confirm
+            # (USER_IDENTITY_PLAN.md rule 6).
+            login = link_claim.get("login") or ""
+            survivor = link_claim["sub"]
             outcome = "failed"
+            needs_confirm = False
             if self._db is not None:
                 try:
-                    await self._ensure_links_schema()
-                    result = await _links.link_and_migrate(
-                        self._db, channel_id, login)
-                    if result.get("ok"):
-                        outcome = ("already" if result.get("already")
-                                   else "ok")
-                        moved = result.get("migrated") or []
-                        print(f"[PublicWebServer] LINKED yt:{channel_id}"
-                              f" -> twitch:{login} "
-                              f"({len(moved)} holdings migrated)")
+                    owner = await _users.find_youtube(self._db, channel_id)
+                    if owner is not None and owner != survivor:
+                        needs_confirm = True
                     else:
-                        outcome = result.get("reason", "failed")
+                        result = await _users.link_youtube(
+                            self._db, survivor, channel_id, title, thumb)
+                        outcome = ("already" if result.get("already")
+                                   else "ok") if result.get("ok") \
+                            else result.get("reason", "failed")
+                        if result.get("ok"):
+                            print(f"[PublicWebServer] LINKED yt:{channel_id}"
+                                  f" -> {survivor} ({login})")
                 except Exception as e:
-                    print(f"[PublicWebServer] link_and_migrate "
-                          f"failed: {e}")
-            resp = web.HTTPFound(
-                f"/twitch/{login}?linked={outcome}")
+                    print(f"[PublicWebServer] link failed: {e}")
+            if needs_confirm:
+                now = int(time.time())
+                pending = _ws.sign(
+                    {"sub": survivor, "channel_id": channel_id,
+                     "title": title, "thumb": thumb, "mode": "pending_link",
+                     "iat": now, "exp": now + 600}, WEB_SESSION_SECRET)
+                resp = web.HTTPFound("/link/confirm")
+                resp.set_cookie(
+                    self.PENDING_LINK_COOKIE, pending, max_age=600,
+                    httponly=True, secure=self._cookie_secure,
+                    samesite="Lax", path="/")
+            else:
+                resp = web.HTTPFound(f"/twitch/{login}?linked={outcome}")
             resp.del_cookie(self.GOOGLE_LINK_COOKIE, path="/")
             resp.del_cookie(_ws.OAUTH_STATE_COOKIE, path="/")
             return resp
 
         # ── login mode: issue a YouTube session ──
-        # If the channel already merged into a Twitch account, land
-        # on the portfolio that actually holds the shares (the /yt/
-        # page is empty after migration). The session stays yt-only:
-        # viewing rights, never the Twitch account's trading rights.
+        # The session is the PERSON, not the platform: a channel that
+        # was linked to a Twitch account resolves to that same user,
+        # so their hats, trades and bingo cards are all there.
+        user_uuid = None
         dest = f"/yt/{channel_id}"
         if self._db is not None:
             try:
-                await self._ensure_links_schema()
-                linked = await _links.get_link(self._db, channel_id)
-                if linked:
-                    dest = f"/twitch/{linked}"
+                user_uuid = await _users.get_or_create_youtube(
+                    self._db, channel_id, title, thumb)
+                tw_login = await _users.twitch_login_of(self._db, user_uuid)
+                if tw_login:
+                    dest = f"/twitch/{tw_login}"
             except Exception as e:
-                print(f"[PublicWebServer] link lookup failed: {e}")
+                print(f"[PublicWebServer] yt user upsert failed: {e}")
         token = _ws.issue_youtube(
-            channel_id, title, thumb, secret=WEB_SESSION_SECRET)
+            channel_id, title, thumb, secret=WEB_SESSION_SECRET,
+            user_uuid=user_uuid)
         resp = web.HTTPFound(dest)
         self._set_session_cookie(resp, token)
         resp.del_cookie(_ws.OAUTH_STATE_COOKIE, path="/")
         print(f"[PublicWebServer] website login (yt): {channel_id} "
               f"({title}) -> {dest}")
+        return resp
+
+    # ── account link: preview + confirm ─────────────────────────────
+    PENDING_LINK_COOKIE = "hatmas_pending_link"
+
+    def _pending_link(self, request: web.Request) -> Optional[dict]:
+        claim = _ws.verify(request.cookies.get(self.PENDING_LINK_COOKIE),
+                           WEB_SESSION_SECRET)
+        if not claim or claim.get("mode") != "pending_link":
+            return None
+        return claim
+
+    async def _link_side(self, user_uuid: str) -> Dict[str, Any]:
+        """What a merge would move: display name, positions, balance."""
+        user = await _users.get_user(self._db, user_uuid) or {}
+        holdings = []
+        async with self._db.execute(
+                "SELECT god_name, shares FROM portfolios "
+                "WHERE user_uuid = ? AND shares > 0.001 ORDER BY shares DESC",
+                (user_uuid,)) as cur:
+            async for god, shares in cur:
+                holdings.append({"god": god, "shares": round(float(shares), 3)})
+        balance = None
+        eco = self.economy
+        if eco is not None and getattr(eco, "_connected", False):
+            try:
+                balance = await eco._get_balance(user_uuid)
+            except Exception:
+                balance = None
+        return {"user_uuid": user_uuid,
+                "display_name": user.get("display_name"),
+                "holdings": holdings, "balance": balance}
+
+    async def _handle_link_page(self, request: web.Request):
+        return web.FileResponse(PUBLIC_DIR / "link.html",
+                                headers={"Cache-Control": "no-cache"})
+
+    async def _handle_api_link_preview(self, request: web.Request):
+        """GET /api/link/preview - both sides of the pending link."""
+        ident, survivor = await self._session_user(request)
+        claim = self._pending_link(request)
+        if ident is None or not survivor:
+            return web.json_response({"error": "not_logged_in"}, status=401,
+                                     headers=self._NO_STORE)
+        if claim is None or claim.get("sub") != survivor:
+            return web.json_response({"error": "no_pending_link"}, status=404,
+                                     headers=self._NO_STORE)
+        if self._db is None:
+            return web.json_response({"error": "db_unavailable"}, status=503,
+                                     headers=self._NO_STORE)
+        owner = await _users.find_youtube(self._db, claim["channel_id"])
+        if owner is None or owner == survivor:
+            # nothing to merge after all -> link now
+            await _users.link_youtube(self._db, survivor, claim["channel_id"],
+                                      claim.get("title"), claim.get("thumb"))
+            return web.json_response({"done": True, "merge": False},
+                                     headers=self._NO_STORE)
+        return web.json_response({
+            "done": False, "merge": True,
+            "channel_id": claim["channel_id"],
+            "channel_title": claim.get("title"),
+            "twitch": await self._link_side(survivor),
+            "youtube": await self._link_side(owner),
+        }, headers=self._NO_STORE)
+
+    async def _handle_api_link_confirm(self, request: web.Request):
+        """POST /api/link/confirm - perform the merge."""
+        ident, survivor = await self._session_user(request)
+        claim = self._pending_link(request)
+        if ident is None or not survivor:
+            return web.json_response({"ok": False, "error": "not_logged_in"},
+                                     status=401, headers=self._NO_STORE)
+        if not self._origin_ok(request):
+            return web.json_response({"ok": False, "error": "Bad origin."},
+                                     status=403, headers=self._NO_STORE)
+        if claim is None or claim.get("sub") != survivor:
+            return web.json_response({"ok": False, "error": "no_pending_link"},
+                                     status=404, headers=self._NO_STORE)
+        if self._db is None:
+            return web.json_response({"ok": False, "error": "db_unavailable"},
+                                     status=503, headers=self._NO_STORE)
+        try:
+            result = await _users.link_youtube(
+                self._db, survivor, claim["channel_id"], claim.get("title"),
+                claim.get("thumb"), initiated_by="user")
+        except Exception as e:
+            print(f"[PublicWebServer] link confirm failed: {e}")
+            return web.json_response({"ok": False, "error": "merge_failed"},
+                                     status=500, headers=self._NO_STORE)
+        login = await _users.twitch_login_of(self._db, survivor)
+        resp = web.json_response({
+            "ok": bool(result.get("ok")),
+            "reason": result.get("reason"),
+            "merged": bool(result.get("merged")),
+            "next": f"/twitch/{login}?linked=ok" if login else "/me",
+        }, status=200 if result.get("ok") else 409, headers=self._NO_STORE)
+        resp.del_cookie(self.PENDING_LINK_COOKIE, path="/")
+        if result.get("ok"):
+            print(f"[PublicWebServer] LINKED (confirmed) yt:{claim['channel_id']}"
+                  f" -> {survivor}")
         return resp
 
     async def _handle_auth_logout(self, request: web.Request):
@@ -2563,28 +2669,25 @@ class PublicWebServer:
                  "market_open": self._market_open()},
                 status=401, headers=self._NO_STORE)
         prov = _ws.provider(ident)
+        user_uuid = await self._ident_user_uuid(ident)
         # Link state drives the auth chip: Twitch sessions learn
         # whether a YouTube channel is linked ("YT Linked" badge vs
         # the "Link YouTube" action); YouTube sessions learn which
-        # Twitch login their channel merged into, so the chip can
-        # point at the portfolio that actually holds their shares.
+        # Twitch login their person has, so the chip can point at the
+        # portfolio URL.
         yt_linked = False
         yt_linked_to = None
-        if self._db is not None:
+        if self._db is not None and user_uuid:
             try:
-                if (prov == "tw" and self._google_login_enabled
-                        and ident.get("login")):
-                    await self._ensure_links_schema()
-                    yt_linked = bool(await _links.get_links_for_twitch(
-                        self._db, ident["login"]))
-                elif prov == "yt" and ident.get("uid"):
-                    await self._ensure_links_schema()
-                    yt_linked_to = await _links.get_link(
-                        self._db, ident["uid"])
+                slot = (await self._identity_map([user_uuid])).get(user_uuid, {})
+                yt_linked = bool(slot.get("channel_id"))
+                if prov == "yt":
+                    yt_linked_to = slot.get("login")
             except Exception as e:
                 print(f"[PublicWebServer] link lookup failed: {e}")
         return web.json_response({
             "logged_in": True,
+            "user_uuid": user_uuid,
             "uid": ident.get("uid"),
             "login": ident.get("login"),
             "name": ident.get("name"),
@@ -2648,43 +2751,21 @@ class PublicWebServer:
             limit = 50
 
         prov = _ws.provider(ident)
-        if prov == "yt":
-            return await self._me_profile_youtube(ident, limit)
+        user_uuid = await self._ident_user_uuid(ident)
+        if not user_uuid:
+            return web.json_response({"error": "no_user"},
+                                     status=503, headers=self._NO_STORE)
+        slot = (await self._identity_map([user_uuid])).get(user_uuid, {})
+        login = (slot.get("login") or "").lower()
+        # Every Twitch login this person has had (renames keep old
+        # identity rows around) - for the login-keyed JSON files.
+        logins = set()
+        for i in await _users.identities(self._db, user_uuid):
+            if i.get("provider") == "twitch" and i.get("login"):
+                logins.add(i["login"].lower())
 
-        login = (ident.get("login") or "").lower()
-        if not login:
-            return web.json_response({"error": "no_login"},
-                                     status=403, headers=self._NO_STORE)
-
-        # Holdings — same join as the public portfolio page.
-        holdings: List[Dict[str, Any]] = []
-        try:
-            async with self._db.execute("""
-                SELECT h.god_name, h.shares, h.avg_cost, p.price
-                  FROM portfolios h
-                  LEFT JOIN god_prices p ON p.god_name = h.god_name
-                 WHERE LOWER(h.username) = ? AND h.shares > 0.001
-                 ORDER BY h.god_name
-            """, (login,)) as cur:
-                async for r in cur:
-                    god, shares, avg_cost, price = r
-                    price = (float(price) if price is not None
-                             else float(ECONOMY_STARTING_PRICE))
-                    value = shares * price
-                    cost_basis = shares * avg_cost
-                    pl = value - cost_basis
-                    holdings.append({
-                        "god": god,
-                        "shares": round(float(shares), 4),
-                        "avg_cost": round(float(avg_cost), 2),
-                        "price": round(price, 2),
-                        "value": round(value, 2),
-                        "pl": round(pl, 2),
-                        "pl_pct": round(pl / cost_basis * 100.0, 2)
-                                  if cost_basis > 0 else 0.0,
-                    })
-        except Exception as e:
-            print(f"[PublicWebServer] profile holdings failed: {e}")
+        payload = await self._portfolio_payload(user_uuid)
+        holdings = payload["holdings"]
 
         # Full transaction history (paginated by ?limit=, cap 200).
         transactions: List[Dict[str, Any]] = []
@@ -2693,9 +2774,9 @@ class PublicWebServer:
                 SELECT god_name, type, shares, price, total, channel,
                        timestamp
                   FROM transactions
-                 WHERE LOWER(username) = ?
-                 ORDER BY timestamp DESC LIMIT ?
-            """, (login, limit)) as cur:
+                 WHERE user_uuid = ?
+                 ORDER BY timestamp DESC, id DESC LIMIT ?
+            """, (user_uuid, limit)) as cur:
                 async for r in cur:
                     transactions.append({
                         "god": r[0], "type": r[1],
@@ -2715,8 +2796,8 @@ class PublicWebServer:
             async with self._db.execute("""
                 SELECT type, COUNT(*), COALESCE(SUM(total), 0)
                   FROM transactions
-                 WHERE LOWER(username) = ? GROUP BY type
-            """, (login,)) as cur:
+                 WHERE user_uuid = ? GROUP BY type
+            """, (user_uuid,)) as cur:
                 async for ttype, count, total in cur:
                     if ttype == "buy":
                         stats["buys"] = count
@@ -2724,28 +2805,24 @@ class PublicWebServer:
                         stats["sells"] = count
                     elif ttype == "dividend":
                         stats["dividends_earned"] = round(float(total), 2)
-                    elif ttype == "free_share":
-                        stats["free_shares"] = count
+                    elif ttype in ("free_share", "comment_share"):
+                        stats["free_shares"] += count
             stats["trades"] = stats["buys"] + stats["sells"]
         except Exception as e:
             print(f"[PublicWebServer] profile stats failed: {e}")
 
-        total_value = sum(h["value"] for h in holdings)
-        total_cost = sum(h["shares"] * h["avg_cost"] for h in holdings)
+        total_value = payload["total_value"]
+        total_cost = payload["total_cost"]
+        rank, total_traders = payload["rank"], payload["total_traders"]
 
-        rank, total_traders = None, None
-        try:
-            rank, total_traders = await self._portfolio_rank(
-                "twitch", login)
-        except Exception as e:
-            print(f"[PublicWebServer] profile rank failed: {e}")
-
-        # Hats balance — live MixItUp read; null when it's down.
+        # Hats balance — live MixItUp read; null when it's down or the
+        # person has no Twitch login yet (YouTube-only, until the
+        # local wallet lands).
         balance = None
         eco = self.economy
         if eco is not None and getattr(eco, "_connected", False):
             try:
-                balance = await eco._get_balance(login)
+                balance = await eco._get_balance(user_uuid)
             except Exception as e:
                 print(f"[PublicWebServer] profile balance failed: {e}")
 
@@ -2756,7 +2833,7 @@ class PublicWebServer:
             for item in reversed(raw_history):
                 if not isinstance(item, dict):
                     continue
-                if (item.get("requester") or "").lower() != login:
+                if (item.get("requester") or "").lower() not in logins:
                     continue
                 god_requests.append({
                     "god": item.get("god"),
@@ -2774,7 +2851,7 @@ class PublicWebServer:
             for idx, item in enumerate(raw_queue):
                 if not isinstance(item, dict):
                     continue
-                if (item.get("requester") or "").lower() != login:
+                if (item.get("requester") or "").lower() not in logins:
                     continue
                 pending_requests.append({
                     "position": idx + 1,
@@ -2789,9 +2866,9 @@ class PublicWebServer:
             async with self._db.execute("""
                 SELECT god_name, vote_date
                   FROM god_pool_votes
-                 WHERE LOWER(voter_username) = ?
+                 WHERE user_uuid = ?
                  ORDER BY vote_date DESC LIMIT 30
-            """, (login,)) as cur:
+            """, (user_uuid,)) as cur:
                 async for god, date in cur:
                     pool_votes.append({"god": god, "date": date})
         except Exception:
@@ -2804,9 +2881,9 @@ class PublicWebServer:
                 SELECT god, amount_cents, currency, status,
                        created_at, played_at
                   FROM priority_payments
-                 WHERE LOWER(twitch_username) = ?
+                 WHERE user_uuid = ?
                  ORDER BY created_at DESC LIMIT 20
-            """, (login,)) as cur:
+            """, (user_uuid,)) as cur:
                 async for r in cur:
                     priority_payments.append({
                         "god": r[0], "amount_cents": r[1],
@@ -2817,8 +2894,11 @@ class PublicWebServer:
             pass
 
         return web.json_response({
-            "platform": "twitch",
-            "login": login,
+            "platform": "twitch" if login else "youtube",
+            "user_uuid": user_uuid,
+            "login": login or None,
+            "yt_channel_id": slot.get("channel_id"),
+            "yt_linked_to": login if prov == "yt" and login else None,
             "name": ident.get("name"),
             "img": ident.get("img"),
             "balance": balance,
@@ -2835,98 +2915,6 @@ class PublicWebServer:
             "god_requests_pending": pending_requests,
             "pool_votes": pool_votes,
             "priority_payments": priority_payments,
-        }, headers=self._NO_STORE)
-
-    async def _me_profile_youtube(self, ident: dict, limit: int):
-        """YouTube-session profile: holdings + share grants keyed on
-        the channel id. No hats, no requests — those are Twitch-login
-        surfaces (yt sessions carry an empty login by design)."""
-        channel_id = ident.get("uid") or ""
-        holdings: List[Dict[str, Any]] = []
-        try:
-            async with self._db.execute("""
-                SELECT h.god_name, h.shares, h.avg_cost, p.price
-                  FROM youtube_holdings h
-                  LEFT JOIN god_prices p ON p.god_name = h.god_name
-                 WHERE h.yt_channel_id = ? AND h.shares > 0.001
-                 ORDER BY h.god_name
-            """, (channel_id,)) as cur:
-                async for r in cur:
-                    god, shares, avg_cost, price = r
-                    price = (float(price) if price is not None
-                             else float(ECONOMY_STARTING_PRICE))
-                    value = shares * price
-                    cost_basis = shares * (avg_cost or 0)
-                    holdings.append({
-                        "god": god,
-                        "shares": round(float(shares), 4),
-                        "avg_cost": round(float(avg_cost or 0), 2),
-                        "price": round(price, 2),
-                        "value": round(value, 2),
-                        "pl": round(value - cost_basis, 2),
-                        "pl_pct": round((value - cost_basis)
-                                        / cost_basis * 100.0, 2)
-                                  if cost_basis > 0 else 0.0,
-                    })
-        except Exception as e:
-            print(f"[PublicWebServer] yt profile holdings failed: {e}")
-
-        transactions: List[Dict[str, Any]] = []
-        try:
-            async with self._db.execute("""
-                SELECT god_name, type, shares, price, timestamp
-                  FROM youtube_transactions
-                 WHERE yt_channel_id = ?
-                 ORDER BY timestamp DESC LIMIT ?
-            """, (channel_id, limit)) as cur:
-                async for r in cur:
-                    transactions.append({
-                        "god": r[0], "type": r[1],
-                        "shares": round(float(r[2] or 0), 4),
-                        "price": round(float(r[3] or 0), 2),
-                        "total": 0.0, "channel": "youtube",
-                        "timestamp": r[4],
-                    })
-        except Exception as e:
-            print(f"[PublicWebServer] yt profile transactions failed: {e}")
-
-        linked_to = None
-        try:
-            await self._ensure_links_schema()
-            linked_to = await _links.get_link(self._db, channel_id)
-        except Exception:
-            pass
-
-        total_value = sum(h["value"] for h in holdings)
-        total_cost = sum(h["shares"] * h["avg_cost"] for h in holdings)
-        rank, total_traders = None, None
-        try:
-            rank, total_traders = await self._portfolio_rank(
-                "youtube", channel_id)
-        except Exception:
-            pass
-        return web.json_response({
-            "platform": "youtube",
-            "login": None,
-            "name": ident.get("name"),
-            "img": ident.get("img"),
-            "yt_linked_to": linked_to,
-            "balance": None,
-            "market_open": False,
-            "holdings": holdings,
-            "total_value": round(total_value, 2),
-            "total_cost": round(total_cost, 2),
-            "total_pl": round(total_value - total_cost, 2),
-            "rank": rank,
-            "total_traders": total_traders,
-            "transactions": transactions,
-            "stats": {"trades": 0, "buys": 0, "sells": 0,
-                      "dividends_earned": 0.0,
-                      "free_shares": len(transactions)},
-            "god_requests": [],
-            "god_requests_pending": [],
-            "pool_votes": [],
-            "priority_payments": [],
         }, headers=self._NO_STORE)
 
     async def _handle_api_live(self, request: web.Request):
@@ -3012,13 +3000,15 @@ class PublicWebServer:
                 headers=self._NO_STORE)
         balance = None
         eco = self.economy
-        if eco is not None and getattr(eco, "_connected", False):
+        user_uuid = await self._ident_user_uuid(ident)
+        if eco is not None and getattr(eco, "_connected", False) and user_uuid:
             try:
-                balance = await eco._get_balance(ident.get("login", ""))
+                balance = await eco._get_balance(user_uuid)
             except Exception as e:
                 print(f"[PublicWebServer] balance read error: {e}")
         return web.json_response({
             "login": ident.get("login"),
+            "user_uuid": user_uuid,
             "balance": balance,
             "market_open": self._market_open(),
         }, headers=self._NO_STORE)
@@ -3042,7 +3032,8 @@ class PublicWebServer:
         god_name = eco._resolve_god_name(god_input) or god_input
         shares, avg_cost = 0.0, 0.0
         try:
-            h = await eco._get_holding(ident.get("login", ""), god_name)
+            user_uuid = await self._ident_user_uuid(ident)
+            h = await eco._get_holding(user_uuid, god_name) if user_uuid else None
             if h:
                 shares = round(float(h["shares"]), 4)
                 avg_cost = round(float(h.get("avg_cost", 0)), 2)
@@ -3065,10 +3056,11 @@ class PublicWebServer:
                 headers=self._NO_STORE)
         hidden = False
         eco = self.economy
-        if eco is not None and getattr(eco, "_db", None) is not None:
+        user_uuid = await self._ident_user_uuid(ident)
+        if eco is not None and getattr(eco, "_db", None) is not None \
+                and user_uuid:
             try:
-                hidden = await eco.get_leaderboard_hidden(
-                    ident.get("login", ""))
+                hidden = await eco.get_leaderboard_hidden(user_uuid)
             except Exception as e:
                 print(f"[PublicWebServer] settings read error: {e}")
         return web.json_response(
@@ -3089,13 +3081,11 @@ class PublicWebServer:
             return web.json_response(
                 {"ok": False, "error": "Log in with Twitch first."},
                 status=401, headers=self._NO_STORE)
-        if _ws.provider(ident) != "tw" or not ident.get("login"):
-            # leaderboard_opt_out lives on the Twitch portfolio row —
-            # a YouTube session has no login key to write to.
+        user_uuid = await self._ident_user_uuid(ident)
+        if not user_uuid:
             return web.json_response(
-                {"ok": False, "error": "This setting needs a Twitch "
-                                       "login."},
-                status=403, headers=self._NO_STORE)
+                {"ok": False, "error": "Your account is still loading."},
+                status=503, headers=self._NO_STORE)
         if not self._origin_ok(request):
             return web.json_response(
                 {"ok": False, "error": "Bad origin."},
@@ -3121,8 +3111,7 @@ class PublicWebServer:
                 {"ok": False, "error": "Economy offline - try later."},
                 status=503, headers=self._NO_STORE)
         try:
-            await eco.set_leaderboard_hidden(ident.get("login", ""),
-                                             hidden)
+            await eco.set_leaderboard_hidden(user_uuid, hidden)
         except Exception as e:
             print(f"[PublicWebServer] visibility write error: {e}")
             return web.json_response(
@@ -3152,25 +3141,21 @@ class PublicWebServer:
         if not self._trading_allowed():
             return err(503, "Trading is disabled.")
         # 2. session
-        ident = self._session_identity(request)
+        ident, user_uuid = await self._session_user(request)
         if ident is None:
-            return err(401, "Log in with Twitch first.")
-        if _ws.provider(ident) != "tw":
-            # YouTube sessions have no Twitch login and no MixItUp
-            # balance — shares and hats are keyed on the Twitch side.
-            return err(403, "Trading needs a Twitch login. Log in "
-                            "with Twitch (you can link your YouTube "
-                            "account from there).")
+            return err(401, "Log in first.")
+        if not user_uuid:
+            return err(503, "Your account is still loading - try again.")
         login = (ident.get("login") or "").lower()
         # 3. origin allowlist (CSRF backstop)
         if not self._origin_ok(request):
             return err(403, "Bad origin.")
         # 4. excluded bot accounts
-        if not login or login in EXCLUDED_USERS_LOWER:
+        if login and login in EXCLUDED_USERS_LOWER:
             return err(403, "This account cannot trade.")
         # 5. per-user cooldown (mirrors chat)
         now = time.time()
-        elapsed = now - self._web_trade_cooldowns.get(login, 0)
+        elapsed = now - self._web_trade_cooldowns.get(user_uuid, 0)
         if elapsed < WEB_TRADE_COOLDOWN:
             retry = max(1, int(WEB_TRADE_COOLDOWN - elapsed) + 1)
             return err(429, f"Trade cooldown: {retry}s",
@@ -3201,17 +3186,17 @@ class PublicWebServer:
                             "is offline.")
 
         # 8. per-user lock serializes balance-check → deduct
-        async with self._trade_locks[login]:
+        async with self._trade_locks[user_uuid]:
             try:
                 if isinstance(amount_raw, str) \
                         and amount_raw.strip().lower() == "all":
                     if action == "buy":
-                        balance = await eco._get_balance(login)
+                        balance = await eco._get_balance(user_uuid)
                         if not balance or balance <= 0:
                             return err(400, "You have no hats.")
                         hat_amount = int(balance)
                     else:
-                        holding = await eco._get_holding(login, god_name)
+                        holding = await eco._get_holding(user_uuid, god_name)
                         if not holding or holding["shares"] <= 0:
                             return err(400, f"You do not own any "
                                             f"{god_name} shares.")
@@ -3231,18 +3216,18 @@ class PublicWebServer:
 
             if action == "buy":
                 result = await eco.execute_buy(
-                    login, god_name, hat_amount, channel="web")
+                    user_uuid, god_name, hat_amount, channel="web")
             else:
                 result = await eco.execute_sell(
-                    login, god_name, hat_amount, channel="web")
+                    user_uuid, god_name, hat_amount, channel="web")
 
         if not result.get("success"):
             return err(400, result.get("error", "Trade failed."))
 
-        self._web_trade_cooldowns[login] = time.time()
+        self._web_trade_cooldowns[user_uuid] = time.time()
         balance = None
         try:
-            balance = await eco._get_balance(login)
+            balance = await eco._get_balance(user_uuid)
         except Exception:
             pass
         # Remaining position in this god after the trade, so the UI can
@@ -3250,11 +3235,11 @@ class PublicWebServer:
         # a failure here must not mask a completed trade.
         holding_shares = None
         try:
-            h = await eco._get_holding(login, god_name)
+            h = await eco._get_holding(user_uuid, god_name)
             holding_shares = round(float(h["shares"]), 4) if h else 0.0
         except Exception:
             pass
-        print(f"[PublicWebServer] WEB TRADE: {login} {action} "
+        print(f"[PublicWebServer] WEB TRADE: {login or user_uuid} {action} "
               f"{result.get('god_name', god_name)} for {hat_amount} hats")
         return web.json_response({
             "ok": True,
@@ -3286,19 +3271,17 @@ class PublicWebServer:
                 headers={**self._NO_STORE, **extra_headers})
 
         # 1. session
-        ident = self._session_identity(request)
+        ident, user_uuid = await self._session_user(request)
         if ident is None:
-            return err(401, "Log in with Twitch first.")
-        if _ws.provider(ident) != "tw":
-            # Nominations share chat's 1/day cap, keyed on the Twitch
-            # login — a YouTube session has none.
-            return err(403, "Nominating needs a Twitch login.")
+            return err(401, "Log in first.")
+        if not user_uuid:
+            return err(503, "Your account is still loading - try again.")
         login = (ident.get("login") or "").lower()
         # 2. origin allowlist (CSRF backstop)
         if not self._origin_ok(request):
             return err(403, "Bad origin.")
         # 3. excluded bot accounts
-        if not login or login in EXCLUDED_USERS_LOWER:
+        if login and login in EXCLUDED_USERS_LOWER:
             return err(403, "This account cannot nominate.")
         # 4. per-IP bucket (shared with /api/trade + /auth/*)
         if not self._ip_rate_ok(request):
@@ -3328,8 +3311,9 @@ class PublicWebServer:
         is_broadcaster = bool(channel) and login == channel
 
         result = await god_pool.do_nominate(
-            login, god_input, is_broadcaster=is_broadcaster,
-            use_aspect=use_aspect)
+            user_uuid, god_input, is_broadcaster=is_broadcaster,
+            use_aspect=use_aspect,
+            display_name=ident.get("name") or login or None)
 
         if not result.get("ok"):
             reason = result.get("reason")
@@ -3345,7 +3329,7 @@ class PublicWebServer:
                                 f"today. Try again tomorrow.")
             return err(503, "Nominations are offline right now.")
 
-        print(f"[PublicWebServer] WEB NOMINATE: {login} -> "
+        print(f"[PublicWebServer] WEB NOMINATE: {login or user_uuid} -> "
               f"{display_god(result['god'], result['use_aspect'])} "
               f"({result['votes']} votes)")
         return web.json_response({
@@ -3924,34 +3908,25 @@ class PublicWebServer:
                 and not self._god_ws_clients):
             return
 
-        # YouTube portfolio clients: filter to only those channels that
-        # actually hold this god.
+        # Portfolio clients are keyed by the URL they opened (/yt/<id>
+        # or /twitch/<login>); find every identity of every holder.
         affected_yt_channels: Set[str] = set()
-        if self._ws_clients:
-            try:
-                async with self._db.execute("""
-                    SELECT DISTINCT yt_channel_id
-                      FROM youtube_holdings
-                     WHERE god_name = ? AND shares > 0.001
-                """, (god_name,)) as cur:
-                    async for r in cur:
-                        affected_yt_channels.add(r[0])
-            except Exception as e:
-                print(f"[PublicWebServer] holder lookup failed (yt): {e}")
-
-        # Twitch portfolio clients: same filter against the Twitch table.
         affected_twitch_users: Set[str] = set()
-        if self._twitch_ws_clients:
+        if self._ws_clients or self._twitch_ws_clients:
             try:
                 async with self._db.execute("""
-                    SELECT DISTINCT LOWER(username)
-                      FROM portfolios
-                     WHERE god_name = ? AND shares > 0.001
+                    SELECT DISTINCT i.provider, i.provider_id, i.login
+                      FROM portfolios p
+                      JOIN user_identities i ON i.user_uuid = p.user_uuid
+                     WHERE p.god_name = ? AND p.shares > 0.001
                 """, (god_name,)) as cur:
-                    async for r in cur:
-                        affected_twitch_users.add(r[0])
+                    async for prov, pid, login in cur:
+                        if prov == "youtube":
+                            affected_yt_channels.add(pid)
+                        elif login:
+                            affected_twitch_users.add(login.lower())
             except Exception as e:
-                print(f"[PublicWebServer] holder lookup failed (twitch): {e}")
+                print(f"[PublicWebServer] holder lookup failed: {e}")
 
         msg = json.dumps({"event": event_name, "data": data})
         async with self._send_lock:

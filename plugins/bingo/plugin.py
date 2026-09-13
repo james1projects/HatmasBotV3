@@ -77,7 +77,7 @@ def render_card(card: dict, pool: List[dict], claimed: bool = False) -> dict:
     lines = winning_lines(marks)
     return {
         "id": int(card["id"]), "seq": int(card["seq"]), "price": int(card.get("price") or 0),
-        "login": card.get("login"), "display": card.get("display"),
+        "user_uuid": card.get("user_uuid"), "login": card.get("login"), "display": card.get("display"),
         "squares": [{"id": sid, "label": label_of(pool, sid), "marked": i in marks,
                      "free": sid == FREE} for i, sid in enumerate(card["squares"])],
         "to_bingo": int(card.get("to_bingo", 5)),
@@ -114,6 +114,11 @@ class BingoPlugin:
     async def on_ready(self):
         self.pool = load_pool(Path(_cfg("BINGO_POOL_FILE", config.DATA_DIR / "bingo" / "pool.json")))
         self.store = BingoStore(_cfg("BINGO_DB", config.DATA_DIR / "bingo.db"))
+        try:
+            from core import users as _users
+            _users.register_merge_hook(self._on_user_merge)
+        except Exception as e:
+            self._error(f"merge hook: {e}")
         if self.overlay_manager is not None:
             try:
                 self.overlay_manager.add_event_listener(self._on_overlay_event)
@@ -123,6 +128,9 @@ class BingoPlugin:
         print(f"[Bingo] ready: {len(self.pool)} squares in the pool, "
               f"{'round ' + str(r['id']) + ' open' if r else 'no open round'}, "
               f"toggle {'on' if self._enabled() else 'off'}")
+
+    async def _on_user_merge(self, absorbed: str, survivor: str) -> dict:
+        return self.store.repoint_user(absorbed, survivor) if self.store else {}
 
     async def cleanup(self):
         if self.store:
@@ -239,7 +247,8 @@ class BingoPlugin:
         lines = res["winners"]          # cards that just completed a line; they still have to claim
         out = {"ok": True, "round_id": r["id"], "event_id": event_id, "label": sq["label"],
                "source": source, "already": res["already"], "changed": len(res["changed"]),
-               "lines": [{"login": w["login"], "display": w["display"], "card_id": w["id"]} for w in lines],
+               "lines": [{"user_uuid": w["user_uuid"], "login": w["login"], "display": w["display"],
+                          "card_id": w["id"]} for w in lines],
                "summary": summary}
         await self._notify("bingo_call", {**summary, "call": {"event_id": event_id, "label": sq["label"],
                                                              "source": source, "already": res["already"]},
@@ -257,10 +266,10 @@ class BingoPlugin:
             await self._say(f"Bingo call: {sq['label']} ({len(res['changed'])} cards marked).{tail}")
         return out
 
-    async def claim_bingo(self, login: str, card_id: Any) -> dict:
+    async def claim_bingo(self, user_uuid: str, card_id: Any) -> dict:
         """The viewer pressed Bingo!. Re-check the line against the calls,
         pay the pot, close the round, announce. First valid claim wins."""
-        login = (login or "").lower().strip()
+        user_uuid = (user_uuid or "").strip()
         if not self._enabled() or not self.store:
             return {"ok": False, "error": "Bingo is off right now."}
         try:
@@ -271,22 +280,23 @@ class BingoPlugin:
             r = self.store.current_round()
             if not r:
                 last = self.store.last_round()
-                if last and last.get("winner_login"):
-                    who = "you" if last["winner_login"] == login else last.get("winner_name")
+                if last and last.get("winner_uuid"):
+                    who = "you" if last["winner_uuid"] == user_uuid else last.get("winner_name")
                     return {"ok": False, "error": f"The round is over: {who} already claimed it."}
                 return {"ok": False, "error": "No round is open."}
-            chk = self.store.check_claim(r["id"], card_id, login)
+            chk = self.store.check_claim(r["id"], card_id, user_uuid)
             if not chk["ok"]:
                 return chk
             card = chk["card"]
             summary = self.store.summary(r["id"])
             prize = summary["pot"]
             payout = await self._pay_winner(r, card, prize)
-            self.store.close_round(r["id"], winner={"login": card["login"], "display": card["display"],
-                                                    "card_id": card["id"]}, prize_paid=prize, prize_ok=payout)
+            self.store.close_round(r["id"], winner={"user_uuid": card["user_uuid"], "login": card["login"],
+                                                    "display": card["display"], "card_id": card["id"]},
+                                   prize_paid=prize, prize_ok=payout)
             summary = self.store.summary(r["id"])
-        winner = {"login": card["login"], "display": card["display"], "card_id": card["id"],
-                  "prize": prize, "paid": bool(payout), "line": list(chk["line"])}
+        winner = {"user_uuid": card["user_uuid"], "login": card["login"], "display": card["display"],
+                  "card_id": card["id"], "prize": prize, "paid": bool(payout), "line": list(chk["line"])}
         await self._notify("bingo_claim", {**summary, "winner": winner})
         paid = f"{prize} Hats paid out" if payout else f"{prize} Hats owed (balance service unavailable)"
         await self._say(f"BINGO! {card['display']} claimed it. {paid}. Next round opens when Hatmaster starts it.")
@@ -294,17 +304,18 @@ class BingoPlugin:
 
     # ── show my card on stream ────────────────────────────────────────
 
-    def on_stream(self, login: str) -> bool:
-        return bool(self.store and login and self.store.on_stream(login))
+    def on_stream(self, user_uuid: str) -> bool:
+        return bool(self.store and user_uuid and self.store.on_stream(user_uuid))
 
-    async def set_on_stream(self, login: str, on: bool) -> dict:
-        login = (login or "").lower().strip()
-        if not self.store or not login:
-            return {"ok": False, "error": "Log in with Twitch first."}
-        self.store.set_on_stream(login, bool(on))
+    async def set_on_stream(self, user_uuid: str, on: bool) -> dict:
+        user_uuid = (user_uuid or "").strip()
+        if not self.store or not user_uuid:
+            return {"ok": False, "error": "Log in first."}
+        self.store.set_on_stream(user_uuid, bool(on))
         r = self.current()
         if r:
-            await self._notify("bingo_prefs", {**self.store.summary(r["id"]), "login": login, "on_stream": bool(on)})
+            await self._notify("bingo_prefs", {**self.store.summary(r["id"]), "user_uuid": user_uuid,
+                                               "on_stream": bool(on)})
         return {"ok": True, "on_stream": bool(on)}
 
     def cards_on_stream(self) -> dict:
@@ -322,26 +333,26 @@ class BingoPlugin:
         if eco is None or not getattr(eco, "_connected", False) or prize <= 0:
             return False
         try:
-            return bool(await eco._adjust_balance(card["login"], int(prize)))
+            return bool(await eco._adjust_balance(card["user_uuid"], int(prize)))
         except Exception as e:
             self._error(f"payout: {e}")
             return False
 
     # ── cards ─────────────────────────────────────────────────────────
 
-    async def claim_card(self, login: str, display: str) -> dict:
+    async def claim_card(self, user_uuid: str, display: str, login: Optional[str] = None) -> dict:
         """Free card first, then bought ones at rising prices (Hats via
         the economy plugin). -> {"ok", "card"|"error", "price"}"""
         if not self._enabled() or not self.store:
             return {"ok": False, "error": "Bingo is off right now."}
-        login = (login or "").lower().strip()
-        if not login:
-            return {"ok": False, "error": "Log in with Twitch first."}
+        user_uuid = (user_uuid or "").strip()
+        if not user_uuid:
+            return {"ok": False, "error": "Log in first."}
         async with self._lock:
             r = self.store.current_round()
             if not r:
                 return {"ok": False, "error": "No bingo round is open. Wait for Hatmaster to start one."}
-            mine = self.store.cards_for(r["id"], login)
+            mine = self.store.cards_for(r["id"], user_uuid)
             seq = len(mine) + 1
             if seq > self.max_cards():
                 return {"ok": False, "error": f"You already have the maximum of {self.max_cards()} cards."}
@@ -352,26 +363,26 @@ class BingoPlugin:
                 eco = self._economy()
                 if eco is None or not getattr(eco, "_connected", False):
                     return {"ok": False, "error": "Hats are unavailable right now, so extra cards are off."}
-                bal = await eco._get_balance(login)
+                bal = await eco._get_balance(user_uuid)
                 if bal is None or bal < price:
                     return {"ok": False, "error": f"That card costs {price} Hats; you have {bal or 0}."}
-                if not await eco._adjust_balance(login, -int(price)):
+                if not await eco._adjust_balance(user_uuid, -int(price)):
                     return {"ok": False, "error": "Could not take the Hats. Try again."}
-            squares = make_card(self.pool, card_seed(r["id"], login, seq))
-            card = self.store.add_card(r["id"], login, display, seq, price, squares,
+            squares = make_card(self.pool, card_seed(r["id"], user_uuid, seq))
+            card = self.store.add_card(r["id"], user_uuid, login, display, seq, price, squares,
                                        self.store.called_ids(r["id"]))
             summary = self.store.summary(r["id"])
-        await self._notify("card_added", {**summary, "login": login, "display": display, "seq": seq,
-                                          "price": price})
+        await self._notify("card_added", {**summary, "user_uuid": user_uuid, "login": login,
+                                          "display": display, "seq": seq, "price": price})
         return {"ok": True, "card": render_card(card, self.pool), "price": price,
                 "next_price": next_card_price(seq + 1, self.prices()) if seq + 1 <= self.max_cards() else None}
 
-    def my_cards(self, login: str) -> dict:
+    def my_cards(self, user_uuid: str) -> dict:
         """The viewer's cards for the open round, or, once it has closed,
         for the last round (so a winning line stays on screen until the
         next round opens). Buying is only possible while open; a card with
         `bingo` true and the round open shows the Bingo! button."""
-        if not self.store or not login:
+        if not self.store or not user_uuid:
             return {"round": None, "open": False, "cards": [], "next_price": None, "can_claim": False,
                     "on_stream": False, "winner": None}
         r = self.current()
@@ -380,14 +391,15 @@ class BingoPlugin:
             r = self.store.last_round()
         if r is None:
             return {"round": None, "open": False, "cards": [], "next_price": None, "can_claim": False}
-        cards = self.store.cards_for(r["id"], login.lower())
+        cards = self.store.cards_for(r["id"], user_uuid)
         seq = len(cards) + 1
         nxt = next_card_price(seq, self.prices()) if (is_open and seq <= self.max_cards()) else None
         won = r.get("winner_card")
         return {"round": r["id"], "open": is_open,
                 "cards": [render_card(c, self.pool, claimed=(won is not None and c["id"] == won)) for c in cards],
-                "next_price": nxt, "can_claim": nxt is not None, "on_stream": self.store.on_stream(login),
-                "winner": {"login": r.get("winner_login"), "display": r.get("winner_name")} if r.get("winner_login") else None}
+                "next_price": nxt, "can_claim": nxt is not None, "on_stream": self.store.on_stream(user_uuid),
+                "winner": {"user_uuid": r.get("winner_uuid"), "login": r.get("winner_login"),
+                           "display": r.get("winner_name")} if r.get("winner_uuid") else None}
 
     def public_state(self) -> dict:
         r = self.current() if self.store else None
@@ -603,8 +615,8 @@ class BingoPlugin:
             await self.bot.send_reply(message, "No bingo round is open right now.")
             return
         s = state["round"]
-        login = (getattr(getattr(message, "chatter", None), "name", "") or "").lower()
-        mine = self.store.cards_for(s["round_id"], login) if login else []
+        user_uuid = await self.bot.user_uuid_for(getattr(message, "chatter", None)) if self.bot else None
+        mine = self.store.cards_for(s["round_id"], user_uuid) if user_uuid else []
         best = min((c["to_bingo"] for c in mine), default=None)
         you = f" You: {len(mine)} card(s), {best} to go." if mine else " Grab a free card at hatmaster.tv/bingo."
         await self.bot.send_reply(message, f"Bingo round open: {s['cards']} cards, {s['players']} players, "

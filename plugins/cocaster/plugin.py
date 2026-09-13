@@ -77,6 +77,10 @@ class CoCasterPlugin:
     async def on_ready(self):
         try:
             self.chatlog = ChatLog(_cfg("CHAT_LOG_DB", config.DATA_DIR / "chat_log.db"))
+            # account merges re-point this file too (core/users.py)
+            from core import users as _users
+            _users.register_merge_hook(self._on_user_merge)
+            asyncio.create_task(self._backfill_chatlog_uuids())
         except Exception as e:
             print(f"[CoCaster] chat log unavailable: {e}")
         self.persona = self._load_persona()
@@ -179,6 +183,28 @@ class CoCasterPlugin:
             ctx["queue_len"] = len(queue)
         return ctx
 
+    async def _on_user_merge(self, absorbed: str, survivor: str) -> int:
+        return self.chatlog.repoint_user(absorbed, survivor) if self.chatlog else 0
+
+    async def _backfill_chatlog_uuids(self) -> None:
+        """Rows logged before the uuid era get their user_uuid from the
+        login (placeholder identity until the person is seen with an id)."""
+        try:
+            from core import db as _shared_db
+            from core import users as _users
+            db = await _shared_db.get_db()
+            if db is None or not self.chatlog:
+                return
+            n = 0
+            for login in self.chatlog.logins_without_uuid():
+                uid = await _users.get_or_create_twitch_login(db, login, commit=False)
+                n += self.chatlog.backfill_uuid(login, uid)
+            await db.commit()
+            if n:
+                print(f"[CoCaster] chat log: backfilled user_uuid on {n} rows")
+        except Exception as e:
+            self._error(f"chat log uuid backfill: {e}")
+
     # ── chat ──────────────────────────────────────────────────────────
 
     async def _on_chat(self, payload) -> None:
@@ -196,7 +222,13 @@ class CoCasterPlugin:
             except Exception:
                 pass
             if self.chatlog:
-                self.chatlog.add(user, display, text, is_command=is_cmd, is_mod=is_mod)
+                user_uuid = None
+                try:
+                    user_uuid = await self.bot.user_uuid_for(chatter) if self.bot else None
+                except Exception:
+                    pass
+                self.chatlog.add(user, display, text, is_command=is_cmd, is_mod=is_mod,
+                                 user_uuid=user_uuid)
         except Exception as e:
             self._error(f"chat log: {e}")
 

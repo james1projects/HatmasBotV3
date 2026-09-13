@@ -9,10 +9,10 @@ it as the source of truth for Hats — the game economy plugin issues
 ADD/SUBTRACT operations against viewer balances on every !buy / !sell
 and dividend payout.
 
-This mixin owns the GET/PATCH primitives plus the higher-level
-"resolve currency id by name", "get user id by Twitch username", and
-"get/adjust balance" wrappers. Everything else in the plugin uses
-these instead of touching MIXITUP_API_BASE directly.
+Callers pass a user_uuid (core/users.py). MixItUp only knows Twitch
+usernames, so this mixin resolves the uuid to the user's Twitch login
+first; a YouTube-only viewer has no login and therefore no balance
+until the local wallet (docs/WALLET_PLAN.md) replaces MixItUp.
 
 Notes:
   * MixItUp's API uses User-IDs, not usernames. Every balance op needs
@@ -29,6 +29,7 @@ from typing import Optional
 import aiohttp
 
 from core.config import MIXITUP_API_BASE, ECONOMY_CURRENCY_NAME
+from core import users as _users
 
 
 class _MixItUpMixin:
@@ -37,6 +38,7 @@ class _MixItUpMixin:
       self.session        aiohttp.ClientSession (created in on_ready)
       self._currency_id   resolved on _resolve_currency_id success
       self._connected     True iff currency was found in MixItUp
+      self._db            shared connection, for uuid -> login lookups
 
     All set up by EconomyPlugin.__init__ (or .on_ready for the session).
     """
@@ -80,32 +82,61 @@ class _MixItUpMixin:
                 return
         print(f"[Economy] Currency '{ECONOMY_CURRENCY_NAME}' not found!")
 
+    async def _twitch_login_for(self, user_uuid: str) -> Optional[str]:
+        """uuid -> Twitch login (lowercase) or None. Cached per uuid;
+        a merge clears core.users' cache, not this one, but logins
+        only ever gain a Twitch identity so a stale None is refreshed
+        by the next miss."""
+        cache = getattr(self, "_login_by_uuid", None)
+        if cache is None:
+            cache = self._login_by_uuid = {}
+        login = cache.get(user_uuid)
+        if login:
+            return login
+        db = getattr(self, "_db", None)
+        if db is None or not user_uuid:
+            return None
+        try:
+            login = await _users.twitch_login_of(db, user_uuid)
+        except Exception as e:
+            print(f"[Economy] login lookup failed for {user_uuid}: {e}")
+            return None
+        if login:
+            cache[user_uuid] = login
+        return login
+
     async def _get_user_id(self, twitch_username: str) -> Optional[str]:
         data = await self._miu_get(f"/users/Twitch/{twitch_username}")
         if data and "User" in data:
             return data["User"]["ID"]
         return None
 
-    async def _get_balance(self, twitch_username: str) -> Optional[int]:
+    async def _get_balance(self, user_uuid: str) -> Optional[int]:
         if not self._connected:
             return None
-        user_id = await self._get_user_id(twitch_username)
-        if not user_id:
+        login = await self._twitch_login_for(user_uuid)
+        if not login:
             return None
-        data = await self._miu_get(f"/currency/{self._currency_id}/{user_id}")
+        miu_id = await self._get_user_id(login)
+        if not miu_id:
+            return None
+        data = await self._miu_get(f"/currency/{self._currency_id}/{miu_id}")
         if data:
             return data.get("Amount", 0)
         return 0
 
-    async def _adjust_balance(self, twitch_username: str, amount: int) -> bool:
+    async def _adjust_balance(self, user_uuid: str, amount: int) -> bool:
         """Add or subtract hats. Positive = add, negative = subtract."""
         if not self._connected:
             return False
-        user_id = await self._get_user_id(twitch_username)
-        if not user_id:
+        login = await self._twitch_login_for(user_uuid)
+        if not login:
+            return False
+        miu_id = await self._get_user_id(login)
+        if not miu_id:
             return False
         result = await self._miu_patch(
-            f"/currency/{self._currency_id}/{user_id}",
+            f"/currency/{self._currency_id}/{miu_id}",
             {"Amount": amount}
         )
         return result is not None

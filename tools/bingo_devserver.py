@@ -99,6 +99,10 @@ class _Server:
             return None
         return {"uid": "0", "login": self.login, "name": self.login.title(), "prov": "tw"}
 
+    async def _ident_user_uuid(self, ident):
+        # no users table in the dev harness: a stable fake uuid per login
+        return ("dev-" + ident["login"]) if ident and ident.get("login") else None
+
     def _origin_ok(self, request):
         return True
 

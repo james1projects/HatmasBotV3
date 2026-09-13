@@ -5,6 +5,9 @@ Synchronous sqlite3 behind a lock (same pattern as the co-caster's chat
 log): every operation is a few milliseconds, so it runs inline on the
 event loop; the public server also touches it from request handlers.
 
+Viewers are `user_uuid`s (core/users.py); `login` / `display` on a
+card are display text captured when it was claimed.
+
 Tables
   rounds  one per bingo round (a stream, usually): status open|closed,
           base prize, Hats collected from card sales, the winner.
@@ -38,6 +41,7 @@ CREATE TABLE IF NOT EXISTS rounds (
     base_prize   INTEGER NOT NULL DEFAULT 0,
     sales        INTEGER NOT NULL DEFAULT 0,     -- Hats spent on extra cards
     pot_share    REAL NOT NULL DEFAULT 0.5,      -- fraction of sales added to the pot
+    winner_uuid  TEXT,
     winner_login TEXT,
     winner_name  TEXT,
     winner_card  INTEGER,
@@ -47,7 +51,8 @@ CREATE TABLE IF NOT EXISTS rounds (
 CREATE TABLE IF NOT EXISTS cards (
     id         INTEGER PRIMARY KEY,
     round_id   INTEGER NOT NULL,
-    login      TEXT NOT NULL,
+    user_uuid  TEXT NOT NULL,
+    login      TEXT,
     display    TEXT,
     seq        INTEGER NOT NULL,                 -- 1 = free card, 2.. = bought
     price      INTEGER NOT NULL DEFAULT 0,
@@ -55,7 +60,7 @@ CREATE TABLE IF NOT EXISTS cards (
     marks      TEXT NOT NULL DEFAULT '[]',       -- JSON list of marked indexes
     created_at REAL NOT NULL,
     bingo_at   REAL,
-    UNIQUE (round_id, login, seq)
+    UNIQUE (round_id, user_uuid, seq)
 );
 CREATE INDEX IF NOT EXISTS idx_cards_round ON cards(round_id);
 CREATE TABLE IF NOT EXISTS calls (
@@ -68,7 +73,7 @@ CREATE TABLE IF NOT EXISTS calls (
 );
 CREATE INDEX IF NOT EXISTS idx_calls_round ON calls(round_id);
 CREATE TABLE IF NOT EXISTS prefs (
-    login      TEXT PRIMARY KEY,
+    user_uuid  TEXT PRIMARY KEY,
     on_stream  INTEGER NOT NULL DEFAULT 0,          -- "Show my card on stream"
     updated_at REAL
 );
@@ -84,7 +89,21 @@ class BingoStore:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous=NORMAL")
+        self._migrate_login_era()
         self.conn.executescript(SCHEMA)
+
+    def _migrate_login_era(self) -> None:
+        """Tables from before user_uuid (keyed on the Twitch login) are
+        parked as _legacy_* and recreated; login-era cards belong to
+        rounds that are long closed, and prefs are re-set by the viewer
+        with one click."""
+        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(cards)")}
+        if cols and "user_uuid" not in cols:
+            for t in ("rounds", "cards", "calls", "prefs"):
+                self.conn.execute(f"DROP TABLE IF EXISTS _legacy_{t}")
+                self.conn.execute(f"ALTER TABLE {t} RENAME TO _legacy_{t}")
+            self.conn.commit()
+            print("[Bingo] store re-keyed on user_uuid (login-era tables kept as _legacy_*)")
 
     def close(self) -> None:
         with self._lock:
@@ -92,6 +111,33 @@ class BingoStore:
                 self.conn.close()
             except Exception:
                 pass
+
+    # ── account merges (core/users.py hook) ────────────────────────────
+
+    def repoint_user(self, absorbed_uuid: str, survivor_uuid: str) -> dict:
+        """Move the absorbed viewer's cards and prefs to the survivor.
+        Cards are re-sequenced after the survivor's own so the
+        (round, user, seq) key never collides and no card is lost."""
+        moved = 0
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT id, round_id FROM cards WHERE user_uuid=? ORDER BY round_id, seq",
+                (absorbed_uuid,)).fetchall()
+            for row in rows:
+                nxt = self.conn.execute(
+                    "SELECT COALESCE(MAX(seq), 0) + 1 FROM cards WHERE round_id=? AND user_uuid=?",
+                    (row["round_id"], survivor_uuid)).fetchone()[0]
+                self.conn.execute("UPDATE cards SET user_uuid=?, seq=? WHERE id=?",
+                                  (survivor_uuid, int(nxt), row["id"]))
+                moved += 1
+            self.conn.execute("UPDATE rounds SET winner_uuid=? WHERE winner_uuid=?",
+                              (survivor_uuid, absorbed_uuid))
+            self.conn.execute("INSERT OR IGNORE INTO prefs (user_uuid, on_stream, updated_at)"
+                              " SELECT ?, on_stream, updated_at FROM prefs WHERE user_uuid=?",
+                              (survivor_uuid, absorbed_uuid))
+            self.conn.execute("DELETE FROM prefs WHERE user_uuid=?", (absorbed_uuid,))
+            self.conn.commit()
+        return {"cards": moved}
 
     # ── rounds ────────────────────────────────────────────────────────
 
@@ -126,12 +172,12 @@ class BingoStore:
     def close_round(self, round_id: int, winner: Optional[dict] = None, prize_paid: Optional[int] = None,
                     prize_ok: Optional[bool] = None, now: Optional[float] = None) -> Optional[dict]:
         now = time.time() if now is None else now
+        w = winner or {}
         with self._lock:
             self.conn.execute(
-                "UPDATE rounds SET status='closed', ended_at=?, winner_login=?, winner_name=?, winner_card=?,"
-                " prize_paid=?, prize_ok=? WHERE id=?",
-                (now, (winner or {}).get("login"), (winner or {}).get("display"),
-                 (winner or {}).get("card_id"), prize_paid,
+                "UPDATE rounds SET status='closed', ended_at=?, winner_uuid=?, winner_login=?, winner_name=?,"
+                " winner_card=?, prize_paid=?, prize_ok=? WHERE id=?",
+                (now, w.get("user_uuid"), w.get("login"), w.get("display"), w.get("card_id"), prize_paid,
                  None if prize_ok is None else int(bool(prize_ok)), int(round_id)))
             self.conn.commit()
         return self.get_round(round_id)
@@ -144,11 +190,11 @@ class BingoStore:
 
     # ── cards ─────────────────────────────────────────────────────────
 
-    def cards_for(self, round_id: int, login: str) -> List[dict]:
+    def cards_for(self, round_id: int, user_uuid: str) -> List[dict]:
         with self._lock:
             rows = self.conn.execute(
-                "SELECT * FROM cards WHERE round_id=? AND login=? ORDER BY seq",
-                (int(round_id), login.lower())).fetchall()
+                "SELECT * FROM cards WHERE round_id=? AND user_uuid=? ORDER BY seq",
+                (int(round_id), user_uuid)).fetchall()
         return [self._card(r) for r in rows]
 
     def all_cards(self, round_id: int) -> List[dict]:
@@ -157,18 +203,19 @@ class BingoStore:
                 "SELECT * FROM cards WHERE round_id=? ORDER BY id", (int(round_id),)).fetchall()
         return [self._card(r) for r in rows]
 
-    def add_card(self, round_id: int, login: str, display: str, seq: int, price: int,
-                 squares: Sequence[str], called: Iterable[str], now: Optional[float] = None) -> dict:
+    def add_card(self, round_id: int, user_uuid: str, login: Optional[str], display: Optional[str],
+                 seq: int, price: int, squares: Sequence[str], called: Iterable[str],
+                 now: Optional[float] = None) -> dict:
         """Insert a card; squares already called this round start marked
         (a late joiner is not punished for the round's history)."""
         now = time.time() if now is None else now
         marks = sorted(marked_indexes(list(squares), called))
         with self._lock:
             cur = self.conn.execute(
-                "INSERT INTO cards (round_id, login, display, seq, price, squares, marks, created_at)"
-                " VALUES (?,?,?,?,?,?,?,?)",
-                (int(round_id), login.lower(), display or login, int(seq), int(price),
-                 json.dumps(list(squares)), json.dumps(marks), now))
+                "INSERT INTO cards (round_id, user_uuid, login, display, seq, price, squares, marks, created_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?)",
+                (int(round_id), user_uuid, (login or "").lower() or None, display or login or user_uuid,
+                 int(seq), int(price), json.dumps(list(squares)), json.dumps(marks), now))
             if price > 0:
                 self.conn.execute("UPDATE rounds SET sales = sales + ? WHERE id=?", (int(price), int(round_id)))
             self.conn.commit()
@@ -179,7 +226,8 @@ class BingoStore:
         """(cards, distinct players)"""
         with self._lock:
             row = self.conn.execute(
-                "SELECT COUNT(*), COUNT(DISTINCT login) FROM cards WHERE round_id=?", (int(round_id),)).fetchone()
+                "SELECT COUNT(*), COUNT(DISTINCT user_uuid) FROM cards WHERE round_id=?",
+                (int(round_id),)).fetchone()
         return int(row[0]), int(row[1])
 
     @staticmethod
@@ -275,18 +323,18 @@ class BingoStore:
 
     # ── prefs + the claim ─────────────────────────────────────────────
 
-    def on_stream(self, login: str) -> bool:
+    def on_stream(self, user_uuid: str) -> bool:
         with self._lock:
-            row = self.conn.execute("SELECT on_stream FROM prefs WHERE login=?", (login.lower(),)).fetchone()
+            row = self.conn.execute("SELECT on_stream FROM prefs WHERE user_uuid=?", (user_uuid,)).fetchone()
         return bool(row and row[0])
 
-    def set_on_stream(self, login: str, on: bool, now: Optional[float] = None) -> bool:
+    def set_on_stream(self, user_uuid: str, on: bool, now: Optional[float] = None) -> bool:
         now = time.time() if now is None else now
         with self._lock:
             self.conn.execute(
-                "INSERT INTO prefs (login, on_stream, updated_at) VALUES (?,?,?)"
-                " ON CONFLICT(login) DO UPDATE SET on_stream=excluded.on_stream, updated_at=excluded.updated_at",
-                (login.lower(), int(bool(on)), now))
+                "INSERT INTO prefs (user_uuid, on_stream, updated_at) VALUES (?,?,?)"
+                " ON CONFLICT(user_uuid) DO UPDATE SET on_stream=excluded.on_stream, updated_at=excluded.updated_at",
+                (user_uuid, int(bool(on)), now))
             self.conn.commit()
         return bool(on)
 
@@ -294,12 +342,12 @@ class BingoStore:
         """Cards of viewers who opted in, closest to bingo first."""
         with self._lock:
             rows = self.conn.execute(
-                "SELECT c.* FROM cards c JOIN prefs p ON p.login = c.login"
+                "SELECT c.* FROM cards c JOIN prefs p ON p.user_uuid = c.user_uuid"
                 " WHERE c.round_id=? AND p.on_stream=1 ORDER BY c.id", (int(round_id),)).fetchall()
         cards = [self._card(r) for r in rows]
         return sorted(cards, key=lambda c: (c["to_bingo"], c["created_at"]))
 
-    def check_claim(self, round_id: int, card_id: int, login: str) -> dict:
+    def check_claim(self, round_id: int, card_id: int, user_uuid: str) -> dict:
         """Is this a valid Bingo! press? The line is recomputed from the
         round's calls, never trusted from the card row.
         -> {"ok": True, "card": card, "line": (i..)} or {"ok": False, "error"}"""
@@ -309,7 +357,7 @@ class BingoStore:
                 "SELECT DISTINCT event_id FROM calls WHERE round_id=?", (int(round_id),)).fetchall()}
         if row is None or int(row["round_id"]) != int(round_id):
             return {"ok": False, "error": "That card is not in this round."}
-        if row["login"] != login.lower():
+        if row["user_uuid"] != user_uuid:
             return {"ok": False, "error": "That is not your card."}
         card = self._card(row)
         marks = marked_indexes(card["squares"], called)
@@ -330,22 +378,23 @@ class BingoStore:
     def card_list(self, round_id: int) -> List[dict]:
         """Compact view of every card in a round for the control page."""
         r = self.get_round(round_id) or {}
-        return [{"id": c["id"], "login": c["login"], "display": c["display"], "seq": c["seq"],
-                 "price": c["price"], "marked": len(c["marks"]), "to_bingo": c["to_bingo"],
+        return [{"id": c["id"], "user_uuid": c["user_uuid"], "login": c["login"], "display": c["display"],
+                 "seq": c["seq"], "price": c["price"], "marked": len(c["marks"]), "to_bingo": c["to_bingo"],
                  "bingo": c["bingo_at"] is not None, "claimed": r.get("winner_card") == c["id"],
-                 "on_stream": self.on_stream(c["login"]), "created_at": c["created_at"]}
+                 "on_stream": self.on_stream(c["user_uuid"]), "created_at": c["created_at"]}
                 for c in self.all_cards(round_id)]
 
     def leaders(self, round_id: int, limit: int = 5) -> List[dict]:
         """Closest cards to bingo (fewest squares missing), one per player."""
         best: Dict[str, dict] = {}
         for c in self.all_cards(round_id):
-            cur = best.get(c["login"])
+            cur = best.get(c["user_uuid"])
             if cur is None or c["to_bingo"] < cur["to_bingo"]:
-                best[c["login"]] = c
+                best[c["user_uuid"]] = c
         rows = sorted(best.values(), key=lambda c: (c["to_bingo"], c["created_at"]))[:limit]
-        return [{"login": c["login"], "display": c["display"], "to_bingo": c["to_bingo"],
-                 "cards": len(self.cards_for(round_id, c["login"]))} for c in rows]
+        return [{"user_uuid": c["user_uuid"], "login": c["login"], "display": c["display"],
+                 "to_bingo": c["to_bingo"], "cards": len(self.cards_for(round_id, c["user_uuid"]))}
+                for c in rows]
 
     def summary(self, round_id: int) -> dict:
         r = self.get_round(round_id) or {}
@@ -365,6 +414,7 @@ class BingoStore:
                       for c in calls],
             "called_ids": sorted({c["event_id"] for c in calls}),
             "leaders": self.leaders(round_id),
-            "winner": {"login": r.get("winner_login"), "display": r.get("winner_name"),
-                       "prize": r.get("prize_paid")} if r.get("winner_login") else None,
+            "winner": {"user_uuid": r.get("winner_uuid"), "login": r.get("winner_login"),
+                       "display": r.get("winner_name"), "prize": r.get("prize_paid")}
+                      if r.get("winner_uuid") else None,
         }

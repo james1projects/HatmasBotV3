@@ -34,22 +34,10 @@ import aiosqlite
 
 
 YOUTUBE_SCHEMA_SQL = """
-    CREATE TABLE IF NOT EXISTS youtube_portfolios (
-        yt_channel_id    TEXT PRIMARY KEY,
-        yt_display_name  TEXT NOT NULL,
-        first_seen_at    TEXT NOT NULL DEFAULT (datetime('now')),
-        last_seen_at     TEXT NOT NULL DEFAULT (datetime('now')),
-        leaderboard_opt_out INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE IF NOT EXISTS youtube_holdings (
-        yt_channel_id  TEXT NOT NULL,
-        god_name       TEXT NOT NULL,
-        shares         REAL NOT NULL DEFAULT 0,
-        avg_cost       REAL NOT NULL DEFAULT 0,
-        PRIMARY KEY (yt_channel_id, god_name)
-    );
-
+    -- youtube_portfolios / youtube_holdings / youtube_transactions were
+    -- folded into users + portfolios + transactions (keyed on user_uuid,
+    -- docs/USER_IDENTITY_PLAN.md). Only the video/comment bookkeeping
+    -- tables remain here.
     CREATE TABLE IF NOT EXISTS youtube_video_gods (
         yt_video_id  TEXT PRIMARY KEY,
         god_name     TEXT NOT NULL,
@@ -66,21 +54,6 @@ YOUTUBE_SCHEMA_SQL = """
         PRIMARY KEY (yt_video_id, yt_channel_id)
     );
 
-    CREATE TABLE IF NOT EXISTS youtube_transactions (
-        id             INTEGER PRIMARY KEY AUTOINCREMENT,
-        yt_channel_id  TEXT NOT NULL,
-        god_name       TEXT NOT NULL,
-        type           TEXT NOT NULL,
-        shares         REAL NOT NULL,
-        price          REAL NOT NULL,
-        yt_video_id    TEXT,
-        timestamp      TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_yt_holdings_god
-        ON youtube_holdings(god_name);
-    CREATE INDEX IF NOT EXISTS idx_yt_transactions_user
-        ON youtube_transactions(yt_channel_id, timestamp DESC);
 """
 
 

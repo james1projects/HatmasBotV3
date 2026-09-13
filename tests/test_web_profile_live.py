@@ -37,6 +37,7 @@ except ImportError:
 
 import core.public_webserver as pw
 from core import web_session as ws_mod
+from core import users as _users
 
 SECRET = "profile-live-test-secret-0123456789abcdef01234567"
 
@@ -57,8 +58,9 @@ class FakeEconomy:
         self.bot = types.SimpleNamespace(
             is_feature_enabled=lambda f: True)
 
-    async def _get_balance(self, login):
-        return 12345
+    async def _get_balance(self, user_uuid):
+        # mirrors the MixItUp bridge: no Twitch login -> no balance yet
+        return None if user_uuid == "u-yt" else 12345
 
 
 class FakeStreamStatus:
@@ -68,60 +70,63 @@ class FakeStreamStatus:
                 "current_god": "Ymir"}
 
 
+# Viewer-keyed tables use user_uuid (docs/USER_IDENTITY_PLAN.md); the
+# users / user_identities tables come from core.users.ensure_schema.
 SCHEMA = """
 CREATE TABLE god_prices (god_name TEXT PRIMARY KEY, price REAL);
-CREATE TABLE portfolios (username TEXT, god_name TEXT, shares REAL,
-  avg_cost REAL, leaderboard_opt_out INT DEFAULT 0,
-  PRIMARY KEY (username, god_name));
+CREATE TABLE portfolios (user_uuid TEXT, god_name TEXT, shares REAL,
+  avg_cost REAL, PRIMARY KEY (user_uuid, god_name));
 CREATE TABLE transactions (id INTEGER PRIMARY KEY AUTOINCREMENT,
-  username TEXT, god_name TEXT, type TEXT, shares REAL, price REAL,
-  total REAL, fee REAL, channel TEXT DEFAULT 'chat', timestamp TEXT);
-CREATE TABLE god_pool_votes (voter_username TEXT, vote_date TEXT,
-  god_name TEXT, voted_at TEXT,
-  PRIMARY KEY (voter_username, vote_date));
+  username TEXT, user_uuid TEXT, god_name TEXT, type TEXT, shares REAL,
+  price REAL, total REAL, fee REAL, channel TEXT DEFAULT 'chat',
+  timestamp TEXT, ref TEXT);
+CREATE TABLE god_pool_votes (user_uuid TEXT, vote_date TEXT,
+  god_name TEXT, voted_at TEXT, use_aspect INT DEFAULT 0,
+  voter_username TEXT, PRIMARY KEY (user_uuid, vote_date));
 CREATE TABLE priority_payments (stripe_session_id TEXT PRIMARY KEY,
   twitch_username TEXT, god TEXT, amount_cents INT, currency TEXT,
-  created_at TEXT, status TEXT, played_at TEXT);
+  created_at TEXT, status TEXT, played_at TEXT, user_uuid TEXT);
 CREATE TABLE processed_matches (match_id TEXT PRIMARY KEY,
   god_name TEXT, outcome TEXT, kills INT, deaths INT, assists INT,
   price_change REAL, source TEXT, was_live_at_settle INT,
   processed_at TEXT, played_at TEXT);
-CREATE TABLE youtube_portfolios (yt_channel_id TEXT PRIMARY KEY,
-  yt_display_name TEXT, first_seen_at TEXT, last_seen_at TEXT,
-  leaderboard_opt_out INT DEFAULT 0);
-CREATE TABLE youtube_holdings (yt_channel_id TEXT, god_name TEXT,
-  shares REAL, avg_cost REAL, PRIMARY KEY (yt_channel_id, god_name));
-CREATE TABLE youtube_transactions (id INTEGER PRIMARY KEY AUTOINCREMENT,
-  yt_channel_id TEXT, god_name TEXT, type TEXT, shares REAL, price REAL,
-  yt_video_id TEXT, timestamp TEXT);
 """
 
 SEED = [
+    "INSERT INTO users (uuid, display_name) VALUES ('u-1', 'Viewer One')",
+    "INSERT INTO users (uuid, display_name) VALUES ('u-2', 'Rival')",
+    "INSERT INTO users (uuid, display_name) VALUES ('u-yt', 'YT Viewer')",
+    "INSERT INTO user_identities (provider, provider_id, user_uuid, login)"
+    " VALUES ('twitch', '100', 'u-1', 'viewer1')",
+    "INSERT INTO user_identities (provider, provider_id, user_uuid, login)"
+    " VALUES ('twitch', '200', 'u-2', 'rival')",
+    "INSERT INTO user_identities (provider, provider_id, user_uuid)"
+    " VALUES ('youtube', 'UCabc', 'u-yt')",
     "INSERT INTO god_prices VALUES ('Ymir', 231.0)",
     "INSERT INTO god_prices VALUES ('Loki', 95.0)",
-    "INSERT INTO portfolios VALUES ('viewer1', 'Ymir', 12.0, 180.0, 0)",
-    "INSERT INTO portfolios VALUES ('rival', 'Loki', 40.0, 90.0, 0)",
-    "INSERT INTO transactions (username, god_name, type, shares, price,"
+    "INSERT INTO portfolios VALUES ('u-1', 'Ymir', 12.0, 180.0)",
+    "INSERT INTO portfolios VALUES ('u-2', 'Loki', 40.0, 90.0)",
+    "INSERT INTO portfolios VALUES ('u-yt', 'Ymir', 2.0, 0.0)",
+    "INSERT INTO transactions (user_uuid, god_name, type, shares, price,"
     " total, fee, channel, timestamp) VALUES"
-    " ('viewer1','Ymir','buy',12.0,180.0,2160.0,21.6,'web','2026-08-05T20:11:00')",
-    "INSERT INTO transactions (username, god_name, type, shares, price,"
+    " ('u-1','Ymir','buy',12.0,180.0,2160.0,21.6,'web','2026-08-05T20:11:00')",
+    "INSERT INTO transactions (user_uuid, god_name, type, shares, price,"
     " total, fee, channel, timestamp) VALUES"
-    " ('viewer1','Loki','sell',5.0,101.0,505.0,5.05,'chat','2026-08-02T21:40:00')",
-    "INSERT INTO transactions (username, god_name, type, shares, price,"
+    " ('u-1','Loki','sell',5.0,101.0,505.0,5.05,'chat','2026-08-02T21:40:00')",
+    "INSERT INTO transactions (user_uuid, god_name, type, shares, price,"
     " total, fee, channel, timestamp) VALUES"
-    " ('viewer1','Ymir','dividend',0,220.0,86.0,0,'chat','2026-08-06T22:00:00')",
-    "INSERT INTO god_pool_votes VALUES"
-    " ('viewer1','2026-08-07','Baron Samedi','2026-08-07T20:00:00')",
+    " ('u-1','Ymir','dividend',0,220.0,86.0,0,'chat','2026-08-06T22:00:00')",
+    "INSERT INTO transactions (user_uuid, god_name, type, shares, price,"
+    " total, fee, channel, timestamp, ref) VALUES"
+    " ('u-yt','Ymir','comment_share',1.0,200.0,200.0,0,'youtube','2026-08-01','vid1')",
+    "INSERT INTO god_pool_votes (user_uuid, vote_date, god_name, voted_at)"
+    " VALUES ('u-1','2026-08-07','Baron Samedi','2026-08-07T20:00:00')",
     "INSERT INTO priority_payments VALUES"
-    " ('cs_1','viewer1','Achilles',500,'usd','2026-08-03','fulfilled','2026-08-03')",
+    " ('cs_1','viewer1','Achilles',500,'usd','2026-08-03','fulfilled','2026-08-03','u-1')",
     "INSERT INTO processed_matches VALUES"
     " ('m1','Ymir','win',9,3,7,12.0,'live',1,'2026-08-07T22:00:00',NULL)",
     "INSERT INTO processed_matches VALUES"
     " ('m2','Loki','loss',1,9,2,-11.0,'live',1,'2026-08-06T22:00:00',NULL)",
-    "INSERT INTO youtube_holdings VALUES ('UCabc', 'Ymir', 2.0, 0.0)",
-    "INSERT INTO youtube_transactions (yt_channel_id, god_name, type,"
-    " shares, price, yt_video_id, timestamp) VALUES"
-    " ('UCabc','Ymir','free_share',1.0,200.0,'vid1','2026-08-01')",
 ]
 
 _TMP = Path(tempfile.mkdtemp(prefix="hatmas_profile_test_"))
@@ -163,6 +168,7 @@ async def make_env(features=None):
     server = pw.PublicWebServer(
         economy=FakeEconomy(), stream_status=FakeStreamStatus(), bot=bot)
     db = await aiosqlite.connect(":memory:")
+    await _users.ensure_schema(db)
     for stmt in SCHEMA.strip().split(";"):
         if stmt.strip():
             await db.execute(stmt)
@@ -175,14 +181,16 @@ async def make_env(features=None):
     return client, server, db
 
 
-def tw_cookie(login="viewer1"):
+def tw_cookie(login="viewer1", user_uuid="u-1"):
     return {ws_mod.SESSION_COOKIE:
-            ws_mod.issue("100", login, "Viewer One", "", SECRET)}
+            ws_mod.issue("100", login, "Viewer One", "", SECRET,
+                         user_uuid=user_uuid)}
 
 
-def yt_cookie(channel_id="UCabc"):
+def yt_cookie(channel_id="UCabc", user_uuid="u-yt"):
     return {ws_mod.SESSION_COOKIE:
-            ws_mod.issue_youtube(channel_id, "YT Viewer", "", SECRET)}
+            ws_mod.issue_youtube(channel_id, "YT Viewer", "", SECRET,
+                                 user_uuid=user_uuid)}
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -239,11 +247,14 @@ async def test_profile_yt_session():
         p = await res.json()
         assert p["platform"] == "youtube"
         assert p["login"] is None
+        assert p["user_uuid"] == "u-yt"
         assert p["balance"] is None
         assert len(p["holdings"]) == 1
         assert p["holdings"][0]["god"] == "Ymir"
         assert len(p["transactions"]) == 1
         assert p["transactions"][0]["channel"] == "youtube"
+        # a YouTube-only viewer ranks like everyone else
+        assert p["rank"] is not None and p["total_traders"] == 3
     finally:
         await client.close(); await db.close()
 

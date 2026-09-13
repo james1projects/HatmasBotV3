@@ -182,6 +182,55 @@ class GodPoolPlugin:
             await self._db.execute(
                 "ALTER TABLE god_pool_votes "
                 "ADD COLUMN use_aspect INTEGER NOT NULL DEFAULT 0")
+            vote_cols.add("use_aspect")
+
+        # ── user_uuid (core/users.py, docs/USER_IDENTITY_PLAN.md) ──
+        # god_pool.added_by stays as display text; added_by_uuid is
+        # the key. god_pool_votes is rebuilt with PRIMARY KEY
+        # (user_uuid, vote_date) -- the daily cap is per person, on
+        # every platform. Legacy "yt:<name>" rows (YouTube nominations
+        # approved from /community) cannot be mapped and are dropped;
+        # they only ever enforced a cap that has since expired.
+        from core import users as _users
+        if "added_by_uuid" not in pool_cols:
+            await self._db.execute(
+                "ALTER TABLE god_pool ADD COLUMN added_by_uuid TEXT")
+        if "user_uuid" not in vote_cols:
+            rows = []
+            async with self._db.execute(
+                    "SELECT voter_username, vote_date, god_name, voted_at, "
+                    "use_aspect FROM god_pool_votes") as cur:
+                rows = await cur.fetchall()
+            await self._db.executescript("""
+                CREATE TABLE god_pool_votes_v2 (
+                    user_uuid      TEXT NOT NULL,
+                    vote_date      TEXT NOT NULL,  -- YYYY-MM-DD
+                    god_name       TEXT NOT NULL,
+                    voted_at       TEXT NOT NULL DEFAULT (datetime('now')),
+                    use_aspect     INTEGER NOT NULL DEFAULT 0,
+                    voter_username TEXT,           -- display only
+                    PRIMARY KEY (user_uuid, vote_date)
+                );
+            """)
+            kept = 0
+            for voter, vdate, god, voted_at, use_aspect in rows:
+                voter = (voter or "").lower()
+                if not voter or voter.startswith("yt:"):
+                    continue
+                uid = await _users.get_or_create_twitch_login(
+                    self._db, voter, commit=False)
+                await self._db.execute(
+                    "INSERT OR IGNORE INTO god_pool_votes_v2 (user_uuid, "
+                    "vote_date, god_name, voted_at, use_aspect, voter_username) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (uid, vdate, god, voted_at, use_aspect or 0, voter))
+                kept += 1
+            await self._db.executescript("""
+                DROP TABLE god_pool_votes;
+                ALTER TABLE god_pool_votes_v2 RENAME TO god_pool_votes;
+            """)
+            print(f"[GodPool] god_pool_votes re-keyed on user_uuid "
+                  f"({kept}/{len(rows)} rows kept)")
 
         await self._db.commit()
 
@@ -235,9 +284,10 @@ class GodPoolPlugin:
     #   COMMANDS
     # ──────────────────────────────────────────────────────────────────
 
-    async def do_nominate(self, username: str, raw_god: str,
+    async def do_nominate(self, user_uuid: str, raw_god: str,
                           is_broadcaster: bool = False,
-                          use_aspect: bool = False) -> dict:
+                          use_aspect: bool = False,
+                          display_name: Optional[str] = None) -> dict:
         """Pure nomination logic. Callable from any context (chat
         command, webserver endpoint) — same pattern as ``do_spin``.
 
@@ -249,7 +299,9 @@ class GodPoolPlugin:
         (Aspect) are separate entries with separate vote counts.
 
         Chat and web nominations share the daily cap because both key
-        god_pool_votes on the lowercase Twitch login.
+        god_pool_votes on the viewer's user_uuid (core/users.py), so a
+        YouTube-login nomination on the site and a chat nomination by
+        the same linked person count as one.
 
         Returns a dict for the caller to phrase feedback from:
             {"ok": False, "reason": "no_db"}
@@ -262,9 +314,10 @@ class GodPoolPlugin:
         """
         if not self._db:
             return {"ok": False, "reason": "no_db"}
-        username = (username or "").lower()
-        if not username:
+        user_uuid = (user_uuid or "").strip()
+        if not user_uuid:
             return {"ok": False, "reason": "no_user"}
+        added_by = display_name or user_uuid
 
         cleaned, aspect_word = split_aspect(raw_god or "")
         use_aspect = bool(use_aspect or aspect_word)
@@ -288,8 +341,8 @@ class GodPoolPlugin:
         if not is_broadcaster:
             async with self._db.execute(
                     "SELECT god_name, use_aspect FROM god_pool_votes "
-                    "WHERE voter_username = ? AND vote_date = ?",
-                    (username, today)) as cur:
+                    "WHERE user_uuid = ? AND vote_date = ?",
+                    (user_uuid, today)) as cur:
                 row = await cur.fetchone()
             if row:
                 return {"ok": False, "reason": "already_voted",
@@ -299,21 +352,22 @@ class GodPoolPlugin:
         # The added_by column captures the FIRST nominator only.
         await self._db.execute("""
             INSERT INTO god_pool (god_name, use_aspect, added_by,
-                                  vote_count)
-            VALUES (?, ?, ?, 1)
+                                  added_by_uuid, vote_count)
+            VALUES (?, ?, ?, ?, 1)
             ON CONFLICT(god_name, use_aspect) DO UPDATE SET
                 vote_count = vote_count + 1
-        """, (god, aspect_i, username))
+        """, (god, aspect_i, added_by, user_uuid))
         # Only viewers populate god_pool_votes — that table exists to
         # enforce the 1/day cap, which the broadcaster bypasses. Skipping
         # the insert avoids hitting the (voter_username, vote_date) PK
         # on Hatmaster's second nomination of the day.
         if not is_broadcaster:
             await self._db.execute("""
-                INSERT INTO god_pool_votes (voter_username, vote_date,
-                                            god_name, use_aspect)
-                VALUES (?, ?, ?, ?)
-            """, (username, today, god, aspect_i))
+                INSERT INTO god_pool_votes (user_uuid, vote_date,
+                                            god_name, use_aspect,
+                                            voter_username)
+                VALUES (?, ?, ?, ?, ?)
+            """, (user_uuid, today, god, aspect_i, added_by))
         await self._db.commit()
 
         # Total pool size for the reply.
@@ -417,13 +471,18 @@ class GodPoolPlugin:
                 whisper)
             return
 
-        username = (message.chatter.name.lower()
-                    if message.chatter else "")
-        if not username:
+        user_uuid = await self.bot.user_uuid_for(message.chatter)
+        if not user_uuid:
+            await self.bot.send_reply(
+                message, "The pool is still loading. Try again in a moment.",
+                whisper)
             return
+        display = (getattr(message.chatter, "display_name", None)
+                   or message.chatter.name)
 
         result = await self.do_nominate(
-            username, args, self._is_broadcaster(message.chatter))
+            user_uuid, args, self._is_broadcaster(message.chatter),
+            display_name=display)
 
         if not result["ok"]:
             reason = result.get("reason")

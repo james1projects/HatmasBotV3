@@ -35,6 +35,15 @@ except ImportError:
 import core.public_webserver as pw
 from core import web_session as ws
 
+# The harness has no users table, so the session cookie must carry the
+# viewer's uuid itself ("sub"). The login doubles as the uuid here, which
+# keeps every fake keyed on "viewer1" lined up with the real handlers.
+_issue = ws.issue
+def _issue_with_uuid(uid, login, *a, **k):
+    k.setdefault("user_uuid", (login or "").lower() or None)
+    return _issue(uid, login, *a, **k)
+ws.issue = _issue_with_uuid
+
 SECRET = "web-trade-test-secret-0123456789abcdef0123456789"
 ORIGIN = "https://hatmaster.tv"
 

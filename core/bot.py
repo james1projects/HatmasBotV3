@@ -367,6 +367,31 @@ class HatmasBot(commands.Bot):
     def register_raw_handler(self, handler):
         self._raw_handlers.append(handler)
 
+    async def user_uuid_for(self, chatter):
+        """The viewer's user uuid (core/users.py) for a chat message's
+        chatter, created on first sight. None while the shared DB is
+        unavailable, so callers can answer "still loading"."""
+        from core import db as _shared_db
+        from core import users as _users
+        if chatter is None:
+            return None
+        db = await _shared_db.get_db()
+        if db is None:
+            return None
+        tid = getattr(chatter, "id", None)
+        name = (getattr(chatter, "name", "") or "").lower()
+        display = getattr(chatter, "display_name", None) or name
+        try:
+            if tid:
+                return await _users.get_or_create_twitch(
+                    db, str(tid), name, display)
+            if name:
+                return await _users.get_or_create_twitch_login(
+                    db, name, display)
+        except Exception as e:
+            print(f"[Users] resolve failed for {name}: {e}")
+        return None
+
     def is_mod(self, chatter):
         if hasattr(chatter, "moderator") and chatter.moderator:
             return True

@@ -85,11 +85,12 @@ def test_store_rounds_cards_calls_and_winner():
     assert s.current_round() is None
     r = s.open_round(500, 0.5, now=1000.0)
     assert r["status"] == "open" and s.current_round()["id"] == r["id"]
-    c1 = s.add_card(r["id"], "Dyna", "Dyna", 1, 0, P.make_card(pool, 1), [], now=1001.0)
-    c2 = s.add_card(r["id"], "bob", "Bob", 1, 0, P.make_card(pool, 2), [], now=1002.0)
-    s.add_card(r["id"], "bob", "Bob", 2, 50, P.make_card(pool, 3), [], now=1003.0)
+    c1 = s.add_card(r["id"], "u-dyna", "dyna", "Dyna", 1, 0, P.make_card(pool, 1), [], now=1001.0)
+    c2 = s.add_card(r["id"], "u-bob", "bob", "Bob", 1, 0, P.make_card(pool, 2), [], now=1002.0)
+    s.add_card(r["id"], "u-bob", "bob", "Bob", 2, 50, P.make_card(pool, 3), [], now=1003.0)
     assert s.card_count(r["id"]) == (3, 2) and s.pot(r["id"]) == 525
-    assert [c["seq"] for c in s.cards_for(r["id"], "BOB")] == [1, 2]
+    assert [c["seq"] for c in s.cards_for(r["id"], "u-bob")] == [1, 2]
+    assert c1["user_uuid"] == "u-dyna" and c1["login"] == "dyna"
     # first call marks whichever cards hold that square; a repeat is a no-op
     first = c1["squares"][0]
     res = s.mark_event(r["id"], first, "L", "manual", now=1010.0)
@@ -98,17 +99,24 @@ def test_store_rounds_cards_calls_and_winner():
     assert again["already"] and again["changed"] == []
     assert s.called_ids(r["id"]) == [first] and len(s.calls(r["id"])) == 2
     # a late card starts with the already-called squares marked
-    c4 = s.add_card(r["id"], "cat", "Cat", 1, 0, [first] + P.make_card(pool, 4)[1:], s.called_ids(r["id"]))
+    c4 = s.add_card(r["id"], "u-cat", "cat", "Cat", 1, 0, [first] + P.make_card(pool, 4)[1:], s.called_ids(r["id"]))
     assert 0 in c4["marks"] and 12 in c4["marks"]
     # complete c1's top row -> winner, summary reflects it, round closes
     winners = []
     for sid in c1["squares"][1:5]:
         winners += s.mark_event(r["id"], sid, "L", "auto")["winners"]
     assert [w["id"] for w in winners] == [c1["id"]] and s.all_cards(r["id"])[0]["bingo_at"] is not None
-    s.close_round(r["id"], winner={"login": "dyna", "display": "Dyna", "card_id": c1["id"]}, prize_paid=525, prize_ok=True)
+    s.close_round(r["id"], winner={"user_uuid": "u-dyna", "login": "dyna", "display": "Dyna", "card_id": c1["id"]},
+                  prize_paid=525, prize_ok=True)
     summ = s.summary(r["id"])
-    assert summ["status"] == "closed" and summ["winner"] == {"login": "dyna", "display": "Dyna", "prize": 525}
-    assert summ["cards"] == 4 and summ["players"] == 3 and summ["leaders"][0]["login"] == "dyna"
+    assert summ["status"] == "closed"
+    assert summ["winner"] == {"user_uuid": "u-dyna", "login": "dyna", "display": "Dyna", "prize": 525}
+    assert summ["cards"] == 4 and summ["players"] == 3 and summ["leaders"][0]["user_uuid"] == "u-dyna"
+    # the account-merge hook moves cards + prefs to the survivor
+    s.set_on_stream("u-cat", True)
+    s.repoint_user("u-cat", "u-bob")
+    assert s.cards_for(r["id"], "u-cat") == [] and len(s.cards_for(r["id"], "u-bob")) == 3
+    assert s.on_stream("u-bob") and not s.on_stream("u-cat")
     assert s.current_round() is None and s.last_round()["id"] == r["id"]
     # opening a new round closes a stale open one
     s.open_round(100, 0.5); r3 = s.open_round(100, 0.5)
@@ -153,6 +161,10 @@ class _Bot:
     async def send_reply(self, message, text, whisper=False):
         self.chat.append("reply: " + text)
 
+    async def user_uuid_for(self, chatter):
+        # the login doubles as the uuid in this harness
+        return (getattr(chatter, "name", "") or "").lower() or None
+
 
 class _Overlay:
     def __init__(self):
@@ -185,28 +197,29 @@ def _plugin(balances=None):
 
 def test_claim_cards_prices_and_limits():
     p, bot, eco, ov = _plugin({"dyna": 120})
-    assert asyncio.run(p.claim_card("dyna", "Dyna"))["error"].startswith("No bingo round")
+    assert asyncio.run(p.claim_card("dyna", "Dyna", login="dyna"))["error"].startswith("No bingo round")
     asyncio.run(p.start_round())
     assert ov.events[-1][0] == "bingo_open" and "BINGO is open" in bot.chat[-1]
-    r1 = asyncio.run(p.claim_card("dyna", "Dyna"))
+    r1 = asyncio.run(p.claim_card("dyna", "Dyna", login="dyna"))
     assert r1["ok"] and r1["price"] == 0 and r1["next_price"] == 50 and len(r1["card"]["squares"]) == 25
-    r2 = asyncio.run(p.claim_card("dyna", "Dyna"))
+    r2 = asyncio.run(p.claim_card("dyna", "Dyna", login="dyna"))
     assert r2["ok"] and r2["price"] == 50 and eco.balances["dyna"] == 70 and eco.adjustments[-1] == ("dyna", -50)
-    r3 = asyncio.run(p.claim_card("dyna", "Dyna"))
+    r3 = asyncio.run(p.claim_card("dyna", "Dyna", login="dyna"))
     assert not r3["ok"] and "100 Hats" in r3["error"] and eco.balances["dyna"] == 70
-    mine = p.my_cards("DYNA")
+    mine = p.my_cards("dyna")
     assert len(mine["cards"]) == 2 and mine["next_price"] == 100 and mine["can_claim"]
+    assert mine["cards"][0]["user_uuid"] == "dyna" and mine["cards"][0]["login"] == "dyna"
     assert p.public_state()["round"]["pot"] == 525 and p.public_state()["round"]["sales"] == 50
     # no Hats service -> free card still works, paid card refused
     eco._connected = False
-    assert asyncio.run(p.claim_card("bob", "Bob"))["ok"]
-    assert "unavailable" in asyncio.run(p.claim_card("bob", "Bob"))["error"]
+    assert asyncio.run(p.claim_card("bob", "Bob", login="bob"))["ok"]
+    assert "unavailable" in asyncio.run(p.claim_card("bob", "Bob", login="bob"))["error"]
     # max cards
     eco._connected = True
     eco.balances["cat"] = 10_000
     for _ in range(4):
-        asyncio.run(p.claim_card("cat", "Cat"))
-    assert "maximum" in asyncio.run(p.claim_card("cat", "Cat"))["error"]
+        asyncio.run(p.claim_card("cat", "Cat", login="cat"))
+    assert "maximum" in asyncio.run(p.claim_card("cat", "Cat", login="cat"))["error"]
     assert p.my_cards("cat")["can_claim"] is False
 
 
@@ -215,7 +228,7 @@ def test_fire_marks_pays_and_closes():
     assert asyncio.run(p.fire("kill"))["error"] == "no open round"
     assert "unknown" in asyncio.run(p.fire("nope"))["error"]
     asyncio.run(p.start_round())
-    card = asyncio.run(p.claim_card("dyna", "Dyna"))["card"]
+    card = asyncio.run(p.claim_card("dyna", "Dyna", login="dyna"))["card"]
     ids = [s["id"] for s in card["squares"]]
     res = asyncio.run(p.fire(ids[0], source="manual"))
     assert res["ok"] and res["changed"] == 1 and not res["lines"]
@@ -263,18 +276,18 @@ def test_show_my_card_on_stream():
     assert p.cards_on_stream() == {"open": False, "round": None, "cards": []}
     assert not asyncio.run(p.set_on_stream("", True))["ok"]
     asyncio.run(p.start_round())
-    asyncio.run(p.claim_card("dyna", "Dyna"))
-    asyncio.run(p.claim_card("bob", "Bob"))
+    asyncio.run(p.claim_card("dyna", "Dyna", login="dyna"))
+    asyncio.run(p.claim_card("bob", "Bob", login="bob"))
     assert p.my_cards("dyna")["on_stream"] is False and p.cards_on_stream()["cards"] == []
-    assert asyncio.run(p.set_on_stream("Dyna", True)) == {"ok": True, "on_stream": True}
-    assert ov.events[-1][0] == "bingo_prefs" and ov.events[-1][1]["login"] == "dyna"
+    assert asyncio.run(p.set_on_stream("dyna", True)) == {"ok": True, "on_stream": True}
+    assert ov.events[-1][0] == "bingo_prefs" and ov.events[-1][1]["user_uuid"] == "dyna"
     assert p.my_cards("dyna")["on_stream"] is True
     shown = p.cards_on_stream()
     assert shown["open"] and [c["login"] for c in shown["cards"]] == ["dyna"] and shown["cards"][0]["squares"][12]["free"]
     # the preference outlives the round
     asyncio.run(p.end_round("manual"))
     asyncio.run(p.start_round())
-    asyncio.run(p.claim_card("dyna", "Dyna"))
+    asyncio.run(p.claim_card("dyna", "Dyna", login="dyna"))
     assert p.on_stream("dyna") and [c["login"] for c in p.cards_on_stream()["cards"]] == ["dyna"]
     asyncio.run(p.set_on_stream("dyna", False))
     assert p.cards_on_stream()["cards"] == []
@@ -298,7 +311,7 @@ def test_auto_squares_from_detector_and_economy():
             squares.append(wanted[slots.index(i)])
         else:
             squares.append(filler.pop(0))
-    p.store.add_card(r["id"], "dyna", "Dyna", 1, 0, squares, [])
+    p.store.add_card(r["id"], "dyna", "dyna", "Dyna", 1, 0, squares, [])
     asyncio.run(p._on_overlay_event("economy_god_detected", {"god": "Ymir"}))
     asyncio.run(p._on_kill("player_kill", 1))
     asyncio.run(p._on_multikill("double_kill"))
@@ -328,7 +341,7 @@ def test_chat_commands():
     asyncio.run(bot.commands["bingo"](Msg(), ""))
     assert bot.chat[-1].startswith("reply: No bingo round")
     asyncio.run(bot.commands["bingostart"](Msg(), ""))
-    asyncio.run(p.claim_card("dyna", "Dyna"))
+    asyncio.run(p.claim_card("dyna", "Dyna", login="dyna"))
     asyncio.run(bot.commands["bingo"](Msg(), ""))
     assert "You: 1 card(s)" in bot.chat[-1]
     asyncio.run(bot.commands["bingocall"](Msg(), ""))
