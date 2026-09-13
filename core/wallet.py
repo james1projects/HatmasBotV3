@@ -115,9 +115,64 @@ CREATE TABLE IF NOT EXISTS wallet_import_rows (
 """
 
 
+LEDGER_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS idx_wallet_ledger_user
+    ON wallet_ledger(user_uuid, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_wallet_ledger_reason
+    ON wallet_ledger(reason, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_wallet_ledger_ref
+    ON wallet_ledger(reason, ref) WHERE ref IS NOT NULL;
+"""
+
+
+async def _ledger_reasons_in_db(db) -> Optional[Set[str]]:
+    """The reasons the live table's CHECK constraint allows (parsed from
+    sqlite_master), or None when the table does not exist yet."""
+    async with db.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'wallet_ledger'") as cur:
+        row = await cur.fetchone()
+    if not row or not row[0]:
+        return None
+    sql = row[0]
+    start = sql.find("reason IN (")
+    if start < 0:
+        return set()
+    end = sql.find(")", start)
+    inner = sql[start + len("reason IN ("):end]
+    return {part.strip().strip("'") for part in inner.split(",") if part.strip()}
+
+
+async def _migrate_ledger_reasons(db) -> bool:
+    """SQLite cannot ALTER a CHECK constraint, so when REASONS has grown
+    since the table was created (2026-09-13: priority_sr and burn were
+    added and every spend failed the CHECK, which debit() read as an
+    empty wallet) the table is rebuilt: same rows, same ids, the current
+    list. Returns True when a rebuild happened."""
+    allowed = await _ledger_reasons_in_db(db)
+    if allowed is None or set(REASONS) <= allowed:
+        return False
+    ddl = SCHEMA_SQL.split("CREATE TABLE IF NOT EXISTS wallet_ledger (", 1)[1].split(");", 1)[0]
+    await db.execute("DROP TABLE IF EXISTS wallet_ledger_new")
+    await db.execute(f"CREATE TABLE wallet_ledger_new ({ddl})")
+    await db.execute(
+        "INSERT INTO wallet_ledger_new (id, user_uuid, asset, delta, balance_after, reason, "
+        "ref, actor, channel, note, created_at) SELECT id, user_uuid, asset, delta, "
+        "balance_after, reason, ref, actor, channel, note, created_at FROM wallet_ledger")
+    await db.execute("DROP TABLE wallet_ledger")
+    await db.execute("ALTER TABLE wallet_ledger_new RENAME TO wallet_ledger")
+    await db.executescript(LEDGER_INDEX_SQL)
+    await db.commit()
+    print(f"[Wallet] wallet_ledger rebuilt: CHECK now allows {len(REASONS)} reasons "
+          f"(was {len(allowed)})")
+    return True
+
+
 async def ensure_schema(db) -> None:
     """Create the wallet tables. Idempotent; registered with
-    core.db.register_schema() by main.py right after core.users."""
+    core.db.register_schema() by main.py right after core.users.
+    Rebuilds wallet_ledger when REASONS has grown (see
+    _migrate_ledger_reasons)."""
+    await _migrate_ledger_reasons(db)
     await db.executescript(SCHEMA_SQL)
     cols = set()
     async with db.execute("PRAGMA table_info(wallet_import_rows)") as cur:
@@ -231,7 +286,9 @@ async def history(db, user_uuid: str, limit: int = 20,
 async def _ledger(db, user_uuid: str, asset: str, delta: int,
                   balance_after: int, reason: str, ref: Optional[str],
                   actor: str, channel: str, note: Optional[str]) -> bool:
-    """Insert the ledger row. False when (reason, ref) already exists."""
+    """Insert the ledger row. False when (reason, ref) already exists.
+    Any other integrity failure (a CHECK on reason, a NOT NULL) is a bug
+    and is raised, never read as "insufficient balance"."""
     try:
         await db.execute(
             "INSERT INTO wallet_ledger (user_uuid, asset, delta, balance_after, "
@@ -239,8 +296,10 @@ async def _ledger(db, user_uuid: str, asset: str, delta: int,
             (user_uuid, asset, delta, balance_after, reason, ref, actor,
              channel, note))
         return True
-    except sqlite3.IntegrityError:
-        return False
+    except sqlite3.IntegrityError as e:
+        if "UNIQUE" in str(e).upper():
+            return False
+        raise
 
 
 async def _ref_exists(db, reason: str, ref: Optional[str]) -> bool:
@@ -271,14 +330,19 @@ async def credit(db, user_uuid: str, asset: str, amount: int, reason: str,
         "updated_at = datetime('now') WHERE user_uuid = ? AND asset = ?",
         (amount, user_uuid, asset))
     after = await get(db, user_uuid, asset)
-    ok = await _ledger(db, user_uuid, asset, amount, after, reason, ref,
-                       actor, channel, note)
-    if not ok:  # lost a race on the same ref: undo the balance move
+    try:
+        ok = await _ledger(db, user_uuid, asset, amount, after, reason, ref,
+                           actor, channel, note)
+    except Exception as e:
+        ok, err = None, e   # a real failure: undo, then raise below
+    if not ok:  # lost a race on the same ref (or a bug): undo the balance move
         await db.execute(
             "UPDATE wallet_balances SET amount = amount - ? "
             "WHERE user_uuid = ? AND asset = ?", (amount, user_uuid, asset))
         if commit:
             await db.commit()
+        if ok is None:
+            raise err
         return None
     if commit:
         await db.commit()
@@ -306,14 +370,19 @@ async def debit(db, user_uuid: str, asset: str, amount: int, reason: str,
             await db.commit()
         return None
     after = await get(db, user_uuid, asset)
-    ok = await _ledger(db, user_uuid, asset, -amount, after, reason, ref,
-                       actor, channel, note)
+    try:
+        ok = await _ledger(db, user_uuid, asset, -amount, after, reason, ref,
+                           actor, channel, note)
+    except Exception as e:
+        ok, err = None, e   # a real failure (a CHECK, a NOT NULL): give the Hats back, then raise
     if not ok:
         await db.execute(
             "UPDATE wallet_balances SET amount = amount + ? "
             "WHERE user_uuid = ? AND asset = ?", (amount, user_uuid, asset))
         if commit:
             await db.commit()
+        if ok is None:
+            raise err
         return None
     if commit:
         await db.commit()

@@ -113,6 +113,45 @@ async def test_leaderboard_and_opt_out():
         await db.close()
 
 
+async def test_ledger_check_migration():
+    """A DB created before priority_sr / burn existed must be rebuilt on
+    ensure_schema, keeping every row and id (the 2026-09-13 bug: every
+    !burn / !vipsr failed the CHECK and looked like an empty wallet)."""
+    db = await aiosqlite.connect(":memory:")
+    try:
+        await U.ensure_schema(db)
+        old_reasons = [r for r in W.REASONS if r not in ("priority_sr", "burn")]
+        old_sql = W.SCHEMA_SQL.replace(
+            ", ".join("'" + r + "'" for r in W.REASONS),
+            ", ".join("'" + r + "'" for r in old_reasons))
+        assert old_sql != W.SCHEMA_SQL
+        await db.executescript(old_sql)
+        u = await U.get_or_create_twitch(db, "1", "dyna")
+        await W.credit(db, u, "hats", 1000, "migration", ref="miu:1:hats")
+        # the old CHECK refuses the new reason, and that must NOT look like
+        # an empty wallet: it raises
+        try:
+            await W.debit(db, u, "hats", 500, "burn")
+            assert False, "old CHECK should have raised"
+        except Exception as e:
+            assert "CHECK" in str(e).upper(), e
+        assert await W.get(db, u) == 1000
+        assert await W._ledger_reasons_in_db(db) == set(old_reasons)
+        assert await W.ensure_schema(db) is None
+        assert await W._ledger_reasons_in_db(db) == set(W.REASONS)
+        hist = await W.history(db, u)
+        assert len(hist) == 1 and hist[0]["id"] == 1 and hist[0]["ref"] == "miu:1:hats"
+        # same ref is still refused (unique index rebuilt), new reasons work
+        assert await W.credit(db, u, "hats", 1000, "migration", ref="miu:1:hats") is None
+        assert await W.debit(db, u, "hats", 500, "burn") == 500
+        assert await W.debit(db, u, "hats", 200, "priority_sr") == 300
+        assert await W.audit(db) == []
+        # a second ensure_schema is a no-op
+        assert await W._migrate_ledger_reasons(db) is False
+    finally:
+        await db.close()
+
+
 async def test_audit_and_fix():
     db = await make_db()
     try:

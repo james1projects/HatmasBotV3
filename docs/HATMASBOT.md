@@ -3135,3 +3135,18 @@ where reason = burn) so it survives restarts. `!burns` lists the top
 three of the stream and the all-time record. Feature toggle `burn`.
 `plugins/burn.py`, `overlays/alerts/kinds/burn.js`; tests:
 `tests/test_burn.py`.
+
+### Fix: new wallet reasons vs the ledger CHECK (2026-09-13, found live)
+
+James ran `!burn 1000` with 15,039 Hats and got "you can't burn 1,000".
+`wallet_ledger.reason` has a CHECK constraint baked in when the table
+was created; adding `priority_sr` and `burn` to `REASONS` did not change
+the live table, the INSERT failed the CHECK, `_ledger()` swallowed it as
+an IntegrityError and `debit()` read that as "insufficient". Two fixes
+in core/wallet.py: `ensure_schema()` now rebuilds `wallet_ledger` (same
+rows and ids, indexes recreated) whenever `REASONS` has a value the live
+CHECK lacks (`_migrate_ledger_reasons`, runs at bot start; verified on a
+copy of the real economy.db), and `_ledger()` only treats a UNIQUE
+violation as "duplicate ref" - any other integrity error undoes the
+balance move and raises. Adding a reason is now: append to `REASONS`,
+restart. Test: `test_ledger_check_migration` in tests/test_wallet.py.
