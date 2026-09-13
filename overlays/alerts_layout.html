@@ -23,6 +23,10 @@
   .btn.ghost { background: transparent; }
   .btn[disabled] { opacity: 0.4; cursor: default; }
   input, select { font: inherit; font-size: 13px; padding: 5px 7px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+  /* the native option list does not inherit the select's dark background (Windows draws it white),
+     so colour the options explicitly or dim text disappears on it */
+  select option { background: #1a232e; color: #fff; }
+  select option:checked { background: #243040; color: #DFA06E; }
   input[type=number] { width: 70px; font-family: var(--mono); text-align: right; }
   input[type=range] { width: 140px; vertical-align: middle; }
   .status { color: var(--dim); font-family: var(--mono); font-size: 12px; }
@@ -51,7 +55,7 @@
   .kinds h4 .n { font-weight: 400; color: var(--muted); text-transform: none; letter-spacing: 0; }
   .kinds h4 .shared { font-weight: 400; color: var(--accent); text-transform: none; letter-spacing: 0; }
   .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; flex: none; }
-  .kinds .krow select { font-size: 11px; padding: 2px 4px; max-width: 92px; color: var(--muted); background: transparent; border-color: transparent; }
+  .kinds .krow select { font-size: 11px; padding: 2px 4px; max-width: 92px; color: var(--muted); background: var(--panel); border-color: transparent; }
   .kinds .krow select:hover { border-color: var(--border); color: var(--text); }
   .kbox .tag .ln { opacity: 0.75; font-size: 18px; }
   .lanerow { border-top: 1px solid var(--border); padding: 6px 0; }

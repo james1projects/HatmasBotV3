@@ -56,6 +56,10 @@
   .chip.pot b { color: var(--accent); }
   input, select { font: inherit; font-size: 13px; padding: 5px 8px; border-radius: 4px; border: 1px solid var(--border-soft); background: var(--bg); color: var(--text); }
   input:focus, select:focus { outline: none; border-color: var(--accent); }
+  /* the native option list does not inherit the select's dark background (Windows draws it white),
+     so colour the options explicitly or dim text disappears on it */
+  select option { background: #1a232e; color: #fff; }
+  select option:checked { background: #243040; color: #DFA06E; }
   input.label { width: 100%; box-sizing: border-box; }
   input.weight { width: 64px; text-align: right; font-family: var(--mono); }
   input.id { width: 150px; font-family: var(--mono); font-size: 12px; }
