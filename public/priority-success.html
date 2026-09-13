@@ -112,6 +112,47 @@
     color: var(--text);
   }
   .actions a:hover { filter: brightness(1.1); }
+
+  .order {
+    max-width: 420px;
+    margin: 0 auto 18px;
+    text-align: left;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 6px 16px;
+  }
+  .order-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 14px;
+  }
+  .order-row:last-child { border-bottom: 0; }
+  .order-row .k {
+    color: var(--text-dim);
+    font-family: var(--font-sans);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    align-self: center;
+  }
+  .order-row .v { color: var(--text); text-align: right; }
+  .order-row .v.mono {
+    font-family: var(--font-mono);
+    letter-spacing: 0.08em;
+  }
+  .order-row .v.ok { color: var(--accent); }
+  .fine {
+    color: var(--text-dim);
+    font-size: 12px;
+    line-height: 1.6;
+    max-width: 420px;
+    margin: 0 auto 28px;
+  }
 </style>
 </head>
 <body>
@@ -124,12 +165,21 @@
     <div class="success-mark">✓</div>
     <h1>Payment received</h1>
     <p class="lede">
-      Your god has been pushed to the head of the queue. Their full
-      gameplay video lands on the Hatmaster YouTube channel. Thanks
-      for the support!
+      Thanks for the support! Your god request is in queue, keep a
+      look out for when it is uploaded to YouTube in the coming days!
     </p>
 
-    <div id="session-pill" class="session-pill" style="display:none"></div>
+    <div id="order" class="order" style="display:none">
+      <div class="order-row"><span class="k">God</span><span class="v" id="o-god"></span></div>
+      <div class="order-row"><span class="k">For</span><span class="v" id="o-user"></span></div>
+      <div class="order-row"><span class="k">Paid</span><span class="v" id="o-amount"></span></div>
+      <div class="order-row"><span class="k">Status</span><span class="v" id="o-status"></span></div>
+      <div class="order-row"><span class="k">Order ref</span><span class="v mono" id="o-ref"></span></div>
+    </div>
+    <p class="fine" id="fine" style="display:none">
+      Keep the order ref if you need to contact Hatmaster about this
+      request. Questions or refunds: whisper Hatmaster on Twitch.
+    </p>
 
     <div class="actions">
       <a class="primary" href="/community">Back to community</a>
@@ -140,17 +190,48 @@
   </div>
 
 <script>
-  // Stripe appends ?session_id=cs_test_... to the success URL. We
-  // don't validate it here (the webhook already did) — we just
-  // surface it in tiny mono text so the user has a reference they
-  // can mention if a payment dispute comes up. Hidden if absent.
-  const params = new URLSearchParams(window.location.search);
-  const sid = params.get('session_id');
-  if (sid) {
-    const el = document.getElementById('session-pill');
-    el.textContent = 'Receipt: ' + sid;
-    el.style.display = 'inline-block';
-  }
+  // Stripe appends ?session_id=cs_... to the success URL. We ask the
+  // bot for that payment's row and render a human order summary
+  // (god, requester, amount, queue status, short order ref). The
+  // webhook that actually queues the god can land a second or two
+  // after this page loads, so "pending" polls briefly until it flips
+  // to fulfilled. Unknown id or bot down = generic copy only.
+  (function () {
+    var sid = new URLSearchParams(window.location.search).get('session_id');
+    if (!sid) return;
+    function el(id) { return document.getElementById(id); }
+    var STATUS = {
+      pending:   ['Confirming payment…', false],
+      paid:      ['Adding to the queue…', false],
+      fulfilled: ['In the queue', true],
+      played:    ['Played', true],
+      refunded:  ['Refunded', false]
+    };
+    var tries = 0;
+    function render(info) {
+      el('o-god').textContent = info.god;
+      el('o-user').textContent = info.username;
+      el('o-amount').textContent = '$' + (info.amount_cents / 100).toFixed(2) +
+        ' ' + String(info.currency || 'usd').toUpperCase();
+      var st = STATUS[info.status] || [info.status, false];
+      el('o-status').textContent = st[0];
+      el('o-status').className = 'v' + (st[1] ? ' ok' : '');
+      el('o-ref').textContent = info.reference;
+      el('order').style.display = 'block';
+      el('fine').style.display = 'block';
+      if ((info.status === 'pending' || info.status === 'paid') && tries < 12) {
+        tries += 1;
+        setTimeout(load, 5000);
+      }
+    }
+    function load() {
+      fetch('/api/priority-request/status?session_id=' + encodeURIComponent(sid))
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (info) { if (info) render(info); })
+        .catch(function () {});
+    }
+    load();
+  })();
 </script>
 </body>
 </html>

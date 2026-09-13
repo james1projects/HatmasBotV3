@@ -283,6 +283,8 @@ class PublicWebServer:
                                  self._handle_stripe_webhook)
         self.app.router.add_get("/priority-success",
                                  self._handle_priority_success_page)
+        self.app.router.add_get("/api/priority-request/status",
+                                self._handle_priority_status)
 
         # Privacy policy — static page. Linked from the landing page
         # (Google OAuth verification requires the policy be reachable
@@ -3587,6 +3589,25 @@ class PublicWebServer:
             return web.json_response(result, status=status)
 
         return web.json_response(result)
+
+    async def _handle_priority_status(
+            self, request: web.Request) -> web.Response:
+        """GET /api/priority-request/status?session_id=cs_...
+        Feeds the /priority-success page: which god, for whom, how
+        much, and whether the webhook has queued it yet. Looks up the
+        local priority_payments row only (no Stripe call). Unknown or
+        malformed ids 404 so the page falls back to generic copy."""
+        plugin = self.priority_request
+        if plugin is None:
+            return web.json_response({"error": "disabled"}, status=503)
+        sid = (request.query.get("session_id") or "").strip()
+        if not sid.startswith("cs_") or len(sid) > 200:
+            return web.json_response({"error": "bad_session"}, status=400)
+        info = await plugin.get_payment(sid)
+        if info is None:
+            return web.json_response({"error": "not_found"}, status=404)
+        return web.json_response(
+            info, headers={"Cache-Control": "no-store"})
 
     async def _handle_priority_success_page(
             self, request: web.Request) -> web.Response:

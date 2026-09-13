@@ -70,6 +70,32 @@ from core.config import (
 )
 
 
+def stripe_to_plain(obj):
+    """Recursively convert a Stripe SDK object into plain dicts/lists.
+
+    stripe-python 15 dropped the dict base class from StripeObject, so
+    `event.get("type")` raises AttributeError on a real webhook
+    delivery (it worked on the plain-dict events the tests feed in).
+    That turned every real checkout into a 500 and Stripe retried
+    forever. Flattening once, right after signature verification,
+    keeps the rest of the handler on ordinary dict semantics no matter
+    which SDK version is installed."""
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
+    if isinstance(obj, dict):
+        return {k: stripe_to_plain(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [stripe_to_plain(v) for v in obj]
+    for name in ("to_dict_recursive", "to_dict"):
+        fn = getattr(obj, name, None)
+        if callable(fn):
+            return stripe_to_plain(fn())
+    keys = getattr(obj, "keys", None)
+    if callable(keys):
+        return {k: stripe_to_plain(obj[k]) for k in keys()}
+    return obj
+
+
 class PriorityRequestPlugin:
     """
     Stateless-ish plugin: most work is request-handling, no chat
@@ -351,9 +377,9 @@ class PriorityRequestPlugin:
         # on bad signature and ValueError on malformed payload. Either
         # way we reject without doing anything.
         try:
-            event = stripe.Webhook.construct_event(
+            event = stripe_to_plain(stripe.Webhook.construct_event(
                 payload, signature, STRIPE_WEBHOOK_SECRET
-            )
+            ))
         except ValueError:
             print("[PriorityRequest] webhook: malformed payload")
             return {"ok": False, "reason": "bad_payload"}
@@ -645,8 +671,8 @@ class PriorityRequestPlugin:
         if not pi:
             # Pre-payment_intent-column rows: fetch it from Stripe.
             try:
-                s = await asyncio.to_thread(
-                    stripe.checkout.Session.retrieve, session_id)
+                s = stripe_to_plain(await asyncio.to_thread(
+                    stripe.checkout.Session.retrieve, session_id))
                 pi = s.get("payment_intent")
                 if pi is not None and not isinstance(pi, str):
                     pi = (pi.get("id") if isinstance(pi, dict)
@@ -657,8 +683,8 @@ class PriorityRequestPlugin:
             return {"ok": False, "error": "no_payment_intent"}
 
         try:
-            refund = await asyncio.to_thread(
-                stripe.Refund.create, payment_intent=pi)
+            refund = stripe_to_plain(await asyncio.to_thread(
+                stripe.Refund.create, payment_intent=pi))
         except Exception as e:
             print(f"[PriorityRequest] Stripe refund failed: {e}")
             return {"ok": False, "error": f"stripe_refund_failed: {e}"}
@@ -668,6 +694,33 @@ class PriorityRequestPlugin:
               f"({uname} -> {god}) refund_id={refund.get('id')}")
         return {"ok": True, "refund_id": refund.get("id"),
                 "queue_entry_removed": removed}
+
+    async def get_payment(self, session_id: str):
+        """One payment, shaped for the public /priority-success page.
+
+        Keyed on the Stripe session id (unguessable, so it doubles as
+        the lookup token). Returns only what the payer already knows
+        plus the lifecycle status — no payment_intent, no message
+        (the message is shown to the broadcaster, not echoed back)."""
+        if self._db is None or not session_id:
+            return None
+        async with self._db.execute("""
+            SELECT twitch_username, god, use_aspect, amount_cents,
+                   currency, status, created_at
+              FROM priority_payments WHERE stripe_session_id = ?
+        """, (session_id,)) as c:
+            r = await c.fetchone()
+        if r is None:
+            return None
+        return {
+            "username": r[0],
+            "god": display_god(r[1], bool(r[2])),
+            "amount_cents": int(r[3] or 0),
+            "currency": r[4] or PRIORITY_REQUEST_CURRENCY,
+            "status": r[5],
+            "created_at": r[6],
+            "reference": session_id[-8:].upper(),
+        }
 
     async def list_payments(self, limit: int = 50) -> list:
         """Recent payments for the control panel table."""

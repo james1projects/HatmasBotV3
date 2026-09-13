@@ -56,6 +56,7 @@ from core.config import (
     STRIPE_SECRET_KEY,
     PRIORITY_REQUEST_PRICE_CENTS,
 )
+from plugins.priority_request import stripe_to_plain
 
 OK, WARN, FAIL = "[ OK ]", "[WARN]", "[FAIL]"
 
@@ -89,6 +90,7 @@ def fetch_stripe_sessions(days: int) -> list:
     sessions = stripe.checkout.Session.list(
         limit=100, created={"gte": cutoff})
     for s in sessions.auto_paging_iter():
+        s = stripe_to_plain(s)   # SDK 15 objects have no .get()
         if is_ours(s):
             out.append(s)
     return out
@@ -99,6 +101,7 @@ def fetch_stripe_refunded_intents(days: int) -> set:
     refunded = set()
     refunds = stripe.Refund.list(limit=100, created={"gte": cutoff})
     for r in refunds.auto_paging_iter():
+        r = stripe_to_plain(r)
         if r.get("payment_intent"):
             refunded.add(r["payment_intent"])
     return refunded

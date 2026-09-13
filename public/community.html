@@ -1241,20 +1241,21 @@
     }
   });
 
-  // ─── website login: lock the priority-request username field ─────
+  // ─── website login: prefill the priority-request username field ──
   // When the viewer is logged in with Twitch, the $5 form's username
-  // is locked to their session login. Kills the typo'd-username
-  // failure mode in the Stripe metadata path — the webhook queues
-  // whatever name was typed, so a locked field means the paid request
-  // always lands on the right account.
+  // starts as their session login so the common case has no typo
+  // risk. It stays editable on purpose: a viewer can buy a priority
+  // request for someone else (the webhook queues whatever name is
+  // submitted). Only prefill an empty field so we never clobber
+  // something the viewer already typed.
   if (window.HatmasAuth) {
     HatmasAuth.ready.then(function (me) {
       if (!me || !me.logged_in) return;
       var f = document.getElementById('pc-twitch');
-      if (f) {
+      if (f && !f.value.trim()) {
         f.value = me.login;
-        f.readOnly = true;
-        f.title = 'Locked to your logged-in Twitch account';
+        f.title = 'Prefilled from your Twitch login. Change it to ' +
+                  'request on behalf of someone else.';
       }
     });
   }

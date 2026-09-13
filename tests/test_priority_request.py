@@ -415,6 +415,60 @@ async def test_manual_refund_session():
     assert res3 == {"ok": False, "error": "not_found"}, res3
 
 
+class SdkObject:
+    """Stand-in for stripe-python 15's StripeObject: item access and
+    to_dict_recursive() work, but there is NO .get() — the shape that
+    500'd every real webhook delivery before stripe_to_plain()."""
+    def __init__(self, d):
+        self._d = {k: (SdkObject(v) if isinstance(v, dict) else v)
+                   for k, v in d.items()}
+    def __getitem__(self, k):
+        return self._d[k]
+    def __contains__(self, k):
+        return k in self._d
+    def keys(self):
+        return self._d.keys()
+    def to_dict_recursive(self):
+        return {k: (v.to_dict_recursive() if isinstance(v, SdkObject)
+                    else v) for k, v in self._d.items()}
+    def __getattr__(self, name):
+        raise AttributeError(name)
+
+
+async def test_sdk15_object_event_without_get():
+    """Real Stripe deliveries arrive as StripeObject, not dict. Must
+    queue exactly like the dict-shaped happy path."""
+    plugin, bot = await make_plugin()
+    res = await deliver(plugin, SdkObject(checkout_event()))
+    assert res["ok"] and res["action"] == "queued", res
+    godreq = bot.plugins["godrequest"]
+    assert len(godreq.queue) == 1 and godreq.queue[0]["god"] == "Ymir"
+    row = await fetch_row(plugin)
+    assert row["status"] == "fulfilled", dict(row)
+    assert row["payment_intent"] == "pi_test_1"
+
+    res = await deliver(plugin, SdkObject(refund_event()))
+    assert res["ok"] and res["action"] == "refund_processed", res
+    assert not godreq.queue
+    row = await fetch_row(plugin)
+    assert row["status"] == "refunded", dict(row)
+
+
+async def test_get_payment_for_success_page():
+    """/priority-success looks the row up by session id and must see
+    the lifecycle status flip, without leaking payment_intent."""
+    plugin, bot = await make_plugin()
+    assert await plugin.get_payment("cs_nope") is None
+    await deliver(plugin, checkout_event())
+    info = await plugin.get_payment("cs_test_1")
+    assert info["god"].lower() == "ymir" and info["username"] == "viewer1", info
+    assert info["amount_cents"] == 500 and info["status"] == "fulfilled"
+    assert info["reference"] == "CS_TEST_1"[-8:]
+    assert "payment_intent" not in info and "message" not in info
+    await deliver(plugin, refund_event())
+    assert (await plugin.get_payment("cs_test_1"))["status"] == "refunded"
+
+
 async def test_list_payments():
     plugin, _ = await make_plugin()
     await deliver(plugin, checkout_event())
@@ -448,6 +502,8 @@ TESTS = [
     test_checkout_after_refund_does_not_requeue,
     test_manual_refund_session,
     test_list_payments,
+    test_sdk15_object_event_without_get,
+    test_get_payment_for_success_page,
 ]
 
 

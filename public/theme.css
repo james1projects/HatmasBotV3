@@ -40,8 +40,8 @@
   --border-hi: #7D98A1;     /* Cool Steel — hover/active border */
   --grid:      #2B3845;
   --text:      #FFFFFF;     /* White — primary body text */
-  --text-dim:  #9FB4BB;     /* Cool Steel (lightened) — secondary text, AA 4.5:1 on all surfaces */
-  --text-fade: rgba(159, 180, 187, 0.78);   /* faded meta text — AA 4.5:1 on page bg */
+  --text-dim:  #CDD9DE;     /* Cool Steel (lightened) — secondary text, ~9.8:1 on bg, 7:1 on panel-hi (AAA) */
+  --text-fade: rgba(205, 217, 222, 0.80);   /* faded meta text — still >7:1 on page bg */
   --accent:    #DFA06E;     /* Light Bronze — primary accent */
   --accent-hi: #E8B583;
   --green:     #DFA06E;     /* gain — strict palette reuses Bronze */
