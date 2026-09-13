@@ -599,6 +599,15 @@ BINGO_DB = DATA_DIR / "bingo.db"
 # created with defaults (every migrated kind off) on first run.
 ALERTS_FILE = DATA_DIR / "alerts.json"
 
+# === TIMED MESSAGES (plugins/timed_messages.py, managed on hatmaster.tv/mod) ===
+# Rotating chat messages in lanes, the last MixItUp feature rebuilt. The
+# file is created with one empty "general" lane on first use; everything
+# else (lanes, intervals, live-only, the global gap) is edited on /mod.
+TIMED_MESSAGES_FILE = DATA_DIR / "timed_messages.json"
+TIMED_MESSAGES_DEFAULT_INTERVAL_MIN = 10   # a new lane's interval
+TIMED_MESSAGES_DEFAULT_GAP_SEC = 60        # first-run global gap between any two posts
+TIMED_MESSAGES_TICK_SEC = 1.0              # how often the loop checks the lanes
+
 # === FEATURE TOGGLES ===
 # Defaults only. The dashboard's features card flips these live, and
 # flips persist across restarts in data/feature_overrides.json (sparse:
@@ -625,6 +634,7 @@ DEFAULT_FEATURES = {
     "cocaster": False,     # off = no earpiece summaries, no caster lines (chat log still records)
     "bingo": True,         # off = hatmaster.tv/bingo 404s and no squares get marked
     "wallet_earn": True,   # off = no passive Hats while live (balances, trading, gamble keep working)
+    "timed_messages": True,  # off = the /mod rotation posts nothing (lanes keep ticking)
 }
 
 # === FINDIT (plugins/findit/ — hatmaster.tv/FindIt, early development) ===

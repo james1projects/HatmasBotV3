@@ -75,6 +75,49 @@
     border: 1px solid var(--border); border-radius: var(--radius);
     padding: 5px 8px; font: 13px var(--font-sans); }
   .respedit:focus { outline: none; border-color: var(--border-hi); }
+  /* timed messages */
+  .tm { background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); margin-bottom: 22px; overflow: hidden; }
+  .tm h2 { font: 600 13px var(--font-mono); text-transform: uppercase;
+    letter-spacing: 1.5px; color: var(--accent); margin: 0;
+    padding: 10px 14px; border-bottom: 1px solid var(--border);
+    display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  .tm h2 .tmstat { margin-left: auto; font-weight: 500; text-transform: none;
+    letter-spacing: 0; color: var(--text-dim); font-size: 12px; }
+  .tm h2 .tmstat .ok { color: var(--accent); }
+  .tm h2 .tmstat .bad { color: var(--red); }
+  .tm .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  .tm .row:last-child { border-bottom: none; }
+  .tm .row label { font-size: 13px; color: var(--text-dim); display: inline-flex;
+    align-items: center; gap: 6px; }
+  .tm input[type="text"], .tm input[type="number"], .tm select {
+    background: var(--bg-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 6px 8px; font: 13px var(--font-mono); }
+  .tm input:focus, .tm select:focus { outline: none; border-color: var(--border-hi); }
+  .tm input[type="number"] { width: 70px; text-align: right; }
+  .tm .lanename { width: 130px; }
+  .tm .msgtext { flex: 1; min-width: 260px; font-family: var(--font-sans); }
+  .tm .help { width: 100%; font-size: 11px; color: var(--text-fade); }
+  .tm button { background: var(--green-bg); color: var(--accent);
+    border: 1px solid var(--accent); border-radius: var(--radius);
+    padding: 6px 12px; font: 600 12px var(--font-mono); cursor: pointer;
+    text-transform: uppercase; letter-spacing: 1px; }
+  .tm button.small { padding: 3px 7px; font-size: 11px; }
+  .tm button.del { background: var(--red-bg); color: var(--red); border-color: var(--red); }
+  .tm button.dim { background: var(--bg-2); color: var(--text-dim); border-color: var(--border); }
+  .tm button:disabled { opacity: .4; cursor: not-allowed; }
+  .tm h3 { font: 500 11px var(--font-mono); text-transform: uppercase; letter-spacing: 1px;
+    color: var(--text-fade); margin: 0; padding: 8px 14px 0; }
+  .tm table td { padding: 7px 14px; }
+  .tm .lanehead td { color: var(--accent); font: 600 12px var(--font-mono);
+    text-transform: uppercase; letter-spacing: 1px; background: var(--bg-2); }
+  .tm .lanehead .meta { color: var(--text-dim); font-weight: 500; text-transform: none;
+    letter-spacing: 0; margin-left: 10px; }
+  .tm tr.next td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+  .tm .actions { white-space: nowrap; text-align: right; width: 1%; }
+  .tm .actions button { margin-left: 4px; }
+  .tm .empty { padding: 12px 14px; color: var(--text-fade); font-size: 13px; }
   .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
     background: var(--panel-hi); border: 1px solid var(--border-hi); color: var(--text);
     border-radius: var(--radius); padding: 10px 18px; font-size: 14px;
@@ -99,6 +142,38 @@
     <button id="addBtn">Add command</button>
     <span class="hint">Custom text commands. Placeholders: {user} = who ran it,
     {args} = text after the command. Name: a-z 0-9 _ - only.</span>
+  </div>
+
+  <div class="tm" id="tm">
+    <h2>Timed messages <span class="tmstat" id="tmStat"></span></h2>
+    <div class="row">
+      <label><span class="toggle"><input type="checkbox" id="tmLiveOnly"><span class="slider"></span></span>
+        Only while live</label>
+      <label>Gap between any two posts
+        <input type="number" id="tmGap" min="0" max="3600" step="1"> s</label>
+      <span class="help">Messages rotate inside a <b>lane</b>: one at a time, in
+      the order listed, every N minutes. Lanes run independently; the gap keeps
+      two lanes from posting back to back. "Only while live" holds everything
+      while the stream is offline (timers restart on going live, nothing piles
+      up). "Min chat" on a lane waits until chat has had that many messages
+      since the lane last posted (0 = off). Post now says a message immediately.
+      Every change is audit-logged.</span>
+    </div>
+    <h3>Lanes</h3>
+    <div id="tmLanes"></div>
+    <div class="row">
+      <input type="text" class="lanename" id="tmNewLane" placeholder="lane name" maxlength="24" autocomplete="off" aria-label="New lane name">
+      <label>every <input type="number" id="tmNewLaneMin" min="1" max="1440" value="10"> min</label>
+      <label>min chat <input type="number" id="tmNewLaneChat" min="0" max="1000" value="0"></label>
+      <button id="tmAddLane">Add lane</button>
+    </div>
+    <h3>Messages</h3>
+    <div id="tmMsgs"></div>
+    <div class="row">
+      <input type="text" class="msgtext" id="tmNewText" placeholder="Message text" maxlength="450" autocomplete="off" aria-label="New timed message">
+      <select id="tmNewMsgLane" aria-label="Lane for the new message"></select>
+      <button id="tmAddMsg">Add message</button>
+    </div>
   </div>
 
   <div class="toolbar">
@@ -342,7 +417,207 @@
     } catch (e) { toast(`Failed: ${e.message}`, true); }
   });
 
+  // ── timed messages ──────────────────────────────────────────────
+  const TM = "/api/mod/timed-messages";
+  let tmSnap = null;
+
+  function tmEl(tag, cls, text) {
+    const el = document.createElement(tag);
+    if (cls) el.className = cls;
+    if (text !== undefined) el.textContent = text;
+    return el;
+  }
+
+  function tmLaneSelect(current) {
+    const sel = tmEl("select");
+    for (const name of Object.keys(tmSnap.lanes).sort()) {
+      const o = tmEl("option", "", name); o.value = name; sel.appendChild(o);
+    }
+    if (current) sel.value = current;
+    return sel;
+  }
+
+  async function tmCall(method, url, body, okMsg) {
+    try {
+      const data = await api(method, url, body);
+      if (data.snapshot) tmRender(data.snapshot);
+      if (okMsg) toast(okMsg);
+      return data;
+    } catch (e) { toast(`Failed: ${e.message}`, true); tmRender(tmSnap); return null; }
+  }
+
+  function tmRenderStatus(snap) {
+    const st = snap.status || {};
+    const el = document.getElementById("tmStat");
+    el.textContent = "";
+    const add = (t, cls) => { const s = tmEl("span", cls, t); el.appendChild(s); el.append("  "); };
+    if (!st.feature_on) add("feature off", "bad");
+    else if (!st.running) add("loop stopped", "bad");
+    else add(st.live ? "live" : "offline", st.live ? "ok" : "");
+    add(`${st.posted || 0} posted`);
+    if (st.last_text) add(`last [${st.last_lane}] ${st.last_post_ago_sec}s ago: ${st.last_text.slice(0, 40)}`);
+    if (st.gap_remaining_sec) add(`gap ${st.gap_remaining_sec}s`);
+  }
+
+  function tmRender(snap) {
+    if (!snap) return;
+    tmSnap = snap;
+    tmRenderStatus(snap);
+    const live = document.getElementById("tmLiveOnly");
+    if (document.activeElement !== live) live.checked = !!snap.settings.live_only;
+    const gap = document.getElementById("tmGap");
+    if (document.activeElement !== gap) gap.value = snap.settings.global_gap_sec;
+
+    // lanes
+    const lanesEl = document.getElementById("tmLanes");
+    lanesEl.textContent = "";
+    const lt = tmEl("table");
+    for (const name of Object.keys(snap.lanes).sort()) {
+      const lane = snap.lanes[name];
+      const tr = tmEl("tr");
+      tr.append(tmEl("td", "cmd", name));
+      const tdI = tmEl("td");
+      const lab = tmEl("label"); lab.append("every ");
+      const inp = tmEl("input"); inp.type = "number"; inp.min = 1; inp.max = 1440; inp.value = lane.interval_min;
+      inp.addEventListener("change", () => tmCall("POST", TM + "/lanes",
+        { name, interval_min: Number(inp.value) }, `${name}: every ${inp.value} min`));
+      lab.append(inp, " min"); tdI.append(lab);
+      const tdC = tmEl("td");
+      const lab2 = tmEl("label"); lab2.append("min chat ");
+      const inp2 = tmEl("input"); inp2.type = "number"; inp2.min = 0; inp2.max = 1000; inp2.value = lane.min_chat_messages;
+      inp2.title = "Post only once chat has had this many messages since the lane last posted. 0 = off.";
+      inp2.addEventListener("change", () => tmCall("POST", TM + "/lanes",
+        { name, min_chat_messages: Number(inp2.value) }, `${name}: min chat ${inp2.value}`));
+      lab2.append(inp2); tdC.append(lab2);
+      const due = lane.enabled_count ? `next in ${Math.floor(lane.due_in_sec / 60)}m ${lane.due_in_sec % 60}s` : "nothing enabled";
+      const tdD = tmEl("td", "desc", `${lane.enabled_count}/${lane.total_count} on · ${due}` +
+        (lane.min_chat_messages ? ` · chat ${lane.chat_since}/${lane.min_chat_messages}` : ""));
+      const tdA = tmEl("td", "actions");
+      const del = tmEl("button", "small del", "delete");
+      del.disabled = lane.total_count > 0 || Object.keys(snap.lanes).length === 1;
+      del.title = del.disabled ? "Move or delete its messages first" : "";
+      del.addEventListener("click", () => {
+        if (confirm(`Delete lane ${name}?`)) tmCall("DELETE", TM + "/lanes/" + encodeURIComponent(name), null, `${name} deleted`);
+      });
+      tdA.append(del);
+      tr.append(tdI, tdC, tdD, tdA);
+      lt.appendChild(tr);
+    }
+    lanesEl.appendChild(lt);
+    const newSel = document.getElementById("tmNewMsgLane");
+    const keep = newSel.value;
+    newSel.replaceChildren(...tmLaneSelect(keep).children);
+    if (keep) newSel.value = keep;
+
+    // messages grouped by lane, in rotation order
+    const msgsEl = document.getElementById("tmMsgs");
+    msgsEl.textContent = "";
+    if (!snap.messages.length) {
+      msgsEl.appendChild(tmEl("div", "empty", "No timed messages yet. Add one below."));
+      return;
+    }
+    const mt = tmEl("table");
+    const byLane = new Map();
+    for (const m of snap.messages) {
+      if (!byLane.has(m.lane)) byLane.set(m.lane, []);
+      byLane.get(m.lane).push(m);
+    }
+    for (const name of [...byLane.keys()].sort()) {
+      const head = tmEl("tr", "lanehead");
+      const td = tmEl("td", "", name); td.colSpan = 4;
+      const lane = snap.lanes[name] || {};
+      td.append(tmEl("span", "meta", `every ${lane.interval_min} min`));
+      head.appendChild(td); mt.appendChild(head);
+      const list = byLane.get(name);
+      list.forEach((m, i) => {
+        const tr = tmEl("tr");
+        if (m.id === lane.next_id) { tr.classList.add("next"); tr.title = "Next up in this lane"; }
+        const tdOn = tmEl("td", "tcell");
+        const lab = tmEl("label", "toggle");
+        const cb = tmEl("input"); cb.type = "checkbox"; cb.checked = m.enabled;
+        cb.addEventListener("change", () => tmCall("POST", TM + "/messages",
+          { id: m.id, text: m.text, lane: m.lane, enabled: cb.checked },
+          `${cb.checked ? "enabled" : "disabled"}: ${m.text.slice(0, 30)}`));
+        lab.append(cb, tmEl("span", "slider")); tdOn.append(lab);
+        const tdT = tmEl("td");
+        const edit = tmEl("input", "respedit"); edit.type = "text"; edit.maxLength = 450; edit.value = m.text;
+        edit.title = "Edit the text. Saves on change.";
+        edit.addEventListener("change", () => tmCall("POST", TM + "/messages",
+          { id: m.id, text: edit.value, lane: m.lane, enabled: m.enabled }, "updated"));
+        tdT.append(edit);
+        const tdL = tmEl("td", "tcell");
+        const sel = tmLaneSelect(m.lane);
+        sel.addEventListener("change", () => tmCall("POST", TM + "/messages",
+          { id: m.id, text: m.text, lane: sel.value, enabled: m.enabled }, `moved to ${sel.value}`));
+        tdL.append(sel);
+        const tdA = tmEl("td", "actions");
+        const up = tmEl("button", "small dim", "\u2191"); up.title = "Earlier in the rotation";
+        const down = tmEl("button", "small dim", "\u2193"); down.title = "Later in the rotation";
+        up.disabled = i === 0; down.disabled = i === list.length - 1;
+        const move = (dir) => {
+          const ids = snap.messages.map(x => x.id);
+          const a = ids.indexOf(m.id), b = ids.indexOf(list[i + dir].id);
+          [ids[a], ids[b]] = [ids[b], ids[a]];
+          tmCall("POST", TM + "/order", { ids }, "reordered");
+        };
+        up.addEventListener("click", () => move(-1));
+        down.addEventListener("click", () => move(1));
+        const now = tmEl("button", "small", "post now"); now.title = "Say it in chat right now";
+        now.addEventListener("click", () => tmCall("POST", TM + "/post/" + encodeURIComponent(m.id), null, "posted"));
+        const del = tmEl("button", "small del", "delete");
+        del.addEventListener("click", () => {
+          if (confirm(`Delete this message?\n\n${m.text}`))
+            tmCall("DELETE", TM + "/messages/" + encodeURIComponent(m.id), null, "deleted");
+        });
+        tdA.append(up, down, now, del);
+        tr.append(tdOn, tdT, tdL, tdA);
+        mt.appendChild(tr);
+      });
+    }
+    msgsEl.appendChild(mt);
+  }
+
+  async function tmLoad(statusOnly) {
+    try {
+      const snap = await api("GET", TM);
+      if (statusOnly && tmSnap) {
+        tmSnap = snap; tmRenderStatus(snap);
+        // refresh the countdowns unless a mod is typing in the section
+        if (!document.getElementById("tm").contains(document.activeElement)) tmRender(snap);
+      } else tmRender(snap);
+    } catch (e) {
+      document.getElementById("tmStat").textContent = "unavailable: " + e.message;
+    }
+  }
+
+  document.getElementById("tmLiveOnly").addEventListener("change", (e) =>
+    tmCall("POST", TM + "/settings", { live_only: e.target.checked },
+           e.target.checked ? "only while live" : "posts while offline too"));
+  document.getElementById("tmGap").addEventListener("change", (e) => {
+    const want = Math.max(0, Math.min(3600, Number(e.target.value) || 0));
+    e.target.value = want;
+    tmCall("POST", TM + "/settings", { global_gap_sec: want }, `gap ${want}s`);
+  });
+  document.getElementById("tmAddLane").addEventListener("click", async () => {
+    const name = document.getElementById("tmNewLane").value.toLowerCase().trim();
+    const data = await tmCall("POST", TM + "/lanes", {
+      name, interval_min: Number(document.getElementById("tmNewLaneMin").value),
+      min_chat_messages: Number(document.getElementById("tmNewLaneChat").value) }, `lane ${name} added`);
+    if (data) document.getElementById("tmNewLane").value = "";
+  });
+  document.getElementById("tmAddMsg").addEventListener("click", async () => {
+    const text = document.getElementById("tmNewText").value.trim();
+    const lane = document.getElementById("tmNewMsgLane").value;
+    const data = await tmCall("POST", TM + "/messages", { text, lane }, "message added");
+    if (data) document.getElementById("tmNewText").value = "";
+  });
+  document.getElementById("tmNewText").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") document.getElementById("tmAddMsg").click();
+  });
+
   load();
+  tmLoad();
+  setInterval(() => tmLoad(true), 15000);
 })();
 </script>
 </body>

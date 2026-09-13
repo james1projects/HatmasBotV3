@@ -308,6 +308,23 @@ class PublicWebServer:
                                  self._handle_api_mod_custom_post)
         self.app.router.add_delete("/api/mod/custom-commands/{name}",
                                    self._handle_api_mod_custom_delete)
+        # timed chat messages (plugins/timed_messages.py), same gate
+        self.app.router.add_get("/api/mod/timed-messages",
+                                self._handle_api_mod_timed_get)
+        self.app.router.add_post("/api/mod/timed-messages/settings",
+                                 self._handle_api_mod_timed_settings)
+        self.app.router.add_post("/api/mod/timed-messages/lanes",
+                                 self._handle_api_mod_timed_lane_post)
+        self.app.router.add_delete("/api/mod/timed-messages/lanes/{name}",
+                                   self._handle_api_mod_timed_lane_delete)
+        self.app.router.add_post("/api/mod/timed-messages/messages",
+                                 self._handle_api_mod_timed_msg_post)
+        self.app.router.add_delete("/api/mod/timed-messages/messages/{id}",
+                                   self._handle_api_mod_timed_msg_delete)
+        self.app.router.add_post("/api/mod/timed-messages/order",
+                                 self._handle_api_mod_timed_order)
+        self.app.router.add_post("/api/mod/timed-messages/post/{id}",
+                                 self._handle_api_mod_timed_post_now)
 
         # ── events tab + hidden events admin ──
         # /events + /api/events are public (drafts stripped). The
@@ -1927,6 +1944,153 @@ class PublicWebServer:
         self._mod_audit(login, name, "custom:deleted", "", "")
         return web.json_response({"ok": True, "action": "deleted"},
                                  headers=self._NO_STORE)
+
+    # ── timed chat messages (/mod, plugins/timed_messages.py) ─────
+
+    def _timed_plugin(self):
+        return (self.bot.plugins or {}).get("timed_messages") if self.bot else None
+
+    async def _timed_guards(self, request, write=True):
+        """Mod session -> origin -> rate limit -> plugin loaded.
+        Returns (ident, err_response)."""
+        ident = await self._mod_identity(request)
+        if ident is None:
+            raise web.HTTPNotFound()
+        if write and not self._origin_ok(request):
+            return None, web.json_response(
+                {"ok": False, "error": "Bad origin."},
+                status=403, headers=self._NO_STORE)
+        if write and not self._ip_rate_ok(request):
+            return None, web.json_response(
+                {"ok": False, "error": "Too many requests."},
+                status=429, headers=self._NO_STORE)
+        if self._timed_plugin() is None:
+            return None, web.json_response(
+                {"ok": False, "error": "Timed messages unavailable."},
+                status=503, headers=self._NO_STORE)
+        return ident, None
+
+    async def _timed_body(self, request):
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            body = None
+        if not isinstance(body, dict):
+            return None, web.json_response({"ok": False, "error": "Bad JSON."},
+                                           status=400, headers=self._NO_STORE)
+        return body, None
+
+    def _timed_result(self, ok, result, key="result"):
+        if not ok:
+            return web.json_response({"ok": False, "error": result},
+                                     status=400, headers=self._NO_STORE)
+        return web.json_response({"ok": True, key: result,
+                                  "snapshot": self._timed_plugin().snapshot()},
+                                 headers=self._NO_STORE)
+
+    async def _handle_api_mod_timed_get(self, request: web.Request):
+        """GET /api/mod/timed-messages: settings, lanes, messages, status."""
+        ident, err = await self._timed_guards(request, write=False)
+        if err is not None:
+            return err
+        snap = self._timed_plugin().snapshot()
+        snap.update(ok=True, user=ident.get("login"))
+        return web.json_response(snap, headers=self._NO_STORE)
+
+    async def _handle_api_mod_timed_settings(self, request: web.Request):
+        """POST {live_only?, global_gap_sec?}."""
+        ident, err = await self._timed_guards(request)
+        if err is not None:
+            return err
+        body, err = await self._timed_body(request)
+        if err is not None:
+            return err
+        ok, result = self._timed_plugin().set_settings(
+            live_only=body.get("live_only"), global_gap_sec=body.get("global_gap_sec"))
+        if ok:
+            self._mod_audit(ident.get("login") or "?", "timed", "settings", "",
+                            json.dumps(result))
+        return self._timed_result(ok, result, "settings")
+
+    async def _handle_api_mod_timed_lane_post(self, request: web.Request):
+        """POST {name, interval_min?, min_chat_messages?}: upsert a lane."""
+        ident, err = await self._timed_guards(request)
+        if err is not None:
+            return err
+        body, err = await self._timed_body(request)
+        if err is not None:
+            return err
+        name = str(body.get("name") or "").lower().strip()
+        ok, result = self._timed_plugin().set_lane(
+            name, interval_min=body.get("interval_min"),
+            min_chat_messages=body.get("min_chat_messages"))
+        if ok:
+            self._mod_audit(ident.get("login") or "?", f"timed-lane:{name}",
+                            result, "", json.dumps(self._timed_plugin().store["lanes"].get(name)))
+        return self._timed_result(ok, result, "action")
+
+    async def _handle_api_mod_timed_lane_delete(self, request: web.Request):
+        ident, err = await self._timed_guards(request)
+        if err is not None:
+            return err
+        name = str(request.match_info.get("name") or "").lower().strip()
+        ok, result = self._timed_plugin().delete_lane(name)
+        if ok:
+            self._mod_audit(ident.get("login") or "?", f"timed-lane:{name}", "deleted", "", "")
+        return self._timed_result(ok, result, "action")
+
+    async def _handle_api_mod_timed_msg_post(self, request: web.Request):
+        """POST {id?, text, lane, enabled?}: create (no id) or update."""
+        ident, err = await self._timed_guards(request)
+        if err is not None:
+            return err
+        body, err = await self._timed_body(request)
+        if err is not None:
+            return err
+        login = ident.get("login") or "?"
+        ok, result = self._timed_plugin().add_or_update_message(
+            body.get("text"), body.get("lane"), enabled=body.get("enabled", True),
+            created_by=login, msg_id=body.get("id"))
+        if ok:
+            state = "" if result["enabled"] else " off"
+            self._mod_audit(login, f"timed-msg:{result['id']}",
+                            "updated" if body.get("id") else "added", "",
+                            f"[{result['lane']}{state}] {result['text'][:80]}")
+        return self._timed_result(ok, result, "message")
+
+    async def _handle_api_mod_timed_msg_delete(self, request: web.Request):
+        ident, err = await self._timed_guards(request)
+        if err is not None:
+            return err
+        mid = str(request.match_info.get("id") or "").strip()
+        ok, result = self._timed_plugin().delete_message(mid)
+        if ok:
+            self._mod_audit(ident.get("login") or "?", f"timed-msg:{mid}", "deleted", "", "")
+        return self._timed_result(ok, result, "action")
+
+    async def _handle_api_mod_timed_order(self, request: web.Request):
+        """POST {ids: [...]}: rotation order = list order."""
+        ident, err = await self._timed_guards(request)
+        if err is not None:
+            return err
+        body, err = await self._timed_body(request)
+        if err is not None:
+            return err
+        ok, result = self._timed_plugin().reorder(body.get("ids"))
+        if ok:
+            self._mod_audit(ident.get("login") or "?", "timed", "reordered", "", "")
+        return self._timed_result(ok, result, "action")
+
+    async def _handle_api_mod_timed_post_now(self, request: web.Request):
+        """POST /api/mod/timed-messages/post/{id}: say it right now."""
+        ident, err = await self._timed_guards(request)
+        if err is not None:
+            return err
+        mid = str(request.match_info.get("id") or "").strip()
+        ok, result = await self._timed_plugin().post_now(mid)
+        if ok:
+            self._mod_audit(ident.get("login") or "?", f"timed-msg:{mid}", "post-now", "", "")
+        return self._timed_result(ok, result, "action")
 
     # ──────────────────────────────────────────────────────────────
     #   EVENTS TAB (+ hidden broadcaster-only events admin)

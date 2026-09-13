@@ -233,6 +233,7 @@ plugins/
   songrequest.py            Spotify/YouTube queue, likes, now playing overlay, blacklist.
   obs.py                    OBS WebSocket control, scene switching, fade effects.
   godrequest.py             God request queue, God Token economy (core/wallet.py), auto-complete. Exposes add_history_listener for resolved entries (played/skipped/removed).
+  timed_messages.py         Rotating chat messages in lanes, managed from hatmaster.tv/mod (data/timed_messages.json). Global gap, live-only, optional min-chat per lane. Feature toggle timed_messages.
   priority_request.py       Stripe-paid priority god requests. Two-phase webhook lifecycle (paid -> fulfilled), refund/dispute handling, played_at stamping via godrequest history listener.
   claude_chat.py            Claude API responses for @mentions. Per-user history, safety prompt.
   gamble.py                 Dice roll gambling with Hats currency, jackpot pool, sound/visual alerts.
@@ -580,6 +581,9 @@ Stock-market-style system where viewers invest Hats in Smite 2 gods as shares. G
 Tracks total deaths per day across every gameplay session the kill detector sees (practice, custom, ranked, all count). State lives in `data/death_count.json` as `{count, date}`. The `_check_day_reset()` helper compares the stored date against today's date on every increment and getter, so the counter auto-resets at midnight without needing a background task. `main.py` wires the existing `kd.on_death` callback to also call `death_counter.increment()`, meaning the counter stays in lockstep with the kill detector. The overlay at `/overlay/deaths` is a transparent text widget (red "Deaths Today" label + large white number) that polls `/api/death_count` every 1 second. Drop the URL into OBS as a browser source and position it anywhere — no dashboard configuration needed.
 
 ---
+
+### Timed Chat Messages (plugins/timed_messages.py + /mod)
+Messages the bot says on a rotation, the last MixItUp feature rebuilt (2026-09-13). Mods manage them on hatmaster.tv/mod, "Timed messages" section, no restart: each message has text, a **lane** and an enabled switch; each lane has an interval in minutes and an optional **min chat** count. Messages in a lane post one at a time, in list order (arrow buttons reorder), wrapping round; lanes run independently. A **global gap** (seconds, default 60) between any two posts means two lanes never post back to back: a lane that comes due inside the gap waits and posts as soon as the gap allows, and its own timer restarts from the moment it actually posted. **Only while live** (default on) holds everything while `stream_status.get_status()["is_live"]` is false; lanes that come due offline are re-armed, so going live never dumps a backlog. "Post now" says a message immediately (starts the gap, does not move the rotation). Store: `data/timed_messages.json` (TIMED_MESSAGES_FILE, atomic_io), created with one empty `general` lane. The loop is one `step()` per second (TIMED_MESSAGES_TICK_SEC); the feature toggle `timed_messages` silences posting without losing lane state. API under `/api/mod/timed-messages` (GET snapshot; POST settings / lanes / messages / order / post/{id}; DELETE lanes/{name}, messages/{id}), every write audit-logged to `data/mod_audit.log` like the command toggles. Tests: `tests/test_timed_messages.py` (fake bot + fake clock: rotation order, global gap, live-only, enable/disable + min chat, validation + persistence).
 
 ### Streamloots Card Events (plugins/streamloots.py)
 Event hub for Streamloots card redemptions, chest purchases, and gifts. Streamloots has no official developer API; the plugin listens to the alert overlay's Server-Sent Events stream at `https://widgets.streamloots.com/alerts/<STREAMLOOTS_ALERT_ID>/media-stream` - the same unofficial-but-stable surface MixItUp and Firebot use. One JSON event arrives per SSE `data:` block. Card fields are read BY NAME ("username", "message", "longMessage", "rarity", "quantity", "giftee"), never positionally - field order is not guaranteed. A gift is a purchase event whose fields include "giftee". The listen loop auto-reconnects with exponential backoff (5s doubling to 120s cap, reset on successful connect). Every raw event is appended to `data/streamloots_events.jsonl` for debugging and for building card maps from real payloads.
@@ -3051,3 +3055,30 @@ duplicated HTTP clients. Dashboard state key `mixitup_connected` ->
 **Tests:** tests/test_wallet.py (8: credit/debit floor, ref
 idempotency, leaderboard + opt-out, audit/fix, merge adds balances,
 tick once-per-window, offline/chat bonus/sub multiplier, event bonus).
+
+## v2.18 Update — Timed chat messages on /mod (2026-09-13)
+
+The last MixItUp feature James still used ("say this every N minutes") is
+now the bot's: `plugins/timed_messages.py`, managed by mods on
+hatmaster.tv/mod under the custom-command box, persisted to
+`data/timed_messages.json`. Full description under "Automated Features >
+Timed Chat Messages".
+
+- **Model:** messages (text, lane, enabled) rotate inside lanes (interval
+  in minutes, optional min chat messages); a global minimum gap keeps any
+  two posts apart whatever lane they came from; live-only by default via
+  the stream status plugin. Lanes are names typed on the page, like the
+  alert box's lanes. One `general` lane exists on first run.
+- **Runtime state is not persisted:** a restart re-arms every lane for a
+  full interval and restarts each rotation at its first message.
+- **Page:** settings row (only while live, gap), lanes table (interval,
+  min chat, next-in countdown, delete when empty), messages grouped by
+  lane with enabled toggle, inline text edit, lane move, up/down order,
+  Post now, delete. The status line polls every 15 s.
+- **Config:** TIMED_MESSAGES_FILE, TIMED_MESSAGES_DEFAULT_INTERVAL_MIN
+  (10), TIMED_MESSAGES_DEFAULT_GAP_SEC (60), TIMED_MESSAGES_TICK_SEC (1);
+  feature toggle `timed_messages` (on). Nothing hardcoded to a channel.
+- **Moving off MixItUp:** copy each MixItUp timer's text into a message
+  by hand, group them into lanes with the intervals you had, then disable
+  the MixItUp timers. The bot must be restarted once to load the plugin.
+- **Tests:** `tests/test_timed_messages.py` (5).

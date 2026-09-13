@@ -58,6 +58,7 @@ from plugins.streamloots import StreamlootsPlugin
 from plugins.factorio import FactorioPlugin
 from plugins.discord_bridge import DiscordBridgePlugin
 from plugins.custom_commands import CustomCommandsPlugin
+from plugins.timed_messages import TimedMessagesPlugin
 from plugins.cocaster import CoCasterPlugin
 from plugins.bingo import BingoPlugin
 from plugins.wallet import WalletPlugin
@@ -359,6 +360,10 @@ async def main():
     # so built-in command names always win collisions.
     custom_commands = CustomCommandsPlugin()
     bot.register_plugin("custom_commands", custom_commands)
+
+    # Rotating chat messages in lanes (managed from /mod), the last
+    # MixItUp feature rebuilt. Posts only while live by default.
+    bot.register_plugin("timed_messages", TimedMessagesPlugin())
 
     # ── Priority god request (Stripe) ──
     # Hosts the $5-skip-the-line flow on hatmaster.tv/community.
