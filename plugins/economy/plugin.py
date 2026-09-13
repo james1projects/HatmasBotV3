@@ -8,7 +8,7 @@ Responsibility split: this file owns
 
   * `__init__` (instance state initialization)
   * `setup`    (chat-command registration + schema-callback registration)
-  * `on_ready` (one-time async startup: connect MixItUp, load prices,
+  * `on_ready` (one-time async startup: open the wallet, load prices,
                build god-name index, kick off backfill loop)
   * `_run_periodic_backfill` (the long-lived backfill background task)
   * `cleanup`  (release per-plugin resources; the shared DB connection
@@ -37,7 +37,7 @@ from .fair_value import _FairValueMixin
 from .god_names import _GodNamesMixin
 from .helpers import _HelpersMixin
 from .match import _MatchMixin
-from .mixitup import _MixItUpMixin
+from .hats import _HatsMixin
 from .overlays import _OverlaysMixin
 from .testing import _TestingMixin
 from .ticking import _TickingMixin
@@ -46,11 +46,11 @@ from .trading import _TradingMixin
 
 class EconomyPlugin(
     # Foundational mixins first — DB schema/cache + god-name lookup +
-    # MixItUp client + fair-value math. Everything else builds on these.
+    # wallet bridge + fair-value math. Everything else builds on these.
     _DBMixin,
     _GodNamesMixin,
     _FairValueMixin,
-    _MixItUpMixin,
+    _HatsMixin,
     # Trading & portfolio CRUD that the higher-level handlers need.
     _TradingMixin,
     # Overlay + helper functions used by both the live-match path and
@@ -73,9 +73,9 @@ class EconomyPlugin(
     def __init__(self, token_manager=None):
         self.bot = None
         self.token_manager = token_manager
-        self.session = None        # aiohttp for MixItUp API
+        self.session = None        # aiohttp (Helix helpers)
         self._currency_id = None
-        self._connected = False    # MixItUp connection status
+        self._connected = False    # wallet usable (shared DB open)
         self._db = None            # aiosqlite connection (set by _init_schema)
 
         # In-memory price cache (loaded from DB on startup)
@@ -170,14 +170,15 @@ class EconomyPlugin(
         # Load price cache from database
         await self._load_prices()
 
-        # Connect to MixItUp
-        await self._resolve_currency_id()
+        # Hats live in the local wallet (core/wallet.py) on the same
+        # connection, so "connected" just means the DB is open.
+        self._connected = self._db is not None
 
         # Build god name lookup from existing data
         await self._build_god_name_index()
 
         print(f"[Economy] Ready — {len(self._prices)} gods tracked, "
-              f"MixItUp {'connected' if self._connected else 'disconnected'}")
+              f"wallet {'ready' if self._connected else 'unavailable'}")
 
         # Schedule the periodic match backfill. Initial wait lets the
         # smite plugin finish its on_ready and connect to tracker.gg,
@@ -241,7 +242,7 @@ class EconomyPlugin(
                 pass
             self._backfill_task = None
 
-        # Close our own aiohttp session (the MixItUp API client).
+        # Close our own aiohttp session.
         if self.session is not None:
             try:
                 await self.session.close()

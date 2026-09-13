@@ -60,6 +60,7 @@ from plugins.discord_bridge import DiscordBridgePlugin
 from plugins.custom_commands import CustomCommandsPlugin
 from plugins.cocaster import CoCasterPlugin
 from plugins.bingo import BingoPlugin
+from plugins.wallet import WalletPlugin
 
 
 async def main():
@@ -104,6 +105,8 @@ async def main():
     bot.register_plugin("godrequest", GodRequestPlugin())
     bot.register_plugin("claude", ClaudeChatPlugin())
     bot.register_plugin("gamble", GamblePlugin())
+    # Hats + God Tokens (core/wallet.py): passive earning, !hats, mod grants.
+    bot.register_plugin("wallet", WalletPlugin())
 
     # Death counter — registered before killdetector so the on_death
     # callback can reference it.

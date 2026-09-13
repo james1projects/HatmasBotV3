@@ -154,7 +154,7 @@ All chat messages, overlay text, and any text that appears on screen must read l
 - Pillow + opencv-python + numpy for KDA digit matching and god portrait identification
 - anthropic SDK for !@HatmasBot Claude API responses
 - gTTS for server-side text-to-speech
-- MixItUp Developer API v2 on localhost:8911 for currency (Hats) and inventory (God Tokens)
+- core/wallet.py for currency (Hats) and God Tokens in economy.db (MixItUp's Developer API was the source of truth until 2026-09-13; tools/import_mixitup.py copied it over)
 
 ## Architecture
 
@@ -172,7 +172,7 @@ KillDeathDetector so the kill detector's `on_death` callback can call
 2. SmitePlugin - match tracking, god detection, predictions, title updates (receives token_manager)
 3. SongRequestPlugin - Spotify/YouTube song requests with queue and likes
 4. OBSPlugin - scene switching, source control, fade effects
-5. GodRequestPlugin - god request queue with MixItUp token economy
+5. GodRequestPlugin - god request queue with the God Token economy (core/wallet.py)
 6. ClaudeChatPlugin - AI chat responses via Claude API (per-user history, safety)
 7. GamblePlugin - wager Hats on dice rolls with jackpot pool
 8. DeathCounterPlugin - daily death tally with auto-reset at midnight, powers the /overlay/deaths browser source
@@ -232,7 +232,7 @@ plugins/
   smite.py                  Match tracking, god detection, predictions, title, record, commands.
   songrequest.py            Spotify/YouTube queue, likes, now playing overlay, blacklist.
   obs.py                    OBS WebSocket control, scene switching, fade effects.
-  godrequest.py             God request queue, token economy, MixItUp integration, auto-complete. Exposes add_history_listener for resolved entries (played/skipped/removed).
+  godrequest.py             God request queue, God Token economy (core/wallet.py), auto-complete. Exposes add_history_listener for resolved entries (played/skipped/removed).
   priority_request.py       Stripe-paid priority god requests. Two-phase webhook lifecycle (paid -> fulfilled), refund/dispute handling, played_at stamping via godrequest history listener.
   claude_chat.py            Claude API responses for @mentions. Per-user history, safety prompt.
   gamble.py                 Dice roll gambling with Hats currency, jackpot pool, sound/visual alerts.
@@ -862,7 +862,6 @@ One-press readiness check for everything HatmasBot needs to stream cleanly. Runs
 | Twitch bot token | Token fresh + reachable Twitch + scopes intact |
 | Twitch broadcaster token | Same + verifies all 7 required broadcaster scopes |
 | OBS WebSocket + Smite 2 source | OBS running + plugin enabled + correct port + source named per `KILL_DETECT_OBS_SOURCE` |
-| MixItUp API | MixItUp open + Developer API enabled on 8911 |
 | tracker.gg | Cloudflare bypass working + broadcaster profile reachable |
 | Public webserver (local) | `core/public_webserver.py` listening on 8070 |
 | hatmaster.tv | DNS + Cloudflare + cloudflared + public webserver, all in one HTTP probe |
@@ -1191,13 +1190,13 @@ channel:manage:broadcast, channel:manage:predictions, channel:read:subscriptions
 | TITLE_COMMAND_ROTATION | List of commands to cycle in {command} placeholder |
 | TITLE_COMMAND_ROTATION_INTERVAL | Seconds between rotations (default: 300) |
 | GAMBLE_ALERT_MIN_WAGER | Min wager for sound/visual alerts (default: 100) |
-| GAMBLE_CURRENCY_NAME | Must match MixItUp currency name ("Hats") |
+| WALLET_EARN_INTERVAL_MIN / HATS_PER_TICK | Passive earning: every 5 min while live, 25 Hats to everyone in chat (5/min) |
 | SHOUTOUT_MIN_VIEWERS | Min raid viewers for auto-shoutout (default: 1) |
 | SHOUTOUT_COOLDOWN | Seconds between shoutouts to same user (default: 120) |
 | TTS_MAX_LENGTH | Max chars for TTS messages (default: 300) |
 | SR_PLAYLIST_AUTO_HIDE_SECONDS | Seconds before playlist overlay hides (default: 8) |
-| MIXITUP_API_BASE | MixItUp API URL (default: localhost:8911) |
-| MIXITUP_INVENTORY_NAME / ITEM_NAME | Must match MixItUp inventory and item names exactly ("God Tokens" / "God Token") |
+| WALLET_EARN_SUB_MULTIPLIER / CHAT_BONUS / OFFLINE | Sub multiplier (subs who chatted since the last tick), chat bonus, pay while offline |
+| WALLET_BONUS_SUB / RAID / BITS_PER_100 / FIRST_MSG | One-off Hats on events (sub + raid hooks wired; 0 = off) |
 | ECONOMY_DB_PATH | SQLite database path (default: data/economy.db) |
 | ECONOMY_STARTING_PRICE | Initial price for new gods (default: 100) |
 | ECONOMY_PRICE_FLOOR | Minimum share price (default: 10) |
@@ -1294,7 +1293,7 @@ access).
 | `GET /auth/twitch/callback` | Code exchange + identity fetch + session cookie issue (v2.7 section) |
 | `POST /auth/logout` | Clear the session cookie |
 | `GET /api/me` | Session identity for JS hydration (401 + capabilities when logged out) |
-| `GET /api/me/balance` | Logged-in viewer's hat balance from MixItUp |
+| `GET /api/me/balance` | Logged-in viewer's hat balance from the wallet |
 | `GET /api/me/holding/{god}` | Logged-in viewer's position in one god (shares + price) for the "you own N" trade display (v2.7.2) |
 | `POST /api/trade` | Authenticated buy/sell — delegates to economy execute_buy/execute_sell behind nine guards (v2.7 section); response carries `holding_shares` (v2.7.2) |
 | `GET /auth.js` | Shared login/trading JS client injected into every page's brand-band |
@@ -1733,8 +1732,8 @@ by Hatmaster June 2026); this section is the operational summary.
   (CSRF backstop on top of SameSite=Strict) → excluded-bot filter →
   per-user 3s cooldown → per-IP 30/min window → body validation →
   per-user asyncio.Lock (closes the balance-check race two browser
-  tabs could hit; chat never races) → economy DB + MixItUp up.
-- **Market hours:** hats live in MixItUp, so trades need the bot PC
+  tabs could hit; chat never races) → economy DB up.
+- **Market hours:** hats live in the bot's wallet, so trades need the bot PC
   up. `/api/stream-status` now carries `market_open`; the site header
   shows MARKET OPEN/CLOSED. Off-stream trading is allowed — prices
   only move at tracker.gg settlement, so it is value-neutral.
@@ -2958,7 +2957,7 @@ returns (ident, user_uuid).
 
 **Behaviour changes:** a YouTube login now trades, nominates, buys
 bingo cards and toggles leaderboard visibility like a Twitch login
-(one person, one row). Hats still live in MixItUp, so a YouTube-only
+(one person, one row). Hats lived in MixItUp until v2.17, so a YouTube-only
 viewer's balance is None and dividends compound as bonus shares until
 docs/WALLET_PLAN.md lands (`_pay_bonus_shares`). `/twitch/<login>` and
 `/yt/<channel>` URLs stay; both resolve to the person and show the
@@ -2981,3 +2980,70 @@ Unlinking / splitting a bad merge is deliberately not built (decision
 **Tests:** tests/test_users.py (7), plus test_economy, test_bingo,
 test_web_trade, test_web_nominate, test_web_profile_live updated to the
 uuid key (harness cookies carry `user_uuid=login`).
+
+## v2.17 Update — The wallet: Hats and God Tokens without MixItUp (2026-09-13)
+
+Design: docs/WALLET_PLAN.md (approved, implemented). The bot is the
+source of truth for viewer money; MixItUp is no longer read or written
+by any plugin (leave it installed as the rollback for a couple of weeks).
+
+**Tables (economy.db, core/wallet.py):** `wallet_balances`
+(user_uuid, asset hats|god_token, amount >= 0, last_earned_at),
+`wallet_ledger` (append-only; delta, balance_after, reason from a fixed
+list, ref, actor, channel, note; UNIQUE (reason, ref) WHERE ref IS NOT
+NULL), `wallet_earn_ticks`, `wallet_imports`, `wallet_import_rows`.
+`SUM(delta)` always equals the balance: `tools/wallet_audit.py`
+proves it (`--fix` rewrites a drifted balance with an 'adjust' row).
+
+**API:** `wallet.get / get_all / credit / debit / adjust / leaderboard /
+history`. A debit is one conditional UPDATE, so two concurrent spends
+cannot both succeed; a duplicate (reason, ref) returns None and changes
+nothing (sub awards, dividends, the import and event bonuses are replay
+safe).
+
+**Who calls it:** economy `_HatsMixin` (`plugins/economy/hats.py`,
+replaces mixitup.py) keeps `_get_balance(uuid)` /
+`_adjust_balance(uuid, amount, reason=, ref=, note=, channel=)` for
+trading (buy/sell/refund), dividends (ref = match:god:uuid), bingo
+(bingo_card / bingo_prize) and the site; gamble (gamble_win/loss) and
+god request (`god_token`: godreq_spend / sub_award / donation_award)
+talk to the wallet directly. `_connected` now just means the shared DB
+is open, so the market is open whenever the bot is; YouTube-only
+viewers hold Hats like everyone else and dividends pay Hats to all.
+
+**Earning (plugins/wallet.py):** every WALLET_EARN_INTERVAL_MIN (5)
+minutes while live, everyone in the Helix chatters list gets
+WALLET_EARN_HATS_PER_TICK (25) Hats -- James's "5 hats a minute" (it
+was 1/min in MixItUp). Viewers who chatted since the last tick can get
+WALLET_EARN_CHAT_BONUS and, if they are subs (known from their chat
+badges), WALLET_EARN_SUB_MULTIPLIER; lurking subs earn the base rate.
+A restart inside half an interval never double-pays (last_earned_at).
+Each pass writes a `wallet_earn_ticks` row. Feature toggle
+"wallet_earn". Event bonuses (`WALLET_BONUS_*`, default 0) are wired for
+subs, resubs, gifts (x count) and raids in core/bot.py with the
+EventSub id as the ref.
+
+**Chat:** `!hats` (balance + tokens), `!tophats`, mods `!givehats
+<user> <n>` / `!takehats <user> <n>`. `!godtokens` / `!godrequest` /
+`!gamble` unchanged for viewers.
+
+**Migration (`tools/import_mixitup.py`):** walks MixItUp's API (pages
+of 100 users), reads each Twitch user's Hats and God Token count,
+resolves the login to a user_uuid and credits reason 'migration' with
+ref `miu:<id>:<asset>`; `--dry-run` first. Every run is recorded in
+`wallet_imports` + `wallet_import_rows` (imported / skipped_zero /
+skipped_bot / already_imported / error) for the side-by-side while
+MixItUp stays installed. Run it with the bot stopped, before the first
+launch of this version, so nobody trades on an empty wallet.
+
+**Removed:** MIXITUP_* and GAMBLE_CURRENCY_NAME config, the MixItUp
+readiness probe and launcher, plugins/economy/mixitup.py, the three
+duplicated HTTP clients. Dashboard state key `mixitup_connected` ->
+`wallet_ready`.
+
+**Deferred (James, 2026-09-12):** MixItUp chat commands and the timed
+"say this every N minutes" messages are rebuilt later.
+
+**Tests:** tests/test_wallet.py (8: credit/debit floor, ref
+idempotency, leaderboard + opt-out, audit/fix, merge adds balances,
+tick once-per-window, offline/chat bonus/sub multiplier, event bonus).

@@ -603,13 +603,35 @@ class HatmasBot(commands.Bot):
     # SUBSCRIPTION / DONATION EVENT HANDLERS
     # =============================================================
 
-    async def _award_god_tokens_for_sub(self, username):
+    async def _award_god_tokens_for_sub(self, username, ref=None):
         """Award God Tokens when someone subscribes (new, resub, or gifted)."""
         if "godrequest" in self.plugins and self.is_feature_enabled("god_requests"):
             try:
-                await self.plugins["godrequest"].award_sub_tokens(username)
+                await self.plugins["godrequest"].award_sub_tokens(username, ref=ref)
             except Exception as e:
                 print(f"[HatmasBot] God token award failed for {username}: {e}")
+        await self._wallet_bonus("sub", username, ref=ref)
+
+    async def _wallet_bonus(self, kind, username, count=1, ref=None, twitch_id=None):
+        """Configured one-off Hats bonus (plugins/wallet.py); silent when 0."""
+        w = self.plugins.get("wallet")
+        if w is None:
+            return
+        try:
+            paid = await w.bonus(username, kind, ref=ref, twitch_id=twitch_id, count=count)
+            if paid:
+                await self.send_chat(f"{username} earned {paid:,} Hats for the {kind}!")
+        except Exception as e:
+            print(f"[HatmasBot] wallet {kind} bonus failed for {username}: {e}")
+
+    @staticmethod
+    def _event_ref(payload, kind):
+        """Stable idempotency key for an EventSub payload."""
+        for attr in ("id", "message_id", "event_id"):
+            v = getattr(payload, attr, None)
+            if v:
+                return f"{kind}:{v}"
+        return None
 
     async def event_subscribe(self, payload):
         """Fired on new subscriptions (channel.subscribe)."""
@@ -617,7 +639,7 @@ class HatmasBot(commands.Bot):
             user = payload.user
             username = user.name if hasattr(user, "name") else str(user)
             print(f"[HatmasBot] New subscriber: {username}")
-            await self._award_god_tokens_for_sub(username)
+            await self._award_god_tokens_for_sub(username, ref=self._event_ref(payload, "sub"))
         except Exception as e:
             print(f"[HatmasBot] event_subscribe error: {e}")
 
@@ -627,7 +649,7 @@ class HatmasBot(commands.Bot):
             user = payload.user
             username = user.name if hasattr(user, "name") else str(user)
             print(f"[HatmasBot] Resub message from: {username}")
-            await self._award_god_tokens_for_sub(username)
+            await self._award_god_tokens_for_sub(username, ref=self._event_ref(payload, "resub"))
         except Exception as e:
             print(f"[HatmasBot] event_subscription_message error: {e}")
 
@@ -642,13 +664,18 @@ class HatmasBot(commands.Bot):
             if "godrequest" in self.plugins and self.is_feature_enabled("god_requests"):
                 from core.config import GODREQ_SUB_TOKENS
                 try:
-                    await self.plugins["godrequest"]._award_token(username, GODREQ_SUB_TOKENS * total)
-                    await self.send_chat(
-                        f"{username} earned {GODREQ_SUB_TOKENS * total} God Token(s) "
-                        f"for gifting {total} sub(s)! Use !godrequest <god>."
-                    )
+                    ok = await self.plugins["godrequest"]._award_token(
+                        username, GODREQ_SUB_TOKENS * total, reason="sub_award",
+                        ref=self._event_ref(payload, "gift"), note=f"gifted {total}")
+                    if ok:
+                        await self.send_chat(
+                            f"{username} earned {GODREQ_SUB_TOKENS * total} God Token(s) "
+                            f"for gifting {total} sub(s)! Use !godrequest <god>."
+                        )
                 except Exception as e:
                     print(f"[HatmasBot] Gift sub token award failed: {e}")
+            await self._wallet_bonus("sub", username, count=total,
+                                     ref=self._event_ref(payload, "gift"))
         except Exception as e:
             print(f"[HatmasBot] event_subscription_gift error: {e}")
 
@@ -660,6 +687,15 @@ class HatmasBot(commands.Bot):
         """Fired when someone raids the channel. Sends a chat shoutout and
         triggers the official Twitch /shoutout API."""
         try:
+            try:
+                _from = getattr(payload, "from_broadcaster", None)
+                _name = getattr(_from, "name", None) or str(_from or "")
+                if _name:
+                    await self._wallet_bonus("raid", _name.lower(),
+                                             ref=self._event_ref(payload, "raid"),
+                                             twitch_id=getattr(_from, "id", None))
+            except Exception as e:
+                print(f"[HatmasBot] raid bonus error: {e}")
             raider = payload.from_broadcaster  # PartialUser
             viewer_count = payload.viewer_count or 0
             raider_name = raider.name if hasattr(raider, "name") else str(raider)

@@ -1,6 +1,20 @@
 # Wallet plan: Hats and God Tokens without MixItUp
 
-Status: APPROVED 2026-09-12 (James). Nothing here is implemented yet.
+Status: IMPLEMENTED 2026-09-13 (`core/wallet.py`, `plugins/wallet.py`,
+`plugins/economy/hats.py`, `tools/import_mixitup.py`, `tools/wallet_audit.py`,
+tests/test_wallet.py; see "v2.17 Update" in HATMASBOT.md).
+
+Deviations from the plan as written:
+- Rates: James chose 5 hats/min (MixItUp paid 1/min) -> tick every 5 min,
+  25 hats per tick. Sub multiplier and chat bonus only apply to viewers
+  who chatted since the last tick (sub status rides on chat badges;
+  Helix's chatters list does not carry it). Defaults: multiplier 1.0,
+  bonuses 0.
+- `wallet_balances` has no display_name column (names come from users).
+- Event bonuses: sub/resub/gift/raid hooks wired; bits and first-message
+  keys exist but have no hook yet.
+- `mod_grant` / `mod_take` ship as !givehats / !takehats.
+- The MixItUp import ref is `miu:<user id>:<asset>` (one row per asset).
 Depends on `USER_IDENTITY_PLAN.md`: all viewer keys are `user_uuid`
 (users.uuid); the identity work lands first.
 Owner of the tables: a new `core/wallet.py` module that registers its

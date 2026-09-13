@@ -2216,8 +2216,9 @@ class PublicWebServer:
         return True
 
     def _market_open(self) -> bool:
-        """Trades need the economy DB AND MixItUp (hats live there).
-        Surfaced via /api/stream-status as market_open."""
+        """Trades need the economy DB (hats live in the local wallet on
+        the same connection). Surfaced via /api/stream-status as
+        market_open."""
         eco = self.economy
         return bool(self._trading_allowed()
                     and getattr(eco, "_db", None) is not None
@@ -2815,7 +2816,7 @@ class PublicWebServer:
         total_cost = payload["total_cost"]
         rank, total_traders = payload["rank"], payload["total_traders"]
 
-        # Hats balance — live MixItUp read; null when it's down or the
+        # Hats balance — from the local wallet; null when it's down or the
         # person has no Twitch login yet (YouTube-only, until the
         # local wallet lands).
         balance = None
@@ -2992,7 +2993,7 @@ class PublicWebServer:
         })
 
     async def _handle_api_me_balance(self, request: web.Request):
-        """GET /api/me/balance — current hat balance from MixItUp."""
+        """GET /api/me/balance — current hat balance from the wallet."""
         ident = self._session_identity(request)
         if ident is None:
             return web.json_response(
@@ -3179,11 +3180,10 @@ class PublicWebServer:
         if not god_name:
             return err(400, f"Unknown god: {god_input}")
         # 9 (checked before amount math so "all" can read balances).
-        # economy DB + MixItUp must both be up — hats live in MixItUp.
+        # economy DB must be up — hats live in the local wallet.
         if getattr(eco, "_db", None) is None \
                 or not getattr(eco, "_connected", False):
-            return err(503, "Market closed — the bot or MixItUp "
-                            "is offline.")
+            return err(503, "Market closed — the bot is offline.")
 
         # 8. per-user lock serializes balance-check → deduct
         async with self._trade_locks[user_uuid]:
@@ -3263,7 +3263,7 @@ class PublicWebServer:
         Guard chain mirrors /api/trade minus the trading switches and
         the per-user cooldown — the 1/day cap is the real limiter and
         the per-IP bucket backstops abuse. No hats move here, so the
-        MixItUp-up check doesn't apply either.
+        wallet-up check doesn't apply either.
         """
         def err(status, message, **extra_headers):
             return web.json_response(

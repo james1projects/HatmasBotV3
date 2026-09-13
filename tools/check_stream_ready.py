@@ -3,7 +3,7 @@ Pre-Stream Readiness Check
 ==========================
 Runs ~12 concurrent end-to-end checks against everything HatmasBot needs
 in order to stream cleanly: bot dashboard, both Twitch tokens, OBS
-WebSocket + game source, MixItUp API, tracker.gg, public website
+WebSocket + game source, tracker.gg, public website
 (localhost:8070 + hatmaster.tv via Cloudflare), cloudflared service
 state, disk space, asset library integrity, Spotify token, and the
 SMITE 2 process.
@@ -63,7 +63,6 @@ except Exception:
 DASHBOARD_PORT = 8069
 PUBLIC_PORT = 8070
 OBS_WS_PORT = 4455
-MIXITUP_PORT = 8911
 
 # Paths
 DATA_DIR = REPO_ROOT / "data"
@@ -352,26 +351,6 @@ async def check_obs_websocket():
     return ok(
         name,
         f"OBS v{result['obs']}, WS v{result['ws']}, '{kd_source}' source found",
-        elapsed_ms=elapsed,
-    )
-
-
-async def check_mixitup():
-    name = "MixItUp API"
-    t0 = time.time()
-    status, body = await _http_get_json(f"http://localhost:{MIXITUP_PORT}/api/v2/status")
-    elapsed = int((time.time() - t0) * 1000)
-    if status == 200:
-        return ok(name, f"localhost:{MIXITUP_PORT} responding", elapsed_ms=elapsed)
-    if status is None:
-        return fail(
-            name, f"localhost:{MIXITUP_PORT} unreachable",
-            hint="Open MixItUp, then Settings → Developer API → enable on port 8911.",
-            elapsed_ms=elapsed,
-        )
-    return warn(
-        name, f"unexpected response (HTTP {status})",
-        hint="MixItUp is up but its Developer API may be disabled.",
         elapsed_ms=elapsed,
     )
 
@@ -683,7 +662,6 @@ ALL_CHECKS = [
     ("broadcaster_token", lambda: check_twitch_token(BROADCASTER_TOKEN_FILE, "broadcaster",
                                                      REQUIRED_BROADCASTER_SCOPES),           False),
     ("obs_websocket",     check_obs_websocket,             False),
-    ("mixitup",           check_mixitup,                   False),
     ("tracker_gg",        check_tracker_gg,                True),   # slow-ish
     ("public_local",      check_local_public_webserver,    False),
     ("web_login",         check_web_login,                 False),

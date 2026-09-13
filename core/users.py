@@ -197,7 +197,7 @@ async def identities(db, user_uuid: Optional[str]) -> List[dict]:
 
 async def twitch_login_of(db, user_uuid: Optional[str]) -> Optional[str]:
     """The user's Twitch login (lowercase), or None for YouTube-only
-    users. Used by the MixItUp bridge and the /twitch/<login> URLs."""
+    users. Used by the /twitch/<login> URLs and the god request queue."""
     live = await resolve(db, user_uuid)
     if not live:
         return None

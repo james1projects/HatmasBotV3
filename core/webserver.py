@@ -98,7 +98,7 @@ class WebServer:
                 "queue": [],
                 "next_god": None,
                 "queue_length": 0,
-                "mixitup_connected": False,
+                "wallet_ready": False,
             },
         }
         # VOD processor state — populated by tools/process_recordings.py

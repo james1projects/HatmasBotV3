@@ -30,7 +30,7 @@ class _APIMixin:
       self._session_changes, self._match_active, self._db
     Calls into _FairValueMixin (_get_volatility), _GodNamesMixin
     (_resolve_god_name), _TradingMixin (_get_full_portfolio),
-    _MixItUpMixin (_get_balance).
+    _HatsMixin (_get_balance).
     """
 
     def register_api_routes(self, app):

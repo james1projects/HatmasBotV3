@@ -126,7 +126,7 @@ window.HatmasAuth = (function () {
     el.textContent = me.market_open ? 'MARKET OPEN' : 'MARKET CLOSED';
     el.title = me.market_open
       ? 'The bot is up. Trades execute immediately'
-      : 'Trades need the bot + MixItUp running';
+      : 'Trades need the bot running';
     return el;
   }
 

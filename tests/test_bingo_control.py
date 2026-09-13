@@ -35,7 +35,7 @@ class _Eco:
     async def _get_balance(self, login):
         return self.balances.get(login)
 
-    async def _adjust_balance(self, login, amount):
+    async def _adjust_balance(self, login, amount, **kw):
         self.adjustments.append((login, amount))
         self.balances[login] = self.balances.get(login, 0) + amount
         return True

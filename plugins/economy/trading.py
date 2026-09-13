@@ -6,7 +6,7 @@ Buy / sell + portfolio queries. Every viewer is a `user_uuid`
 
 Public surface:
   * `execute_buy(user_uuid, god_name, hat_amount)` -
-        deduct hats from MixItUp, add the equivalent share count to
+        deduct hats from the wallet, add the equivalent share count to
         the portfolio (weighted average cost basis), record the
         transaction row, emit a trade-feed event.
   * `execute_sell(user_uuid, god_name, hat_amount)` -
@@ -22,7 +22,7 @@ parse args (amount/all/half/quarter), enforce cooldowns, resolve the
 chatter to a uuid, then call execute_buy / execute_sell here.
 
 Both execute_* paths are idempotent in the sense that they validate
-balance + cooldown before mutating MixItUp; if anything fails between
+balance + cooldown before mutating the wallet; if anything fails between
 the balance deduction and the portfolio update we unwind (see
 execute_buy).
 
@@ -43,7 +43,7 @@ class _TradingMixin:
     Mixed into EconomyPlugin. Reads/writes:
       self._db         - for portfolios + transactions writes
       self._prices     - current prices for share/value math
-      MixItUp helpers from _MixItUpMixin (_get_balance, _adjust_balance)
+      Wallet helpers from _HatsMixin (_get_balance, _adjust_balance)
       God name resolution from _GodNamesMixin (_resolve_god_name)
       Schema helpers from _DBMixin (_ensure_god_exists)
       Overlay emit from _OverlaysMixin (_emit_trade_event)
@@ -83,7 +83,7 @@ class _TradingMixin:
 
         Runs under a per-user lock (see _user_trade_lock). If the
         portfolio/ledger write fails AFTER hats were deducted from
-        MixItUp, the hats are refunded so the user never pays for
+        the wallet, the hats are refunded so the user never pays for
         shares they didn't receive.
         """
         god_name = self._resolve_god_name(god_name)
@@ -113,11 +113,13 @@ class _TradingMixin:
                 return {"success": False, "error": f"Not enough hats (have {balance:,})"}
 
             # Execute: deduct hats
-            success = await self._adjust_balance(user_uuid, -hat_amount)
+            success = await self._adjust_balance(
+                user_uuid, -hat_amount, reason="buy", note=god_name,
+                channel=channel)
             if not success:
                 return {"success": False, "error": "Transaction failed"}
 
-            # Hats are gone from MixItUp now. If the portfolio/ledger
+            # Hats are gone from the wallet now. If the portfolio/ledger
             # write fails, unwind everything - otherwise the user pays
             # and gets nothing (or, if only the ledger failed, gets a
             # refund AND keeps the shares).
@@ -143,7 +145,9 @@ class _TradingMixin:
                         print(f"[Economy] CRITICAL: share rollback failed - "
                               f"{user_uuid} kept {shares:.3f} {god_name} "
                               f"shares: {e2}")
-                refunded = await self._adjust_balance(user_uuid, hat_amount)
+                refunded = await self._adjust_balance(
+                    user_uuid, hat_amount, reason="refund", note=god_name,
+                    channel=channel)
                 if not refunded:
                     print(f"[Economy] CRITICAL: refund failed - {user_uuid} "
                           f"is owed {hat_amount} hats (buy {god_name})")
@@ -202,12 +206,14 @@ class _TradingMixin:
                 return {"success": False, "error": "Amount too small"}
 
             # Remove shares first (local DB - the reliable side), then
-            # credit hats via MixItUp HTTP (the flaky side). If the
+            # credit hats via the wallet HTTP (the flaky side). If the
             # credit fails, restore the shares at their original avg
             # cost so the seller ends up exactly where they started.
             await self._remove_shares(user_uuid, god_name, shares_to_sell)
 
-            success = await self._adjust_balance(user_uuid, net_received)
+            success = await self._adjust_balance(
+                user_uuid, net_received, reason="sell", note=god_name,
+                channel=channel)
             if not success:
                 await self._add_shares(user_uuid, god_name, shares_to_sell,
                                        holding["avg_cost"])

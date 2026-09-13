@@ -174,7 +174,7 @@ async def run_tests():
     async def mock_get_balance(username):
         return mock_miu.get_balance(username)
 
-    async def mock_adjust_balance(username, amount):
+    async def mock_adjust_balance(username, amount, **kw):
         mock_miu.adjust(username, amount)
         return True
 

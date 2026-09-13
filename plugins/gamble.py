@@ -1,7 +1,7 @@
 """
 Gamble Plugin
 ==============
-Viewers wager "Hats" (MixItUp currency) on a dice roll.
+Viewers wager "Hats" (core/wallet.py) on a dice roll.
 
 Rolls 1-100:
   1-59   → Loss (lose wager)
@@ -18,22 +18,19 @@ import asyncio
 import json
 import random
 import time
-import aiohttp
 
+from core import db as _shared_db
+from core import wallet as _wallet
 from core.config import (
-    MIXITUP_API_BASE, GAMBLE_CURRENCY_NAME, GAMBLE_MIN_BET,
-    GAMBLE_COOLDOWN, GAMBLE_JACKPOT_FILE, GAMBLE_ALERT_MIN_WAGER
+    GAMBLE_MIN_BET, GAMBLE_COOLDOWN, GAMBLE_JACKPOT_FILE,
+    GAMBLE_ALERT_MIN_WAGER
 )
 
 
 class GamblePlugin:
     def __init__(self):
         self.bot = None
-        self.session = None
-
-        # MixItUp currency ID (resolved on startup)
-        self._currency_id = None
-        self._connected = False
+        self._db = None  # shared economy.db connection (core/db.py)
 
         # Jackpot pool
         self.jackpot_pool = 0
@@ -75,94 +72,31 @@ class GamblePlugin:
                              description="Current jackpot pool", platforms=("twitch", "discord"), plugin="gamble")
 
     async def on_ready(self):
-        self.session = aiohttp.ClientSession()
-        await self._resolve_currency_id()
+        self._db = await _shared_db.get_db()
+        if self._db is None:
+            print("[Gamble] DB unavailable — gambling disabled")
 
-    # === MIXITUP CURRENCY API ===
+    @property
+    def _connected(self) -> bool:
+        return self._db is not None
 
-    async def _miu_get(self, path):
-        try:
-            async with self.session.get(f"{MIXITUP_API_BASE}{path}") as resp:
-                if resp.status == 200:
-                    return await resp.json()
-                return None
-        except aiohttp.ClientConnectorError:
-            return None
-        except Exception as e:
-            print(f"[Gamble] MixItUp GET error: {e}")
-            return None
+    # === WALLET ===
 
-    async def _miu_patch(self, path, data):
-        try:
-            async with self.session.patch(
-                f"{MIXITUP_API_BASE}{path}",
-                json=data,
-                headers={"Content-Type": "application/json"}
-            ) as resp:
-                if resp.status == 200:
-                    return await resp.json()
-                else:
-                    body = await resp.text()
-                    print(f"[Gamble] MixItUp PATCH {path}: {resp.status} {body}")
-                    return None
-        except Exception as e:
-            print(f"[Gamble] MixItUp PATCH error: {e}")
-            return None
-
-    async def _resolve_currency_id(self):
-        """Look up the MixItUp currency ID for Hats."""
-        currencies = await self._miu_get("/currency")
-        if not currencies:
-            print(f"[Gamble] Could not connect to MixItUp API at {MIXITUP_API_BASE}")
-            print(f"[Gamble] Make sure MixItUp is running and Developer API is enabled")
-            return
-
-        for curr in currencies:
-            if curr.get("Name", "").lower() == GAMBLE_CURRENCY_NAME.lower():
-                self._currency_id = curr["ID"]
-                self._connected = True
-                print(f"[Gamble] MixItUp connected — currency '{GAMBLE_CURRENCY_NAME}': {self._currency_id}")
-                return
-
-        print(f"[Gamble] Currency '{GAMBLE_CURRENCY_NAME}' not found in MixItUp!")
-        available = [c.get("Name") for c in currencies]
-        print(f"[Gamble] Available currencies: {available}")
-
-    async def _get_user_id(self, twitch_username):
-        """Look up MixItUp internal user ID from Twitch username."""
-        data = await self._miu_get(f"/users/Twitch/{twitch_username}")
-        if data and "User" in data:
-            return data["User"]["ID"]
-        return None
-
-    async def _get_balance(self, twitch_username):
+    async def _get_balance(self, user_uuid):
         """Get a user's Hats balance."""
-        if not self._connected:
+        if not self._connected or not user_uuid:
             return None
+        return await _wallet.get(self._db, user_uuid, "hats")
 
-        user_id = await self._get_user_id(twitch_username)
-        if not user_id:
-            return None
-
-        data = await self._miu_get(f"/currency/{self._currency_id}/{user_id}")
-        if data:
-            return data.get("Amount", 0)
-        return 0
-
-    async def _adjust_balance(self, twitch_username, amount):
+    async def _adjust_balance(self, user_uuid, amount, roll=None, wager=None):
         """Add or subtract hats. Positive = add, negative = subtract."""
-        if not self._connected:
+        if not self._connected or not user_uuid or not amount:
             return False
-
-        user_id = await self._get_user_id(twitch_username)
-        if not user_id:
-            return False
-
-        result = await self._miu_patch(
-            f"/currency/{self._currency_id}/{user_id}",
-            {"Amount": amount}
-        )
-        return result is not None
+        res = await _wallet.adjust(
+            self._db, user_uuid, "hats", int(amount),
+            "gamble_win" if amount > 0 else "gamble_loss",
+            note=f"roll {roll} wager {wager}" if roll is not None else None)
+        return res is not None
 
     # === COMMANDS ===
 
@@ -183,13 +117,17 @@ class GamblePlugin:
 
         if not self._connected:
             await self.bot.send_reply(
-                message, "Gambling isn't available right now (MixItUp not connected).", whisper
+                message, "Gambling isn't available right now (wallet not ready).", whisper
             )
             return
 
         username = message.chatter.name.lower()
         display_name = message.chatter.display_name or message.chatter.name
         now = time.time()
+        user_uuid = await self.bot.user_uuid_for(message.chatter)
+        if not user_uuid:
+            await self.bot.send_reply(message, "Hats are still loading. Try again in a moment.", whisper)
+            return
 
         # Cooldown check. The slot is CLAIMED here, before the awaited
         # balance fetch below - previously it was only recorded after
@@ -218,7 +156,7 @@ class GamblePlugin:
             return
 
         # Get current balance
-        balance = await self._get_balance(username)
+        balance = await self._get_balance(user_uuid)
         if balance is None:
             _release_cooldown()
             await self.bot.send_reply(message, "Couldn't check your balance. Try again.", whisper)
@@ -267,7 +205,7 @@ class GamblePlugin:
             jackpot_payout = min(self.jackpot_pool, jackpot_cap)
             winnings = (wager * 3) + jackpot_payout
             net = winnings - wager
-            await self._adjust_balance(username, net)
+            await self._adjust_balance(user_uuid, net, roll, wager)
             self.jackpot_pool -= jackpot_payout
             self._save_jackpot()
             pool_msg = "The jackpot pool has been reset." if self.jackpot_pool == 0 else f"Jackpot pool remaining: {self.jackpot_pool:,} hats."
@@ -284,7 +222,7 @@ class GamblePlugin:
             # Triple win
             winnings = wager * 3
             net = winnings - wager
-            await self._adjust_balance(username, net)
+            await self._adjust_balance(user_uuid, net, roll, wager)
             jackpot_text = self._maybe_jackpot_text()
             await self.bot.send_reply(
                 message,
@@ -299,7 +237,7 @@ class GamblePlugin:
             # Normal win — double
             winnings = wager * 2
             net = winnings - wager
-            await self._adjust_balance(username, net)
+            await self._adjust_balance(user_uuid, net, roll, wager)
             jackpot_text = self._maybe_jackpot_text()
             await self.bot.send_reply(
                 message,
@@ -311,7 +249,7 @@ class GamblePlugin:
 
         else:
             # Loss
-            await self._adjust_balance(username, -wager)
+            await self._adjust_balance(user_uuid, -wager, roll, wager)
             jackpot_text = self._maybe_jackpot_text()
             await self.bot.send_reply(
                 message,
@@ -362,5 +300,4 @@ class GamblePlugin:
 
     async def cleanup(self):
         self._save_jackpot()
-        if self.session:
-            await self.session.close()
+        self._db = None

@@ -893,8 +893,8 @@ function renderGodQueue(godReqs) {
     }).join('');
   }
   if (statusEl) {
-    statusEl.textContent = godReqs.mixitup_connected ? 'MixItUp connected' : 'MixItUp not connected';
-    statusEl.style.color = godReqs.mixitup_connected ? 'rgba(80,200,120,0.5)' : 'rgba(200,80,80,0.5)';
+    statusEl.textContent = godReqs.wallet_ready ? 'Wallet ready' : 'Wallet not ready';
+    statusEl.style.color = godReqs.wallet_ready ? 'rgba(80,200,120,0.5)' : 'rgba(200,80,80,0.5)';
   }
 }
 

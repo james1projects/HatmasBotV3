@@ -186,10 +186,23 @@ SNAP_TIMEOUT_DURATION = 600
 SNAP_COOLDOWN = 300
 SNAP_STATS_FILE = DATA_DIR / "snap_stats.json"
 
-# === MIXITUP API ===
-MIXITUP_API_BASE = "http://localhost:8911/api/v2"
-MIXITUP_INVENTORY_NAME = "God Tokens"        # Name of the inventory in MixItUp
-MIXITUP_ITEM_NAME = "God Token"              # Name of the item within that inventory
+# === WALLET (core/wallet.py — docs/WALLET_PLAN.md) ===
+# Hats and God Tokens live in economy.db now (MixItUp's Developer API
+# was the source of truth until 2026-09-13; tools/import_mixitup.py
+# copies the balances over once). Passive earning: while live, everyone
+# in chat gets WALLET_EARN_HATS_PER_TICK every WALLET_EARN_INTERVAL_MIN
+# minutes (James: "5 hats a minute"). The loop also honours the
+# "wallet_earn" feature toggle on the dashboard.
+WALLET_EARN_ENABLED = True
+WALLET_EARN_INTERVAL_MIN = 5           # minutes between ticks
+WALLET_EARN_HATS_PER_TICK = 25         # 5 hats/min x 5 min
+WALLET_EARN_SUB_MULTIPLIER = 1.0       # subs who chatted since the last tick earn this multiple
+WALLET_EARN_OFFLINE = False            # pay ticks while not live
+WALLET_EARN_CHAT_BONUS = 0             # extra hats per tick for viewers who chatted since the last tick
+WALLET_BONUS_SUB = 0                   # one-off hats on a sub / resub / each gifted sub
+WALLET_BONUS_RAID = 0                  # one-off hats to the raider
+WALLET_BONUS_BITS_PER_100 = 0          # hats per 100 bits (no cheer hook yet)
+WALLET_BONUS_FIRST_MSG = 0             # hats on a viewer's first message of a stream (no hook yet)
 
 # === GOD REQUEST ===
 GODREQ_QUEUE_FILE = DATA_DIR / "godreq_queue.json"
@@ -301,7 +314,6 @@ SOCIAL_FEED_CACHE_TTL = 900   # 15 min — generous for Bluesky, and keeps
                               # about).
 
 # === GAMBLE ===
-GAMBLE_CURRENCY_NAME = "Hats"                # Must match the currency name in MixItUp
 GAMBLE_MIN_BET = 10                          # Minimum wager
 GAMBLE_COOLDOWN = 10                         # Seconds between gambles per user
 GAMBLE_JACKPOT_FILE = DATA_DIR / "gamble_jackpot.json"
@@ -612,6 +624,7 @@ DEFAULT_FEATURES = {
     "findit": False,       # off = hatmaster.tv/FindIt 404s + no GPU worker runs
     "cocaster": False,     # off = no earpiece summaries, no caster lines (chat log still records)
     "bingo": True,         # off = hatmaster.tv/bingo 404s and no squares get marked
+    "wallet_earn": True,   # off = no passive Hats while live (balances, trading, gamble keep working)
 }
 
 # === FINDIT (plugins/findit/ — hatmaster.tv/FindIt, early development) ===

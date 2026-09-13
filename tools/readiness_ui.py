@@ -9,7 +9,6 @@ and puts a fix button next to every non-green row:
     Bot down            -> Start bot        (tools/bot_ctl.ps1 restart)
     Twitch token 401    -> Start bot (auto-refresh) / Re-auth console
     OBS unreachable     -> Launch OBS
-    MixItUp unreachable -> Launch MixItUp
     hatmaster.tv down   -> Restart cloudflared (UAC prompt)
     Low disk            -> Open recordings folder
     SMITE 2 not running -> Launch via Steam
@@ -47,7 +46,6 @@ DEFAULT_PORT = 8073
 PORT_TRIES = 6
 
 OBS_EXE = Path(r"C:\Program Files\obs-studio\bin\64bit\obs64.exe")
-MIXITUP_EXE = Path(os.environ.get("LOCALAPPDATA", "")) / "MixItUp" / "MixItUp.exe"
 SMITE2_STEAM_URL = "steam://rungameid/2437170"
 
 
@@ -78,12 +76,6 @@ def fix_launch_obs() -> str:
     subprocess.Popen([str(OBS_EXE)], cwd=str(OBS_EXE.parent))
     return "OBS launching"
 
-
-def fix_launch_mixitup() -> str:
-    if not MIXITUP_EXE.exists():
-        return f"MixItUp not found at {MIXITUP_EXE}"
-    subprocess.Popen([str(MIXITUP_EXE)], cwd=str(MIXITUP_EXE.parent))
-    return "MixItUp launching (enable Developer API on 8911 if the check stays red)"
 
 
 def fix_restart_cloudflared() -> str:
@@ -122,7 +114,6 @@ FIX_ACTIONS = {
     "start_bot": ("Start bot", fix_start_bot),
     "stop_bot": ("Stop bot", fix_stop_bot),
     "launch_obs": ("Launch OBS", fix_launch_obs),
-    "launch_mixitup": ("Launch MixItUp", fix_launch_mixitup),
     "restart_cloudflared": ("Restart cloudflared", fix_restart_cloudflared),
     "reauth_bot": ("Re-auth bot token", fix_reauth_bot),
     "reauth_broadcaster": ("Re-auth broadcaster", fix_reauth_broadcaster),
@@ -137,7 +128,6 @@ SLUG_FIXES = {
     "bot_token": ["start_bot", "reauth_bot"],
     "broadcaster_token": ["start_bot", "reauth_broadcaster"],
     "obs_websocket": ["launch_obs"],
-    "mixitup": ["launch_mixitup"],
     "public_local": ["start_bot"],
     "web_login": ["start_bot"],
     "public_external": ["restart_cloudflared"],

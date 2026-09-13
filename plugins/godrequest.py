@@ -1,7 +1,7 @@
 """
 God Request Plugin
 ===================
-Viewers spend "God Tokens" (MixItUp inventory items) to request
+Viewers spend "God Tokens" (core/wallet.py, asset god_token) to request
 which god Hatmaster plays next. Mods can manage the queue directly.
 
 Queue logic:
@@ -20,8 +20,8 @@ Smite integration:
   - When the Smite plugin detects you're playing the next requested god,
     it auto-completes that request and advances the queue.
 
-MixItUp integration:
-  - Checks/deducts God Tokens via MixItUp's Developer API
+Wallet integration:
+  - Checks/deducts God Tokens in the local wallet (core/wallet.py)
   - Awards tokens on subs and donations (via Twitch EventSub)
 """
 
@@ -29,13 +29,14 @@ import asyncio
 import json
 import sys
 import time
-import aiohttp
 from datetime import datetime
 from pathlib import Path
 
+from core import db as _shared_db
+from core import users as _users
+from core import wallet as _wallet
 from core.config import (
     BASE_DIR,
-    MIXITUP_API_BASE, MIXITUP_INVENTORY_NAME, MIXITUP_ITEM_NAME,
     GODREQ_QUEUE_FILE, GODREQ_HISTORY_FILE,
     GODREQ_MAX_QUEUE, GODREQ_TOKEN_COST,
     GODREQ_SUB_TOKENS, GODREQ_DONATION_THRESHOLD,
@@ -63,13 +64,8 @@ SMITE2_GODS = god_roster.names()
 class GodRequestPlugin:
     def __init__(self):
         self.bot = None
-        self.session = None  # aiohttp session for MixItUp API
+        self._db = None      # shared economy.db connection (core/db.py)
         self.queue = []      # [{god, requester, requested_at, token_spent}]
-
-        # MixItUp IDs (resolved on startup)
-        self._miu_inventory_id = None
-        self._miu_item_id = None
-        self._miu_connected = False
 
         # Daily roster-refresh task (started in on_ready)
         self._roster_task = None
@@ -148,14 +144,21 @@ class GodRequestPlugin:
             bot.plugins["smite"].on_god_detected(self._on_god_detected)
 
     async def on_ready(self):
-        self.session = aiohttp.ClientSession()
-        await self._resolve_mixitup_ids()
+        self._db = await _shared_db.get_db()
+        if self._db is None:
+            print("[GodReq] DB unavailable — God Tokens disabled")
 
         # Push initial OBS state
         await self._update_obs_display()
 
         # Keep the god roster current without manual steps
         self._roster_task = asyncio.create_task(self._roster_refresh_loop())
+
+    @property
+    def _miu_connected(self) -> bool:
+        """Kept under its old name for the dashboard state: True when
+        the wallet (shared DB) is usable."""
+        return self._db is not None
 
     # === ROSTER REFRESH ===
 
@@ -234,130 +237,49 @@ class GodRequestPlugin:
             except Exception as e:
                 print(f"[GodReq] god_pool reload failed: {e}")
 
-    # === MIXITUP API ===
+    # === GOD TOKENS (core/wallet.py) ===
 
-    async def _miu_get(self, path):
-        """GET request to MixItUp API."""
+    async def _uuid_for(self, who, display=None):
+        """Accepts a user_uuid, a Twitch login, or a chatter object."""
+        if who is None or self._db is None:
+            return None
+        if not isinstance(who, str):
+            return await self.bot.user_uuid_for(who)
+        if len(who) == 36 and who.count("-") == 4:
+            return who
         try:
-            async with self.session.get(f"{MIXITUP_API_BASE}{path}") as resp:
-                if resp.status == 200:
-                    return await resp.json()
-                else:
-                    print(f"[GodReq] MixItUp GET {path}: {resp.status}")
-                    return None
-        except aiohttp.ClientConnectorError:
-            return None
+            return await _users.get_or_create_twitch_login(self._db, who, display)
         except Exception as e:
-            print(f"[GodReq] MixItUp error: {e}")
+            print(f"[GodReq] cannot resolve {who}: {e}")
             return None
 
-    async def _miu_patch(self, path, data):
-        """PATCH request to MixItUp API."""
-        try:
-            async with self.session.patch(
-                f"{MIXITUP_API_BASE}{path}",
-                json=data,
-                headers={"Content-Type": "application/json"}
-            ) as resp:
-                if resp.status == 200:
-                    return await resp.json()
-                else:
-                    body = await resp.text()
-                    print(f"[GodReq] MixItUp PATCH {path}: {resp.status} {body}")
-                    return None
-        except Exception as e:
-            print(f"[GodReq] MixItUp error: {e}")
+    async def _get_token_balance(self, who):
+        """Get a user's God Token count (who = uuid, login or chatter)."""
+        uid = await self._uuid_for(who)
+        if not uid:
             return None
+        return await _wallet.get(self._db, uid, "god_token")
 
-    async def _resolve_mixitup_ids(self):
-        """Look up the inventory ID and item ID for God Tokens."""
-        inventories = await self._miu_get("/inventory")
-        if not inventories:
-            print(f"[GodReq] Could not connect to MixItUp API at {MIXITUP_API_BASE}")
-            print(f"[GodReq] Make sure MixItUp is running and Developer API is enabled")
-            return
-
-        for inv in inventories:
-            if inv["Name"].lower() == MIXITUP_INVENTORY_NAME.lower():
-                self._miu_inventory_id = inv["ID"]
-                for item in inv.get("Items", []):
-                    if item["Name"].lower() == MIXITUP_ITEM_NAME.lower():
-                        self._miu_item_id = item["ID"]
-                        break
-                break
-
-        if self._miu_inventory_id and self._miu_item_id:
-            self._miu_connected = True
-            print(f"[GodReq] MixItUp connected — inventory: {self._miu_inventory_id}, "
-                  f"item: {self._miu_item_id}")
-        else:
-            print(f"[GodReq] MixItUp inventory '{MIXITUP_INVENTORY_NAME}' or "
-                  f"item '{MIXITUP_ITEM_NAME}' not found!")
-            print(f"[GodReq] Create them in MixItUp: Consumables → Inventory")
-            if inventories:
-                names = [inv["Name"] for inv in inventories]
-                print(f"[GodReq] Available inventories: {names}")
-
-    async def _get_miu_user_id(self, twitch_username):
-        """Look up the MixItUp internal user ID from a Twitch username."""
-        data = await self._miu_get(f"/users/Twitch/{twitch_username}")
-        if data and "User" in data:
-            return data["User"]["ID"]
-        return None
-
-    async def _get_token_balance(self, twitch_username):
-        """Get a user's God Token count."""
-        if not self._miu_connected:
-            return None
-
-        user_id = await self._get_miu_user_id(twitch_username)
-        if not user_id:
-            return None
-
-        data = await self._miu_get(
-            f"/inventory/{self._miu_inventory_id}/{self._miu_item_id}/{user_id}"
-        )
-        if data:
-            return data.get("Amount", 0)
-        return 0
-
-    async def _spend_token(self, twitch_username, amount=1):
+    async def _spend_token(self, who, amount=1, note=None):
         """Deduct God Tokens from a user. Returns True if successful."""
-        if not self._miu_connected:
+        uid = await self._uuid_for(who)
+        if not uid:
             return False
+        res = await _wallet.debit(self._db, uid, "god_token", amount,
+                                  "godreq_spend", note=note)
+        return res is not None
 
-        user_id = await self._get_miu_user_id(twitch_username)
-        if not user_id:
+    async def _award_token(self, who, amount=1, reason="sub_award", ref=None,
+                           note=None):
+        """Give God Tokens to a user. Returns True if successful (False
+        when the wallet is down or `ref` was already paid)."""
+        uid = await self._uuid_for(who)
+        if not uid or amount <= 0:
             return False
-
-        # Check balance first
-        balance = await self._get_token_balance(twitch_username)
-        if balance is None or balance < amount:
-            return False
-
-        result = await self._miu_patch(
-            f"/inventory/{self._miu_inventory_id}/{self._miu_item_id}/{user_id}",
-            {"Amount": -amount}
-        )
-        return result is not None
-
-    async def _award_token(self, twitch_username, amount=1):
-        """Give God Tokens to a user. Returns True if successful."""
-        if not self._miu_connected:
-            return False
-
-        user_id = await self._get_miu_user_id(twitch_username)
-        if not user_id:
-            return False
-
-        result = await self._miu_patch(
-            f"/inventory/{self._miu_inventory_id}/{self._miu_item_id}/{user_id}",
-            {"Amount": amount}
-        )
-        if result is not None:
-            new_balance = result.get("Amount", "?")
-            print(f"[GodReq] Awarded {amount} token(s) to {twitch_username} "
-                  f"(balance: {new_balance})")
+        res = await _wallet.credit(self._db, uid, "god_token", amount, reason,
+                                   ref=ref, note=note, channel="system")
+        if res is not None:
+            print(f"[GodReq] Awarded {amount} token(s) to {who} (balance: {res})")
             return True
         return False
 
@@ -593,7 +515,7 @@ class GodRequestPlugin:
             "queue": self.queue,
             "next_god": self.queue[0]["god"] if self.queue else None,
             "queue_length": len(self.queue),
-            "mixitup_connected": self._miu_connected,
+            "wallet_ready": self._miu_connected,
         }
 
     # === COMMANDS ===
@@ -606,10 +528,9 @@ class GodRequestPlugin:
 
         if not args:
             # Show usage with token balance if available
-            username = message.chatter.name.lower()
             balance = None
             if self._miu_connected:
-                balance = await self._get_token_balance(username)
+                balance = await self._get_token_balance(message.chatter)
             if balance is not None:
                 await self.bot.send_reply(
                     message,
@@ -654,17 +575,16 @@ class GodRequestPlugin:
             )
             return
 
-        username = message.chatter.name.lower()
-
-        # Check and spend token via MixItUp
+        # Check and spend a token from the wallet
         if not self._miu_connected:
             await self.bot.send_reply(
-                message, "God tokens aren't available right now (MixItUp not connected).",
+                message, "God tokens aren't available right now (wallet not ready).",
                 whisper
             )
             return
 
-        balance = await self._get_token_balance(username)
+        user_uuid = await self.bot.user_uuid_for(message.chatter)
+        balance = await self._get_token_balance(user_uuid)
         if balance is None or balance < GODREQ_TOKEN_COST:
             await self.bot.send_reply(
                 message,
@@ -674,7 +594,8 @@ class GodRequestPlugin:
             )
             return
 
-        success = await self._spend_token(username, GODREQ_TOKEN_COST)
+        success = await self._spend_token(
+            user_uuid, GODREQ_TOKEN_COST, note=display_god(god_name, use_aspect))
         if not success:
             await self.bot.send_reply(
                 message, "Failed to spend token. Try again!", whisper
@@ -892,8 +813,7 @@ class GodRequestPlugin:
             )
             return
 
-        username = message.chatter.name.lower()
-        balance = await self._get_token_balance(username)
+        balance = await self._get_token_balance(message.chatter)
 
         if balance is not None:
             await self.bot.send_reply(
@@ -976,9 +896,11 @@ class GodRequestPlugin:
 
     # === TOKEN AUTO-AWARD (called from bot event handlers) ===
 
-    async def award_sub_tokens(self, username):
-        """Award tokens when someone subscribes."""
-        success = await self._award_token(username, GODREQ_SUB_TOKENS)
+    async def award_sub_tokens(self, username, ref=None):
+        """Award tokens when someone subscribes. `ref` (the EventSub
+        message id) makes a redelivered event a no-op."""
+        success = await self._award_token(username, GODREQ_SUB_TOKENS,
+                                          reason="sub_award", ref=ref)
         if success:
             await self.bot.send_chat(
                 f"{username} earned {GODREQ_SUB_TOKENS} God Token(s) for subscribing! "
@@ -989,7 +911,9 @@ class GodRequestPlugin:
         """Award tokens based on donation amount ($5 per token)."""
         tokens = int(amount_dollars // GODREQ_DONATION_THRESHOLD)
         if tokens > 0:
-            success = await self._award_token(username, tokens)
+            success = await self._award_token(
+                username, tokens, reason="donation_award",
+                note=f"${amount_dollars:.2f}")
             if success:
                 await self.bot.send_chat(
                     f"{username} earned {tokens} God Token(s) for their "
@@ -1001,6 +925,5 @@ class GodRequestPlugin:
     async def cleanup(self):
         if self._roster_task:
             self._roster_task.cancel()
-        if self.session:
-            await self.session.close()
+        self._db = None
         self._save_data()

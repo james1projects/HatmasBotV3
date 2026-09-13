@@ -58,10 +58,10 @@ async def run_tests(economy, mock):
     assert holding is not None and holding['shares'] > 0, "Should hold shares after buying"
 
     original_adjust = economy._adjust_balance
-    async def credit_fails(u, a):
+    async def credit_fails(u, a, **kw):
         if a > 0:   # credit (positive) fails
             return False
-        return await original_adjust(u, a)   # debit still works
+        return await original_adjust(u, a, **kw)   # debit still works
     economy._adjust_balance = credit_fails
 
     result = await economy.execute_sell('v1', 'ymir', 500)
@@ -121,7 +121,7 @@ async def main():
     mock = MockMixItUp()
     async def mock_get_balance(u):
         return mock.get_balance(u)
-    async def mock_adjust_balance(u, a):
+    async def mock_adjust_balance(u, a, **kw):
         mock.adjust(u, a)
         return True
     economy._get_balance = mock_get_balance

@@ -14,7 +14,7 @@ Squares get marked two ways:
 A line does not win by itself: the viewer must press Bingo! on the site
 (`claim_bingo`), the server re-checks the line against the calls, and the
 first accepted claim wins the pot (BINGO_BASE_PRIZE + half of the Hats
-spent on extra cards), paid through the economy's MixItUp balance like a
+spent on extra cards), paid through the economy's wallet balance like a
 dividend; the round closes and a new one can start. Viewers can tick
 "Show my card on stream" (prefs) to appear on the /overlay/bingo_cards
 carousel.
@@ -333,7 +333,9 @@ class BingoPlugin:
         if eco is None or not getattr(eco, "_connected", False) or prize <= 0:
             return False
         try:
-            return bool(await eco._adjust_balance(card["user_uuid"], int(prize)))
+            return bool(await eco._adjust_balance(
+                card["user_uuid"], int(prize), reason="bingo_prize",
+                ref=f"{round_row['id']}:{card['user_uuid']}", channel="web"))
         except Exception as e:
             self._error(f"payout: {e}")
             return False
@@ -366,7 +368,8 @@ class BingoPlugin:
                 bal = await eco._get_balance(user_uuid)
                 if bal is None or bal < price:
                     return {"ok": False, "error": f"That card costs {price} Hats; you have {bal or 0}."}
-                if not await eco._adjust_balance(user_uuid, -int(price)):
+                if not await eco._adjust_balance(user_uuid, -int(price), reason="bingo_card",
+                                                 note=f"round {r['id']} card {seq}", channel="web"):
                     return {"ok": False, "error": "Could not take the Hats. Try again."}
             squares = make_card(self.pool, card_seed(r["id"], user_uuid, seq))
             card = self.store.add_card(r["id"], user_uuid, login, display, seq, price, squares,
