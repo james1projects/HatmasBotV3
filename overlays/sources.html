@@ -24,7 +24,12 @@
   td.url code { color: var(--dim); }
   td.size { font-family: var(--mono); font-size: 12px; color: var(--dim); white-space: nowrap; }
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 6px; vertical-align: middle; }
-  .dot.on { background: var(--green); }
+  .dot.ok { background: var(--green); }
+  .dot.reconnecting { background: var(--accent); }
+  .dot.down { background: var(--red); box-shadow: 0 0 0 3px rgba(223,41,53,0.25); }
+  td.health { white-space: nowrap; }
+  td.health .sub { display: block; font-size: 11px; color: var(--muted); margin-left: 14px; }
+  td.health.down b { color: var(--red); }
   .btn { font: inherit; font-size: 12px; font-weight: 600; padding: 5px 10px; border-radius: 5px; border: 1px solid var(--border); background: var(--bg); color: var(--text); cursor: pointer; }
   .btn:hover { border-color: var(--accent); }
   .btn[disabled] { opacity: 0.35; cursor: default; }
@@ -37,7 +42,7 @@
 </head>
 <body>
   <h1>OBS browser sources</h1>
-  <p class="lead">Add a source in OBS with the URL and size shown here. The green dot means OBS (or a browser tab) is connected to it right now. Test fires a sample through the real overlay path, so what you see in OBS is what viewers get.</p>
+  <p class="lead">Add a source in OBS with the URL and size shown here. Green = connected right now, with when it was last sent anything. Red = it had a client and lost it for over a minute (a crashed or removed OBS browser source). Grey = nothing has connected since the bot started. Test fires a sample through the real overlay path, so what you see in OBS is what viewers get.</p>
   <div id="groups"><p style="color:var(--muted)">loading</p></div>
   <div class="toast" id="toast"></div>
   <script>
@@ -50,12 +55,21 @@
       ["persistent", "Persistent overlays", "sit on screen and update; each is its own source"],
       ["legacy", "Legacy", "folded into the alert box; still served until every kind is switched on there, then removed"],
     ];
+    function ago(sec) { return sec < 60 ? sec + " s" : sec < 3600 ? Math.round(sec / 60) + " min" : Math.round(sec / 3600) + " h"; }
+    function healthText(s) {
+      const h = s.health || {state: s.clients ? "ok" : "never"};
+      const sent = h.sent_ago == null ? "nothing sent yet" : "last sent " + ago(h.sent_ago) + " ago";
+      if (h.state === "ok") return (h.clients || 1) + ' connected<span class="sub">' + sent + '</span>';
+      if (h.state === "reconnecting") return 'reconnecting<span class="sub">dropped seconds ago</span>';
+      if (h.state === "down") return '<b>down</b> for ' + ago(h.down_for || 0) + '<span class="sub">had a client, none now: check the OBS source</span>';
+      return 'not connected<span class="sub">no OBS source yet</span>';
+    }
     function row(s) {
       return `<tr>
         <td class="name"><b>${esc(s.name)}</b><span>${esc(s.what)}</span>${s.replaced_by ? `<div class="replaced">in the alert box as: ${esc(s.replaced_by)}</div>` : ""}</td>
         <td class="url"><code>${esc(s.url)}</code> <button type="button" class="btn" data-copy="${esc(s.url)}">Copy</button></td>
         <td class="size">${s.size[0]} x ${s.size[1]}</td>
-        <td><span class="dot ${s.clients ? "on" : ""}"></span>${s.clients ? s.clients + " connected" : "not connected"}</td>
+        <td class="health ${s.health.state}"><span class="dot ${s.health.state}"></span>${healthText(s)}</td>
         <td style="white-space:nowrap;text-align:right">
           ${s.settings ? `<a class="btn" href="${esc(s.settings)}" style="text-decoration:none">Settings</a> ` : ""}
           <button type="button" class="btn" data-test="${esc(s.key)}" ${s.test ? "" : "disabled title='no test event'"}>Test</button>

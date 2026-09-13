@@ -94,12 +94,14 @@ def registry(alert_box=None, overlay_manager=None, base: str = DASHBOARD) -> Lis
                          "what": (f"{len(enabled)} of {len(KINDS)} kinds enabled: " + ", ".join(
                              KINDS[k]["label"] for k in enabled)) if enabled else "No kinds enabled yet.",
                          "clients": _clients(overlay_manager, f"alerts:{box}"),
+                         "health": health_of(overlay_manager, f"alerts:{box}"),
                          "settings": f"/alerts/layout?box={box}", "test": bool(enabled), "kinds": enabled})
     for s in SOURCES:
         row = {k: v for k, v in s.items() if k != "test"}
         row["url"] = base + s["path"]
         row["size"] = list(s["size"])
         row["clients"] = _clients(overlay_manager, s["key"])
+        row["health"] = health_of(overlay_manager, s["key"])
         row["test"] = s.get("test") is not None
         if s["group"] == "legacy":
             row["replaced_by"] = KINDS[s["kind"]]["label"]
@@ -112,6 +114,35 @@ def find(key: str) -> Optional[dict]:
         if s["key"] == key:
             return s
     return None
+
+
+DOWN_AFTER = 60      # seconds without a client, after having had one, before a source is "down"
+
+
+def health_of(overlay_manager, key: str, now: Optional[float] = None) -> dict:
+    """One of: never (no client has ever connected since the bot started),
+    ok (connected), down (had a client, none for DOWN_AFTER s), reconnecting
+    (dropped less than DOWN_AFTER s ago). Plus how long ago it was last
+    sent anything."""
+    import time as _t
+    now = _t.time() if now is None else now
+    h = {"clients": 0, "connected_at": None, "disconnected_at": None, "sent_at": None}
+    try:
+        if overlay_manager is not None:
+            h.update(overlay_manager.health(key))
+    except Exception:
+        pass
+    if h["clients"]:
+        state = "ok"
+    elif h["connected_at"] is None:
+        state = "never"
+    elif h["disconnected_at"] and now - h["disconnected_at"] < DOWN_AFTER:
+        state = "reconnecting"
+    else:
+        state = "down"
+    return {"state": state, "clients": h["clients"],
+            "sent_ago": None if h["sent_at"] is None else max(0, int(now - h["sent_at"])),
+            "down_for": None if state != "down" or not h["disconnected_at"] else int(now - h["disconnected_at"])}
 
 
 def _clients(overlay_manager, key: str) -> int:

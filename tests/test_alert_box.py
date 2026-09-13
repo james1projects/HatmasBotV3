@@ -348,6 +348,26 @@ def test_shared_lane_placement():
     assert v['lanes']['popups']['shared'] is False and v['lanes']['popups']['w'] == 520
 
 
+def test_source_health():
+    from core.overlay_manager import OverlayManager
+    om = OverlayManager(None)
+    now = 1_000_000.0
+    assert S.health_of(om, "deaths", now)["state"] == "never"
+    ws = object()
+    om.register_ws("deaths", ws)
+    assert S.health_of(om, "deaths", now)["state"] == "ok"
+    om._health["deaths"]["sent_at"] = now - 240
+    assert S.health_of(om, "deaths", now)["sent_ago"] == 240
+    om.unregister_ws("deaths", ws)
+    om._health["deaths"]["disconnected_at"] = now - 10
+    assert S.health_of(om, "deaths", now)["state"] == "reconnecting"
+    om._health["deaths"]["disconnected_at"] = now - 300
+    h = S.health_of(om, "deaths", now)
+    assert h["state"] == "down" and h["down_for"] == 300
+    rows = S.registry(None, om)
+    assert all("health" in r for r in rows) and next(r for r in rows if r["key"] == "deaths")["health"]["state"] == "down"
+
+
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
 
 def main() -> int:

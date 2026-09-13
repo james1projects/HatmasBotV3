@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from pathlib import Path
 from typing import Dict, Set, Optional, Any
 
@@ -25,6 +26,10 @@ class OverlayManager:
         self._pending_show_delays: Dict[str, asyncio.Task] = {}
         self._send_lock = asyncio.Lock()  # Serialize all WebSocket sends
         self.rules: Dict[str, Any] = {}
+        # Health for the dashboard's /sources page: when a source last
+        # connected, when its last client dropped, when it was last sent
+        # anything. Timestamps (time.time()), never cleared.
+        self._health: Dict[str, Dict[str, float]] = {}
 
         # Generic event listeners — receive every emit() call regardless
         # of overlay_rules.json. Used by the public webserver (port 8070)
@@ -74,6 +79,7 @@ class OverlayManager:
         if overlay_name not in self._ws_clients:
             self._ws_clients[overlay_name] = set()
         self._ws_clients[overlay_name].add(ws)
+        self._health.setdefault(overlay_name, {})["connected_at"] = time.time()
 
     def unregister_ws(self, overlay_name: str, ws) -> None:
         """Unregister a websocket connection for an overlay.
@@ -86,6 +92,15 @@ class OverlayManager:
             self._ws_clients[overlay_name].discard(ws)
             if not self._ws_clients[overlay_name]:
                 del self._ws_clients[overlay_name]
+                self._health.setdefault(overlay_name, {})["disconnected_at"] = time.time()
+
+    def health(self, overlay_name: str) -> Dict[str, Any]:
+        """{"clients", "connected_at", "disconnected_at", "sent_at"} for a source
+        (timestamps or None). The /sources page turns this into ok / idle / down."""
+        h = self._health.get(overlay_name, {})
+        return {"clients": self.client_count(overlay_name),
+                "connected_at": h.get("connected_at"), "disconnected_at": h.get("disconnected_at"),
+                "sent_at": h.get("sent_at")}
 
     def client_count(self, overlay_name: str) -> int:
         """How many WebSocket clients are currently connected for an overlay."""
@@ -125,6 +140,7 @@ class OverlayManager:
 
         message_json = json.dumps(message)
         disconnected = set()
+        self._health.setdefault(overlay_name, {})["sent_at"] = time.time()
 
         async with self._send_lock:
             # Snapshot: register_ws/unregister_ws can mutate the live set
