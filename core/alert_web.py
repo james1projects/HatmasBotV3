@@ -45,6 +45,8 @@ class AlertWeb:
 
     def register(self, router) -> None:
         router.add_get("/sources", self.handle_sources_page)
+        router.add_get("/sounds", self.handle_sounds_page)        # audition every sample, simulate the spin reel
+        router.add_get("/api/sounds", self.handle_sounds)
         router.add_get("/api/sources", self.handle_sources)
         router.add_post("/api/sources/test", self.handle_sources_test)
         router.add_get("/api/sources/test", self.handle_sources_test)
@@ -77,6 +79,22 @@ class AlertWeb:
 
     async def handle_sources_page(self, request):
         return _file(OVERLAY_DIR / "sources.html")
+
+    async def handle_sounds_page(self, request):
+        return _file(OVERLAY_DIR / "soundboard.html")
+
+    async def handle_sounds(self, request):
+        """Every sample under assets/sounds (served at /assets/sounds/), so
+        the sound board can list them without a hand-kept manifest."""
+        from core.config import SOUNDS_DIR
+        files = []
+        if SOUNDS_DIR.is_dir():
+            for f in sorted(SOUNDS_DIR.rglob("*.ogg")):
+                rel = f.relative_to(SOUNDS_DIR).as_posix()
+                parts = rel.split("/")
+                files.append({"path": rel, "pack": "/".join(parts[:-1]), "name": f.stem,
+                              "bytes": f.stat().st_size})
+        return web.json_response({"base": "/assets/sounds/", "files": files})
 
     async def handle_sources(self, request):
         return self._reply({"ok": True, "sources": _sources.registry(self._get_box(), self._get_overlay(), self._base)})

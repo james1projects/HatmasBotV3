@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sound board</title>
+<link rel="stylesheet" href="/overlays/hatmas_theme.css">
+<style>
+  body { margin: 0; background: #1c2630; color: var(--hm-text, #fff); font-family: 'Inter', sans-serif; font-size: 13px; }
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 20px 18px 60px; display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 18px; }
+  .wrap > * { min-width: 0; }
+  @media (max-width: 900px) { .wrap { grid-template-columns: minmax(0, 1fr); } }
+  .file, .role { min-width: 0; }
+  h1 { font-family: 'BigNoodleTitling', 'Bebas Neue', 'Inter', sans-serif; font-size: 30px; letter-spacing: 3px; margin: 0 0 4px; grid-column: 1 / -1; }
+  .sub { color: var(--hm-text-secondary, #AFC2C9); margin: 0 0 8px; grid-column: 1 / -1; }
+  .panel { background: var(--hm-bg, rgba(32,44,57,0.94)); border: 1px solid var(--hm-border, rgba(223,160,110,0.18)); border-radius: 10px; padding: 12px 14px; }
+  .panel h2 { font-family: 'BigNoodleTitling', 'Bebas Neue', 'Inter', sans-serif; font-size: 18px; letter-spacing: 2px; margin: 0 0 8px; color: var(--hm-gold, #DFA06E); text-transform: uppercase; }
+  .tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+  input[type="search"], select, input[type="number"] { background: #141c24; color: var(--hm-text, #fff); border: 1px solid var(--hm-border, rgba(223,160,110,0.18)); border-radius: 6px; padding: 6px 8px; font: 13px 'Inter', sans-serif; }
+  input[type="search"] { min-width: 240px; }
+  input[type="number"] { width: 64px; }
+  button { background: rgba(223,160,110,0.12); color: var(--hm-gold, #DFA06E); border: 1px solid rgba(223,160,110,0.4); border-radius: 6px; padding: 5px 10px; font: 600 12px 'Inter', sans-serif; cursor: pointer; }
+  button:hover { background: rgba(223,160,110,0.22); }
+  button.big { padding: 9px 16px; font-size: 13px; }
+  button.dim { color: var(--hm-text-secondary, #AFC2C9); border-color: rgba(175,194,201,0.3); background: transparent; }
+  .pack { margin: 8px 0 2px; font: 600 11px 'JetBrains Mono', monospace; letter-spacing: 1px; text-transform: uppercase; color: var(--hm-text-muted, #8FA6AF); }
+  .files { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 4px; }
+  .file { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 6px; border: 1px solid transparent; cursor: pointer; }
+  .file:hover { background: rgba(255,255,255,0.04); }
+  .file.picked { border-color: var(--hm-gold, #DFA06E); background: rgba(223,160,110,0.1); }
+  .file.playing { background: rgba(223,160,110,0.18); }
+  .file .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+  .file .kb { color: var(--hm-text-muted, #8FA6AF); font-size: 10px; }
+  .file.hidden { display: none; }
+  .roles .role { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: 1px solid rgba(255,255,255,0.05); }
+  .roles .role:first-child { border-top: 0; }
+  .roles .rname { width: 130px; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--hm-gold, #DFA06E); }
+  .roles .rlist { flex: 1; min-width: 0; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--hm-text-secondary, #AFC2C9); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+  .row label { color: var(--hm-text-secondary, #AFC2C9); display: inline-flex; align-items: center; gap: 5px; }
+  .picked-name { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--hm-text, #fff); padding: 6px 8px; background: #141c24; border-radius: 6px; min-height: 16px; }
+  .note { color: var(--hm-text-muted, #8FA6AF); font-size: 11px; line-height: 1.5; }
+  .reel { position: relative; height: 54px; overflow: hidden; border-radius: 8px; background: #141c24; margin: 8px 0; }
+  .reel .track { position: absolute; top: 0; left: 0; height: 100%; display: flex; }
+  .reel .cell { width: 80px; height: 54px; display: flex; align-items: center; justify-content: center; border-right: 1px solid rgba(255,255,255,0.06); font-family: 'JetBrains Mono', monospace; color: var(--hm-text-secondary, #AFC2C9); flex-shrink: 0; }
+  .reel .marker { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; background: var(--hm-gold, #DFA06E); }
+  .kbd { font-family: 'JetBrains Mono', monospace; background: #141c24; border-radius: 4px; padding: 1px 5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Sound board</h1>
+  <p class="sub">Every sample under <span class="kbd">assets/sounds</span>. Click a name to hear it and make it the reel's tick;
+    the roles below are what the alert box plays today (<span class="kbd">SOUNDS</span> in alerts_core.js). Change a sound by
+    editing that table with the name you liked.</p>
+
+  <div class="panel">
+    <h2>Samples</h2>
+    <div class="tools">
+      <input type="search" id="q" placeholder="filter (click, chip, tick, impact…)" autocomplete="off">
+      <label><input type="checkbox" id="shortOnly"> short only (&lt; 300 ms)</label>
+      <span class="note" id="count"></span>
+    </div>
+    <div id="files"></div>
+  </div>
+
+  <div>
+    <div class="panel">
+      <h2>Spin reel test</h2>
+      <div class="picked-name" id="pickedName">click a sample on the left</div>
+      <div class="reel"><div class="track" id="track"></div><div class="marker"></div></div>
+      <div class="row">
+        <label>rate <input type="number" id="rateMin" step="0.05" value="0.9"> to <input type="number" id="rateMax" step="0.05" value="1.15"></label>
+        <label>gain <input type="number" id="gain" step="0.05" min="0" max="1" value="0.45"></label>
+      </div>
+      <div class="row">
+        <label>landing <select id="land"></select></label>
+      </div>
+      <div class="row">
+        <button class="big" id="runReel">Play reel</button>
+        <button class="dim" id="useCurrent">Use current spin_tick</button>
+      </div>
+      <p class="note">Same easing and tick cadence as the real spin (about 2.2 s, ticks slow with the reel). Rate range = random
+        pitch per tick; the real spin uses 0.9 to 1.15 at gain 0.45.</p>
+    </div>
+    <div class="panel" style="margin-top: 14px;">
+      <h2>Roles in use</h2>
+      <div class="roles" id="roles"></div>
+    </div>
+  </div>
+</div>
+
+<script src="/overlays/alerts/alerts_core.js"></script>
+<script>
+(async () => {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const ac = new AC();
+  const buffers = {};
+  const BASE = '/assets/sounds/';
+  const durations = {};
+
+  async function load(path) {
+    if (buffers[path]) return buffers[path];
+    const r = await fetch(BASE + path);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const buf = await ac.decodeAudioData(await r.arrayBuffer());
+    buffers[path] = buf; durations[path] = buf.duration * 1000;
+    return buf;
+  }
+  function play(path, o) {
+    o = o || {};
+    return load(path).then(buf => {
+      if (ac.state === 'suspended') ac.resume();
+      const src = ac.createBufferSource(); src.buffer = buf; src.playbackRate.value = o.rate || 1;
+      const g = ac.createGain(); g.gain.value = o.gain == null ? 1 : o.gain;
+      src.connect(g); g.connect(ac.destination); src.start(ac.currentTime + (o.at || 0));
+      return buf.duration;
+    }).catch(e => { console.warn(path, e); return 0; });
+  }
+
+  // ── the file list ──
+  const data = await fetch('/api/sounds').then(r => r.json());
+  const filesEl = document.getElementById('files');
+  const byPack = new Map();
+  for (const f of data.files) { if (!byPack.has(f.pack)) byPack.set(f.pack, []); byPack.get(f.pack).push(f); }
+  let picked = null;
+  const rows = [];
+  for (const [pack, files] of byPack) {
+    const h = document.createElement('div'); h.className = 'pack'; h.textContent = pack; filesEl.appendChild(h);
+    const grid = document.createElement('div'); grid.className = 'files'; filesEl.appendChild(grid);
+    for (const f of files) {
+      const row = document.createElement('div'); row.className = 'file'; row.dataset.path = f.path;
+      row.innerHTML = '<span class="name"></span><span class="kb"></span>';
+      row.querySelector('.name').textContent = f.name;
+      row.querySelector('.kb').textContent = Math.round(f.bytes / 1024) + ' KB';
+      row.title = f.path;
+      row.addEventListener('click', async () => {
+        for (const r of rows) r.el.classList.remove('picked');
+        row.classList.add('picked', 'playing');
+        picked = f.path;
+        document.getElementById('pickedName').textContent = f.path.replace(/^kenney\//, '').replace(/\.ogg$/, '');
+        const d = await play(f.path, {gain: 0.8});
+        setTimeout(() => row.classList.remove('playing'), Math.max(150, d * 1000));
+        row.querySelector('.kb').textContent = Math.round(durations[f.path] || 0) + ' ms';
+      });
+      grid.appendChild(row);
+      rows.push({el: row, f, pack: h, grid});
+    }
+  }
+  // durations for the "short only" filter: decode lazily in the background
+  (async () => { for (const r of rows) { try { await load(r.f.path); r.el.querySelector('.kb').textContent = Math.round(durations[r.f.path]) + ' ms'; } catch (_) {} } applyFilter(); })();
+
+  function applyFilter() {
+    const q = document.getElementById('q').value.toLowerCase().trim();
+    const shortOnly = document.getElementById('shortOnly').checked;
+    let n = 0;
+    for (const r of rows) {
+      const okQ = !q || r.f.path.toLowerCase().includes(q);
+      const okS = !shortOnly || (durations[r.f.path] != null && durations[r.f.path] < 300);
+      r.el.classList.toggle('hidden', !(okQ && okS));
+      if (okQ && okS) n++;
+    }
+    document.getElementById('count').textContent = n + ' of ' + rows.length;
+  }
+  document.getElementById('q').addEventListener('input', applyFilter);
+  document.getElementById('shortOnly').addEventListener('change', applyFilter);
+  applyFilter();
+
+  // ── roles ──
+  const SOUNDS = (window.HatmasAlerts && HatmasAlerts.SOUNDS) || {};
+  const rolesEl = document.getElementById('roles');
+  for (const [role, names] of Object.entries(SOUNDS)) {
+    const div = document.createElement('div'); div.className = 'role';
+    div.innerHTML = '<span class="rname"></span><span class="rlist"></span>';
+    div.querySelector('.rname').textContent = role;
+    div.querySelector('.rlist').textContent = names.join(', ');
+    div.querySelector('.rlist').title = names.join('\n');
+    const b = document.createElement('button'); b.textContent = 'play';
+    b.addEventListener('click', () => play('kenney/' + names[Math.floor(Math.random() * names.length)] + '.ogg', {gain: 0.8}));
+    div.appendChild(b);
+    rolesEl.appendChild(div);
+  }
+  const landSel = document.getElementById('land');
+  for (const [role, names] of Object.entries(SOUNDS)) {
+    for (const n of names) { const o = document.createElement('option'); o.value = 'kenney/' + n + '.ogg'; o.textContent = n + (role === 'spin_land' ? '  (current)' : ''); landSel.appendChild(o); }
+  }
+  if (SOUNDS.spin_land) landSel.value = 'kenney/' + SOUNDS.spin_land[0] + '.ogg';
+
+  document.getElementById('useCurrent').addEventListener('click', () => {
+    const names = SOUNDS.spin_tick || [];
+    if (!names.length) return;
+    picked = 'kenney/' + names[0] + '.ogg';
+    document.getElementById('pickedName').textContent = names.join(' + ') + '  (current)';
+    for (const r of rows) r.el.classList.toggle('picked', names.some(n => r.f.path === 'kenney/' + n + '.ogg'));
+  });
+
+  // ── the reel: same easing and tick schedule as overlays/alerts/kinds/spin.js ──
+  const track = document.getElementById('track');
+  const STRIDE = 80, N = 40;
+  for (let i = 0; i < N; i++) { const c = document.createElement('div'); c.className = 'cell'; c.textContent = (i % 12) + 1; track.appendChild(c); }
+  let timers = [];
+  document.getElementById('runReel').addEventListener('click', async () => {
+    if (!picked) { document.getElementById('pickedName').textContent = 'click a sample on the left first'; return; }
+    timers.forEach(clearTimeout); timers = [];
+    if (ac.state === 'suspended') await ac.resume();
+    const tickNames = (document.getElementById('pickedName').textContent.includes('(current)') && SOUNDS.spin_tick)
+      ? SOUNDS.spin_tick.map(n => 'kenney/' + n + '.ogg') : [picked];
+    await Promise.all(tickNames.map(load));
+    const rMin = Number(document.getElementById('rateMin').value) || 1, rMax = Number(document.getElementById('rateMax').value) || 1;
+    const gain = Number(document.getElementById('gain').value);
+    const land = landSel.value;
+    const frameWidth = track.parentElement.clientWidth;
+    const winnerIndex = 28 + Math.floor(Math.random() * 8);
+    const winnerCenter = winnerIndex * STRIDE + STRIDE / 2;
+    const DUR = 2200 + Math.max(0, 12 - 8) * 75;
+    const X1 = 0.20, Y1 = 0.55, X2 = 0.25, Y2 = 1.0;
+    const bez = (t, p1, p2) => 3 * (1 - t) * (1 - t) * t * p1 + 3 * (1 - t) * t * t * p2 + t * t * t;
+    const tForY = (y) => { if (y <= 0) return 0; if (y >= 1) return 1; let lo = 0, hi = 1; for (let i = 0; i < 24; i++) { const m = (lo + hi) / 2; if (bez(m, Y1, Y2) < y) lo = m; else hi = m; } return (lo + hi) / 2; };
+    const offset = -(winnerCenter - frameWidth / 2);
+    const dist = Math.abs(offset);
+    track.style.transition = 'none'; track.style.transform = 'translateX(0)';
+    void track.offsetWidth;
+    requestAnimationFrame(() => {
+      track.style.transition = 'transform ' + (DUR / 1000) + 's cubic-bezier(' + X1 + ', ' + Y1 + ', ' + X2 + ', ' + Y2 + ')';
+      track.style.transform = 'translateX(' + offset + 'px)';
+      const half = STRIDE / 2 - frameWidth / 2;
+      for (let i = Math.max(0, Math.ceil(-half / STRIDE)); i <= Math.floor((dist - half) / STRIDE); i++) {
+        const dd = i * STRIDE + half; if (dd <= 0 || dd > dist) continue;
+        timers.push(setTimeout(() => play(tickNames[Math.floor(Math.random() * tickNames.length)],
+          {gain, rate: rMin + Math.random() * Math.max(0, rMax - rMin)}), DUR * bez(tForY(dd / dist), X1, X2)));
+      }
+      timers.push(setTimeout(() => play(land, {gain: 0.9}), DUR));
+    });
+  });
+})();
+</script>
+</body>
+</html>

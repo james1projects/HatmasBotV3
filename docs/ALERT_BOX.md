@@ -260,3 +260,10 @@ gamble_shake / throw / jackpot / fanfare / big_win / win / win_tone /
 loss / loss_card, bingo_claim / bingo_prize, burn_boom / crackle /
 record. To change a sound, edit the table; `tests/test_alert_box.py`
 fails on a name that is not on disk.
+
+**Sound board** (`/sounds`, `overlays/soundboard.html`, 2026-09-13): every
+sample under assets/sounds with a play button, the current role table
+with play buttons, and a spin-reel simulator that runs the real tick
+cadence with whichever sample you click (rate range, gain, landing
+sound). Pick by ear, then change the `SOUNDS` table. `/api/sounds` lists
+the files.
