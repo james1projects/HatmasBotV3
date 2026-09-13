@@ -227,9 +227,38 @@
     margin-top: 2px;
   }
 
-  /* ─── top traders (leaderboard strip) ───────────────────────── */
-  .top-traders {
+  /* ─── top traders + top hats (leaderboard strips) ───────────── */
+  .boards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
     margin: 0 0 28px;
+  }
+  .boards:not(:has(.top-traders:not([style*="display:none"]))),
+  .boards:not(:has(.top-hats:not([style*="display:none"]))) {
+    grid-template-columns: 1fr;
+  }
+  .top-traders, .top-hats {
+    margin: 0;
+    min-width: 0;
+  }
+  .top-hats .section-title { margin-bottom: 8px; }
+  .top-hats .section-title .hint {
+    font-family: var(--font-sans);
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--text-fade);
+    text-transform: none;
+    letter-spacing: 0;
+    margin-left: 8px;
+  }
+  .trader-row .watch {
+    font-family: var(--font-mono);
+    font-feature-settings: 'tnum' 1;
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    color: var(--text-dim);
+    flex-shrink: 0;
   }
   .top-traders .section-title { margin-bottom: 8px; }
   .leaderboard-list {
@@ -384,6 +413,7 @@
 
   /* ─── mobile ─────────────────────────────────────────────────── */
   @media (max-width: 720px) {
+    .boards { grid-template-columns: 1fr; }
     .hero { padding: 22px 0 14px; }
     .hero-title { font-size: 40px; }
     .hero-tagline { font-size: 14px; }
@@ -664,11 +694,20 @@
       </div>
     </section>
 
-    <section class="top-traders" id="top-traders" style="display:none"
-             aria-label="Top traders by portfolio value">
-      <div class="section-title">Top traders</div>
-      <div class="leaderboard-list" id="leaderboard-list"></div>
-    </section>
+    <div class="boards">
+      <section class="top-traders" id="top-traders" style="display:none"
+               aria-label="Top traders by portfolio value">
+        <div class="section-title">Top traders</div>
+        <div class="leaderboard-list" id="leaderboard-list"></div>
+      </section>
+
+      <section class="top-hats" id="top-hats" style="display:none"
+               aria-label="Top Hats balances">
+        <div class="section-title">Top Hats
+          <span class="hint" id="top-hats-hint">earned by watching</span></div>
+        <div class="leaderboard-list" id="hats-list"></div>
+      </section>
+    </div>
 
     <section class="activity-strip" id="activity-strip" style="display:none"
              aria-label="Recent market activity">
@@ -898,6 +937,53 @@
 
   refreshLeaderboard();
   setInterval(refreshLeaderboard, 60 * 1000);
+
+  // ─── top hats (wallet leaderboard strip) ────────────────────────
+  // Pulls /api/hats-leaderboard: the biggest Hats balances with watch
+  // time. Hats are earned by watching and have no real-world value,
+  // so this strip is pure bragging rights. Same 60s cadence.
+  const $topHats  = document.getElementById('top-hats');
+  const $hatsList = document.getElementById('hats-list');
+  const $hatsHint = document.getElementById('top-hats-hint');
+
+  async function refreshHats() {
+    try {
+      const r = await fetch('/api/hats-leaderboard?limit=10');
+      if (!r.ok) return;
+      const data = await r.json();
+      renderHats(data.leaderboard || [], data.total_holders || 0, data.currency || 'Hats');
+    } catch (e) { /* silent */ }
+  }
+
+  function renderHats(entries, total, currency) {
+    if (!entries.length) {
+      $topHats.style.display = 'none';
+      return;
+    }
+    $topHats.style.display = '';
+    $hatsHint.textContent = currency + ' earned by watching · ' +
+      total.toLocaleString() + ' holders';
+    $hatsList.innerHTML = '';
+    for (const e of entries) {
+      const a = document.createElement('a');
+      a.className = 'trader-row rank-' + e.rank;
+      a.href = e.url;
+      const badgeClass = e.platform === 'twitch' ? 'twitch' : 'youtube';
+      const badgeText  = e.platform === 'twitch' ? 'TW' : 'YT';
+      a.innerHTML =
+        '<span class="rank">#' + e.rank + '</span>' +
+        '<span class="name">' + escapeHtml(e.display_name) +
+          '<span class="platform-badge ' + badgeClass + '">' +
+          badgeText + '</span>' +
+        '</span>' +
+        '<span class="watch" title="Watch time">' + escapeHtml(e.watch || '') + '</span>' +
+        '<span class="value">' + Math.round(e.hats).toLocaleString() + '</span>';
+      $hatsList.appendChild(a);
+    }
+  }
+
+  refreshHats();
+  setInterval(refreshHats, 60 * 1000);
 
   // ─── search by display name ──────────────────────────────────────
   const $q = document.getElementById('q');

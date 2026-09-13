@@ -168,24 +168,42 @@ async def get_all(db, user_uuid: Optional[str]) -> Dict[str, int]:
 async def leaderboard(db, asset: str = "hats", limit: int = 10,
                       excluded: Optional[Set[str]] = None
                       ) -> List[Dict[str, Any]]:
-    """Top balances with display names, skipping excluded uuids and
-    viewers who opted out of leaderboards."""
+    """Top balances with display names and watch time, skipping
+    excluded uuids and viewers who opted out of leaderboards."""
     excluded = excluded or set()
     ph = ",".join("?" for _ in excluded)
     not_excl = f" AND b.user_uuid NOT IN ({ph})" if excluded else ""
     rows = []
     async with db.execute(f"""
-        SELECT b.user_uuid, COALESCE(u.display_name, b.user_uuid), b.amount
+        SELECT b.user_uuid, COALESCE(u.display_name, b.user_uuid), b.amount,
+               COALESCE(u.watch_minutes, 0)
           FROM wallet_balances b
           LEFT JOIN users u ON u.uuid = b.user_uuid
          WHERE b.asset = ? AND b.amount > 0
            AND COALESCE(u.leaderboard_opt_out, 0) = 0{not_excl}
          ORDER BY b.amount DESC, b.user_uuid LIMIT ?
     """, (asset,) + tuple(sorted(excluded)) + (int(limit),)) as cur:
-        async for uuid_, name, amount in cur:
+        async for uuid_, name, amount, watched in cur:
             rows.append({"rank": len(rows) + 1, "user_uuid": uuid_,
-                         "display_name": name, "amount": int(amount)})
+                         "display_name": name, "amount": int(amount),
+                         "watch_minutes": int(watched or 0)})
     return rows
+
+
+async def holder_count(db, asset: str = "hats",
+                       excluded: Optional[Set[str]] = None) -> int:
+    """How many viewers hold a positive balance (leaderboard denominator);
+    excluded uuids and opt-outs are not counted."""
+    excluded = excluded or set()
+    ph = ",".join("?" for _ in excluded)
+    not_excl = f" AND b.user_uuid NOT IN ({ph})" if excluded else ""
+    async with db.execute(f"""
+        SELECT COUNT(*) FROM wallet_balances b
+          LEFT JOIN users u ON u.uuid = b.user_uuid
+         WHERE b.asset = ? AND b.amount > 0
+           AND COALESCE(u.leaderboard_opt_out, 0) = 0{not_excl}
+    """, (asset,) + tuple(sorted(excluded))) as cur:
+        return int((await cur.fetchone())[0])
 
 
 async def history(db, user_uuid: str, limit: int = 20,

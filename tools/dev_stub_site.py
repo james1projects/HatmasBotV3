@@ -201,6 +201,13 @@ ROUTES = {
     "/api/stream-status": {"is_live": False},
     "/api/gods": GODS,
     "/api/leaderboard": LEADERBOARD,
+    "/api/hats-leaderboard": {"currency": "Hats", "total_holders": 25611, "limit": 10, "leaderboard": [
+        {"rank": 1, "display_name": "WhaleWatcher", "platform": "twitch", "hats": 555928,
+         "watch_minutes": 900000, "watch": "625d 0h", "url": "/twitch/whalewatcher"},
+        {"rank": 2, "display_name": "TuberTwo", "platform": "youtube", "hats": 231796,
+         "watch_minutes": 12345, "watch": "8d 13h 45m", "url": "/yt/UC123"},
+        {"rank": 3, "display_name": "ViewerOne", "platform": "twitch", "hats": 207086,
+         "watch_minutes": 125, "watch": "2h 5m", "url": "/twitch/viewerone"}]},
     "/api/recent-events": EVENTS,
     "/api/search": {"results": [
         {"display_name": "ViewerOne", "platform": "twitch",

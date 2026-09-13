@@ -47,7 +47,7 @@ except ImportError:
 from core import db as _shared_db
 from core.config import (
     BASE_DIR, DATA_DIR, ECONOMY_DB_PATH, ECONOMY_STARTING_PRICE, WEB_HOST,
-    ECONOMY_EXCLUDED_USERNAMES, TWITCH_BOT_USERNAME,
+    ECONOMY_EXCLUDED_USERNAMES, TWITCH_BOT_USERNAME, ECONOMY_CURRENCY_NAME,
     TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET,
     WEB_SESSION_SECRET, WEB_TRADING_ENABLED, WEB_TRADE_COOLDOWN,
     WEB_TRADE_MAX_PER_MIN, WEB_OAUTH_REDIRECT_URI, FINDIT_MAX_SESSIONS,
@@ -57,6 +57,7 @@ from core.config import (
     SOCIAL_FEED_CACHE_TTL,
 )
 from core import users as _users
+from core import wallet as _wallet
 from core import aspect_roster
 from core.aspect_roster import display_god
 from core.vod_web import VodWeb
@@ -246,6 +247,11 @@ class PublicWebServer:
         # surface "you're #N of M" rank pills.
         self.app.router.add_get("/api/leaderboard",
                                  self._handle_api_leaderboard)
+        # Top Hats balances (core/wallet.py), the strip next to Top
+        # traders on /market. Hats have no real-world value; this is
+        # bragging rights for watch time.
+        self.app.router.add_get("/api/hats-leaderboard",
+                                 self._handle_api_hats_leaderboard)
 
         # Pending YT nominations — admin-gated by COMMUNITY_ADMIN_TOKEN.
         # The GET surfaces the queue (used by the moderation card on
@@ -1386,6 +1392,37 @@ class PublicWebServer:
             "total_traders": len(full),
             "limit":         limit,
         })
+
+    async def _handle_api_hats_leaderboard(
+            self, request: web.Request) -> web.Response:
+        """Top Hats balances with watch time. Same row decoration as
+        /api/leaderboard (platform / id / url), same exclusions (bot
+        accounts, leaderboard opt-out)."""
+        try:
+            limit = max(1, min(100, int(request.query.get("limit", "10"))))
+        except ValueError:
+            limit = 10
+        if self._db is None:
+            return web.json_response({"leaderboard": [], "total_holders": 0,
+                                      "limit": limit, "currency": ECONOMY_CURRENCY_NAME})
+        excluded = await self._excluded_uuids()
+        try:
+            rows = await _wallet.leaderboard(self._db, "hats", limit, excluded)
+            total = await _wallet.holder_count(self._db, "hats", excluded)
+        except Exception as e:
+            print(f"[PublicWebServer] hats leaderboard failed: {e}")
+            rows, total = [], 0
+        idmap = await self._identity_map([r["user_uuid"] for r in rows])
+        out = []
+        for r in rows:
+            platform, ident, url = self._public_ref(idmap.get(r["user_uuid"], {}), r["user_uuid"])
+            out.append({"rank": r["rank"], "platform": platform, "id": ident,
+                        "user_uuid": r["user_uuid"],
+                        "display_name": r["display_name"] or ident,
+                        "hats": r["amount"], "watch_minutes": r["watch_minutes"],
+                        "watch": _users.format_watch(r["watch_minutes"]), "url": url})
+        return web.json_response({"leaderboard": out, "total_holders": total,
+                                  "limit": limit, "currency": ECONOMY_CURRENCY_NAME})
 
     # ──────────────────────────────────────────────────────────────────
     #   RECENT ACTIVITY FEED

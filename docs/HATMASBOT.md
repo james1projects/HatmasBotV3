@@ -3082,3 +3082,18 @@ Timed Chat Messages".
   by hand, group them into lanes with the intervals you had, then disable
   the MixItUp timers. The bot must be restarted once to load the plugin.
 - **Tests:** `tests/test_timed_messages.py` (5).
+
+## v2.18.1 — Top Hats leaderboard on /market (2026-09-13)
+
+`GET /api/hats-leaderboard?limit=N` (core/public_webserver.py) returns the
+biggest Hats balances from `wallet.leaderboard()` with watch time
+(`users.watch_minutes`, formatted) and the same platform / id / url
+decoration as `/api/leaderboard`; bot accounts and leaderboard opt-outs
+are excluded from both the rows and `total_holders`
+(`wallet.holder_count()`). /market shows it as a "Top Hats" strip in a
+two-column `.boards` grid next to Top traders (stacks under 720px). Hats
+have no real-world value by design (James, 2026-09-13: selling God
+Tokens for Hats would let top earners god-request for hours), so the
+strip is bragging rights for watch time. `tools/dev_stub_site.py` carries
+a canned row set. Test: `test_hats_leaderboard` in
+tests/test_web_profile_live.py.

@@ -327,6 +327,35 @@ async def test_live_ws_broadcast():
         await client.close(); await db.close()
 
 
+async def test_hats_leaderboard():
+    from core import wallet as W
+    client, server, db = await make_env()
+    try:
+        await W.ensure_schema(db)
+        await W.credit(db, "u-1", "hats", 300, "watch")
+        await W.credit(db, "u-2", "hats", 1200, "watch")
+        await W.credit(db, "u-yt", "hats", 50, "watch")
+        await db.execute("UPDATE users SET watch_minutes = 125 WHERE uuid = 'u-2'")
+        await db.commit()
+        res = await client.get("/api/hats-leaderboard?limit=2")
+        assert res.status == 200
+        data = await res.json()
+        rows = data["leaderboard"]
+        assert [(r["rank"], r["display_name"], r["hats"]) for r in rows] == \
+            [(1, "Rival", 1200), (2, "Viewer One", 300)], rows
+        assert rows[0]["watch"] == "2h 5m" and rows[0]["watch_minutes"] == 125
+        assert rows[1]["platform"] == "twitch" and rows[1]["url"] == "/twitch/viewer1"
+        assert data["total_holders"] == 3 and data["currency"]
+        # opt-out drops a viewer from the board and the count
+        await _users.set_leaderboard_opt_out(db, "u-2", True)
+        data = await (await client.get("/api/hats-leaderboard")).json()
+        assert [r["display_name"] for r in data["leaderboard"]] == ["Viewer One", "YT Viewer"]
+        assert data["total_holders"] == 2
+        assert data["leaderboard"][1]["platform"] == "youtube"
+    finally:
+        await client.close(); await db.close()
+
+
 async def test_pages_serve():
     client, server, db = await make_env()
     try:
@@ -353,6 +382,7 @@ TESTS = [
     test_live_toggle_off,
     test_live_ws_broadcast,
     test_pages_serve,
+    test_hats_leaderboard,
 ]
 
 
