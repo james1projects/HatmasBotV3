@@ -27,7 +27,7 @@ it; it is the bot's own alerts, folded into one source.
 | --- | --- |
 | **Source** | One browser-source URL you add in OBS. |
 | **Alert box** | The source at `/overlay/alerts?box=<name>`. `main` is the default. Several boxes can exist, each with its own enabled kinds. |
-| **Alert kind** | One thing the box knows how to render: `gamble`, `tts`, `voiceline`, `dividend`, `match_end`, `leaderboard`, `tradefeed`, `portfolio`, `spin`, `cocaster`, `bingo_open`, `bingo_call`, `bingo_claim`, `bingo_closed`. Each kind is driven by one bot event and has its own template (the current overlay's HTML/CSS, moved). |
+| **Alert kind** | One thing the box knows how to render: `gamble`, `tts`, `voiceline`, `dividend`, `match_end`, `leaderboard`, `tradefeed`, `portfolio`, `spin`, `cocaster`, `bingo_open`, `bingo_call`, `bingo_claim`, `bingo_closed`, `burn` (added 2026-09-13, plugins/burn.py). Each kind is driven by one bot event and has its own template (the current overlay's HTML/CSS, moved). |
 | **Lane** | A queue inside a box. Kinds in the same lane play one at a time, first in first out. Different lanes play at the same time. Defaults: lane `audio` (gamble, tts, voiceline), lane `economy` (dividend, match_end, leaderboard, tradefeed, portfolio, spin), lane `bingo` (bingo_*), lane `caption` (cocaster). Lanes are just names in the config; James can move a kind to any lane, or make a new one by typing a name. |
 | **Placement** | Per kind, per box: `x, y, w, h` on the 1920x1080 canvas, plus an anchor (which corner the content grows from). |
 

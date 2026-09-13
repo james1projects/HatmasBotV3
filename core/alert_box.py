@@ -3,8 +3,8 @@ core/alert_box.py — the Hatmaster Alert Box (docs/ALERT_BOX.md).
 
 One full-canvas OBS browser source (`/overlay/alerts?box=main`) that plays
 the bot's transient overlays as *alert kinds*: gamble, tts, voiceline,
-cocaster, dividend, match_end, leaderboard, tradefeed, portfolio, spin and
-the bingo events. James configures, per box and per kind: enabled, lane
+cocaster, dividend, match_end, leaderboard, tradefeed, portfolio, spin, the
+bingo events and burn. James configures, per box and per kind: enabled, lane
 (a queue; kinds in one lane play one at a time, lanes play concurrently),
 duration cap, sound on/off, volume, and where on the 1920x1080 canvas the
 alert sits (x, y, w, h, anchor). Config lives in data/alerts.json, edited
@@ -149,6 +149,15 @@ KINDS: Dict[str, dict] = {
         "lane": "bingo", "duration": 6, "sound": False, "enabled": False,
         "x": 1400, "y": 40, "w": 480, "h": 130, "anchor": "top-right",
         "sample": {"round_id": 7, "pot": 525, "cards": 9, "players": 6, "reason": "manual", "winner": None},
+    },
+    "burn": {
+        "label": "Hats burned", "events": ["hats_burned"], "legacy": None,
+        "lane": "economy", "duration": 10, "sound": True, "enabled": True,
+        "x": 700, "y": 300, "w": 520, "h": 300, "anchor": "center",
+        "sample": {"display_name": "Dyna", "login": "dyna", "amount": 2000, "balance_after": 12400,
+                   "stream_total": 3500, "stream_burns": 3,
+                   "stream_record": {"display": "Dyna", "amount": 2000}, "is_stream_record": True,
+                   "alltime_record": {"display": "Rich", "amount": 5000}, "is_alltime_record": False},
     },
 }
 
@@ -466,6 +475,10 @@ def _summary(alert: dict) -> str:
             return f"round {d.get('round_id')} opened, pot {d.get('pot')}"
         if kind == "bingo_closed":
             return f"round {d.get('round_id')} closed ({d.get('reason')})"
+        if kind == "burn":
+            tag = " (all-time record)" if d.get("is_alltime_record") else (
+                " (stream record)" if d.get("is_stream_record") else "")
+            return f"{d.get('display_name')} burned {d.get('amount')} Hats{tag}"
     except Exception:
         pass
     return kind

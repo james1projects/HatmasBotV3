@@ -112,6 +112,17 @@
         "127.0.0.1"
       ],
       "port": 8090
+    },
+    {
+      "name": "alerts-dev",
+      "runtimeExecutable": "C:\\Users\\james\\AppData\\Local\\Programs\\Python\\Python314\\python.exe",
+      "runtimeArgs": [
+        "tools/bingo_devserver.py",
+        "--no-open",
+        "--port",
+        "8089"
+      ],
+      "port": 8089
     }
   ]
 }

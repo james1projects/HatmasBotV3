@@ -181,6 +181,12 @@ SR_PLAYLIST_AUTO_HIDE_SECONDS = 8 # Seconds before playlist song overlay auto-hi
 # Feature toggle "priority_sr" (also needs song_requests on).
 SR_PRIORITY_COST = 200            # Hats per cut
 SR_PRIORITY_MAX_PER_HOUR = 2      # cuts per viewer per rolling hour
+
+# === BURN (plugins/burn.py) ===
+# !burn <amount>: destroy your own Hats on stream (alert box kind "burn",
+# chat flex line, biggest-of-the-stream and all-time records). Pure sink.
+# The minimum keeps it a statement rather than spam; there is no cap.
+BURN_MIN_HATS = 500
 SR_QUEUE_FILE = DATA_DIR / "song_queue.json"
 SR_HISTORY_FILE = DATA_DIR / "song_history.json"
 SR_LIKES_FILE = DATA_DIR / "song_likes.json"
@@ -622,6 +628,7 @@ TIMED_MESSAGES_TICK_SEC = 1.0              # how often the loop checks the lanes
 DEFAULT_FEATURES = {
     "song_requests": True, "predictions": False, "snap": True,
     "priority_sr": True,   # !vipsr (Hats to cut the song queue); needs song_requests too
+    "burn": True,          # !burn (destroy Hats for the flex; alert box kind "burn")
     "claude_chat": True, "smite_tracking": True, "gamble": True,
     "now_playing_overlay": True, "auto_scene_switch": True,
     "auto_title": True, "god_requests": True, "auto_shoutout": True,

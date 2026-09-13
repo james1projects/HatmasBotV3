@@ -34,7 +34,7 @@ ASSETS = ("hats", "god_token")
 REASONS = (
     "buy", "sell", "refund", "dividend",
     "gamble_win", "gamble_loss",
-    "bingo_card", "bingo_prize", "priority_sr",
+    "bingo_card", "bingo_prize", "priority_sr", "burn",
     "godreq_spend", "sub_award", "donation_award",
     "watch", "chat_bonus", "sub_bonus", "raid_bonus", "bits_bonus",
     "first_msg_bonus",

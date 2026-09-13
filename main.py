@@ -62,6 +62,7 @@ from plugins.timed_messages import TimedMessagesPlugin
 from plugins.cocaster import CoCasterPlugin
 from plugins.bingo import BingoPlugin
 from plugins.wallet import WalletPlugin
+from plugins.burn import BurnPlugin
 
 
 async def main():
@@ -364,6 +365,10 @@ async def main():
     # Rotating chat messages in lanes (managed from /mod), the last
     # MixItUp feature rebuilt. Posts only while live by default.
     bot.register_plugin("timed_messages", TimedMessagesPlugin())
+
+    # !burn: destroy Hats for the flex (alert box kind "burn"). After
+    # stream_status so it can hook the live transition for "tonight".
+    bot.register_plugin("burn", BurnPlugin())
 
     # ── Priority god request (Stripe) ──
     # Hosts the $5-skip-the-line flow on hatmaster.tv/community.

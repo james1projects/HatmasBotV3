@@ -233,6 +233,7 @@ plugins/
   songrequest.py            Spotify/YouTube queue, likes, now playing overlay, blacklist.
   obs.py                    OBS WebSocket control, scene switching, fade effects.
   godrequest.py             God request queue, God Token economy (core/wallet.py), auto-complete. Exposes add_history_listener for resolved entries (played/skipped/removed).
+  burn.py                   !burn <amount>: destroy Hats for the flex (alert box kind burn, stream + all-time records, !burns). Feature toggle burn.
   timed_messages.py         Rotating chat messages in lanes, managed from hatmaster.tv/mod (data/timed_messages.json). Global gap, live-only, optional min-chat per lane. Feature toggle timed_messages.
   priority_request.py       Stripe-paid priority god requests. Two-phase webhook lifecycle (paid -> fulfilled), refund/dispute handling, played_at stamping via godrequest history listener.
   claude_chat.py            Claude API responses for @mentions. Per-user history, safety prompt.
@@ -3119,3 +3120,18 @@ gold "vip request" label + VIP badge. No refunds by the bot; mods use
 The overlay's secondary text was also lightened (artist, requester,
 label, time) because the theme steel was hard to read over gameplay.
 Tests: `tests/test_priority_sr.py` (3).
+
+## v2.20 — !burn: destroy Hats on stream (2026-09-13)
+
+The top of the flex ladder: `!burn <amount>` (min BURN_MIN_HATS, 500; no
+cap) debits the wallet (reason `burn`) and fires the alert box kind
+`burn` (event `hats_burned`, lane economy, 10 s, sound on, enabled by
+default): the name, the amount counting up, a ribbon for the biggest
+burn of the stream or a new all-time record, the stream total, embers,
+a boom. Chat gets "X just burned N Hats!" plus the record tag; the
+burner gets their balance. "Tonight" resets on the stream_status live
+transition; the all-time record is read from the ledger (`MIN(delta)`
+where reason = burn) so it survives restarts. `!burns` lists the top
+three of the stream and the all-time record. Feature toggle `burn`.
+`plugins/burn.py`, `overlays/alerts/kinds/burn.js`; tests:
+`tests/test_burn.py`.
