@@ -17,6 +17,10 @@ balance like a dividend; the round closes and a new one can start.
 
 Feature toggle "bingo" (default on) gates the site page and the API;
 nothing happens anyway until a round is open.
+
+The dashboard control page (localhost:8069/bingo, routes in
+core/bingo_web.BingoControl) can also undo a call, force an auto square,
+simulate detector events, edit the pool, and browse past rounds.
 """
 
 from __future__ import annotations
@@ -28,14 +32,34 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from core import config
 
-from .pool import (FREE, label_of, load_pool, make_card, card_seed, next_card_price,
-                   marked_indexes, winning_lines)
+from .pool import (CARD_SIZE, FREE, label_of, load_pool, make_card, card_seed, next_card_price,
+                   marked_indexes, save_pool, winning_lines)
 from .store import BingoStore
 
 Listener = Callable[[str, dict], Awaitable[None]]
 
 MULTIKILL_TYPES = {"double_kill": "double", "triple_kill": "triple",
                    "quadra_kill": "quadra", "penta_kill": "penta"}
+
+# Square ids the bot knows how to fire by itself. A pool square with
+# source "auto" and any other id would never be marked, so the pool
+# editor forces those to "manual".
+AUTO_IDS = frozenset({"kill", "death", "assist", "double", "triple", "quadra", "penta",
+                      "first_blood", "kills_10", "deaths_5", "deathless",
+                      "match_win", "match_loss", "new_god"})
+
+# Detector / economy events the control page can simulate (same code
+# path as the real listeners, so the per-match counters are exercised).
+SIMULATED_EVENTS = ("kill", "death", "assist", "double_kill", "triple_kill", "quadra_kill",
+                    "penta_kill", "god", "win", "loss")
+
+
+def square_id(text: str) -> str:
+    """'Says "no mana"' -> 'says_no_mana' (lowercase, [a-z0-9_], <= 40)."""
+    out = "".join(ch if ch.isalnum() else "_" for ch in str(text or "").strip().lower())
+    while "__" in out:
+        out = out.replace("__", "_")
+    return out.strip("_")[:40]
 
 
 def _cfg(name: str, default: Any) -> Any:
@@ -320,8 +344,138 @@ class BingoPlugin:
         s["auto_squares"] = [sq for sq in self.pool if sq["source"] == "auto"]
         s["match"] = {"open": self._match_open, "kills": self._match_kills, "deaths": self._match_deaths,
                       "gods_this_round": sorted(self._gods_this_round)}
+        s["auto_ids"] = self.auto_ids()
+        s["simulated_events"] = list(SIMULATED_EVENTS)
+        s["pool_file"] = str(self._pool_path())
+        s["round_cards"] = self.round_cards()
+        s["history"] = self.history(10)
         s.update(self.stats)
         return s
+
+    def history(self, limit: int = 20) -> List[dict]:
+        """Summaries of the most recent rounds, newest first (the open
+        round included, if any)."""
+        if not self.store:
+            return []
+        return [self.store.summary(r["id"]) for r in self.store.rounds(limit)]
+
+    def round_cards(self) -> List[dict]:
+        r = self.current()
+        return self.store.card_list(r["id"]) if r else []
+
+    @staticmethod
+    def auto_ids() -> List[str]:
+        return sorted(AUTO_IDS)
+
+    # ── pool editing (data/bingo/pool.json) ───────────────────────────
+
+    def _pool_path(self) -> Path:
+        return Path(_cfg("BINGO_POOL_FILE", config.DATA_DIR / "bingo" / "pool.json"))
+
+    def _save_pool(self) -> None:
+        try:
+            save_pool(self._pool_path(), self.pool)
+        except OSError as e:
+            self._error(f"pool save: {e}")
+
+    def set_square(self, sid: str, label: str, source: str = "manual", weight: Any = 1) -> dict:
+        """Add a square or update an existing one (by id). Squares added
+        mid-round land on cards claimed from now on; label and weight
+        edits show up everywhere at once."""
+        sid = square_id(sid or label)
+        label = str(label or "").strip()[:60]
+        if not sid or sid == FREE:
+            return {"ok": False, "error": "square needs an id (letters, digits, underscores)"}
+        if not label:
+            return {"ok": False, "error": "square needs a label"}
+        try:
+            weight = float(weight)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "weight must be a number"}
+        if not weight > 0:
+            return {"ok": False, "error": "weight must be above 0"}
+        source = "auto" if (str(source).lower() == "auto" and sid in AUTO_IDS) else "manual"
+        sq = {"id": sid, "label": label, "source": source, "weight": weight}
+        created = True
+        for i, cur in enumerate(self.pool):
+            if cur["id"] == sid:
+                self.pool[i] = sq
+                created = False
+                break
+        else:
+            self.pool.append(sq)
+        self._save_pool()
+        return {"ok": True, "square": sq, "created": created, "pool_size": len(self.pool)}
+
+    def remove_square(self, sid: str) -> dict:
+        """Drop a square from the pool. Refused while a round is open
+        (cards in play hold it) and when the pool would get too small."""
+        sid = square_id(sid)
+        if self.current():
+            return {"ok": False, "error": "close the round first: cards in play hold this square"}
+        if not self.known_event(sid):
+            return {"ok": False, "error": f"unknown square '{sid}'"}
+        if len(self.pool) - 1 < CARD_SIZE - 1:
+            return {"ok": False, "error": f"the pool needs at least {CARD_SIZE - 1} squares"}
+        self.pool = [sq for sq in self.pool if sq["id"] != sid]
+        self._save_pool()
+        return {"ok": True, "removed": sid, "pool_size": len(self.pool)}
+
+    def reload_pool(self) -> dict:
+        """Re-read pool.json after a hand edit."""
+        self.pool = load_pool(self._pool_path())
+        return {"ok": True, "pool_size": len(self.pool)}
+
+    # ── undo + simulated events (control page) ────────────────────────
+
+    async def uncall(self, event_id: str) -> dict:
+        """Undo a call in the open round (a mis-pressed deck key): the
+        call rows go, every card's marks are rebuilt from what remains."""
+        event_id = (event_id or "").strip().lower()
+        if not self.store:
+            return {"ok": False, "error": "bingo is off"}
+        async with self._lock:
+            r = self.store.current_round()
+            if not r:
+                return {"ok": False, "error": "no open round"}
+            res = self.store.uncall(r["id"], event_id)
+            summary = self.store.summary(r["id"])
+        if not res["removed"]:
+            return {"ok": False, "error": f"'{event_id}' has not been called this round"}
+        label = label_of(self.pool, event_id)
+        await self._notify("bingo_uncall", {**summary, "call": {"event_id": event_id, "label": label},
+                                            "changed_cards": [c["id"] for c in res["changed"]]})
+        await self._say(f"Bingo call undone: {label} (mis-press). {len(res['changed'])} cards unmarked.")
+        return {"ok": True, "round_id": r["id"], "event_id": event_id, "label": label,
+                "removed": res["removed"], "changed": len(res["changed"]), "summary": summary}
+
+    async def simulate(self, kind: str, value: str = "") -> dict:
+        """Feed a fake detector / economy event through the real listeners
+        (so first blood, 10 kills, deathless etc. are testable without a
+        match). kind: kill death assist double_kill..penta_kill god win loss."""
+        kind = (kind or "").strip().lower()
+        if kind not in SIMULATED_EVENTS:
+            return {"ok": False, "error": f"unknown event '{kind}'; one of {', '.join(SIMULATED_EVENTS)}"}
+        r = self.current()
+        before = len(self.store.called_ids(r["id"])) if r else 0
+        if kind == "kill":
+            await self._on_kill("kill")
+        elif kind == "death":
+            await self._on_death()
+        elif kind == "assist":
+            await self._on_assist()
+        elif kind in MULTIKILL_TYPES:
+            await self._on_multikill(kind)
+        elif kind == "god":
+            await self._on_overlay_event("economy_god_detected", {"god": (value or "Test God").strip()})
+        else:
+            await self._on_overlay_event("match_end_economy", {"outcome": kind})
+        r = self.current()
+        called = self.store.called_ids(r["id"]) if r else []
+        return {"ok": True, "simulated": kind, "new_calls": max(0, len(called) - before),
+                "match": {"open": self._match_open, "kills": self._match_kills, "deaths": self._match_deaths,
+                          "gods_this_round": sorted(self._gods_this_round)},
+                "summary": self.store.summary(r["id"]) if r else None}
 
     # ── automatic squares ─────────────────────────────────────────────
 

@@ -1,8 +1,9 @@
 r"""
 tools/bingo_devserver.py — play a Stream Bingo round without the bot.
 
-Mounts the real BingoPlugin and core/bingo_web.py routes on a bare
-aiohttp app, plus the dashboard's control routes and admin page, with a
+Mounts the real BingoPlugin and core/bingo_web.py routes (public page +
+BingoControl, the same control routes the dashboard mounts) on a bare
+aiohttp app, plus the admin page, with a
 fake economy (every viewer has Hats) and a fake Twitch login, so the
 whole loop can be tried from a browser: open a round, grab cards, call
 squares, watch the marks land live, hit bingo.
@@ -29,7 +30,7 @@ if str(REPO_ROOT) not in sys.path:
 from aiohttp import web  # noqa: E402
 
 from core import config  # noqa: E402
-from core.bingo_web import BingoWeb  # noqa: E402
+from core.bingo_web import BingoControl, BingoWeb  # noqa: E402
 from plugins.bingo import BingoPlugin  # noqa: E402
 
 PUBLIC = REPO_ROOT / "public"
@@ -147,26 +148,9 @@ def main() -> int:
     async def stream(request):
         return web.json_response({"is_live": False})
 
-    async def status(request):
-        return web.json_response(plugin.status())
-
-    async def start(request):
-        return web.json_response(await plugin.start_round())
-
-    async def end(request):
-        return web.json_response(await plugin.end_round("manual") or {"ok": False, "error": "no open round"})
-
-    async def fire(request):
-        event = (request.query.get("event") or "").strip().lower()
-        res = await plugin.fire(event, source="deck")
-        return web.json_response(res, status=200 if res.get("ok") else 400)
-
     server.app.router.add_get("/api/me", me)
     server.app.router.add_get("/api/stream-status", stream)
-    server.app.router.add_get("/api/bingo/status", status)
-    for path, h in (("/api/bingo/start", start), ("/api/bingo/end", end), ("/api/bingo/fire", fire)):
-        server.app.router.add_get(path, h)
-        server.app.router.add_post(path, h)
+    BingoControl(lambda: plugin).register(server.app.router)   # the dashboard's /api/bingo/* routes
 
     async def on_startup(app):
         await plugin.on_ready()

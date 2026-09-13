@@ -232,7 +232,48 @@ class BingoStore:
             self.conn.commit()
         return result
 
+    def uncall(self, round_id: int, event_id: str) -> dict:
+        """Undo a call (a mis-pressed deck key): delete its rows and rebuild
+        every card's marks from the calls that remain.
+        -> {"removed": n_call_rows, "changed": [card...]}"""
+        result = {"removed": 0, "changed": []}
+        with self._lock:
+            cur = self.conn.execute("DELETE FROM calls WHERE round_id=? AND event_id=?",
+                                    (int(round_id), event_id))
+            result["removed"] = int(cur.rowcount or 0)
+            if not result["removed"]:
+                self.conn.commit()
+                return result
+            called = {r[0] for r in self.conn.execute(
+                "SELECT DISTINCT event_id FROM calls WHERE round_id=?", (int(round_id),)).fetchall()}
+            rows = self.conn.execute("SELECT * FROM cards WHERE round_id=? ORDER BY id", (int(round_id),)).fetchall()
+            for row in rows:
+                squares = json.loads(row["squares"])
+                old: Set[int] = set(json.loads(row["marks"] or "[]"))
+                new = marked_indexes(squares, called)
+                if new == old:
+                    continue
+                self.conn.execute("UPDATE cards SET marks=?, bingo_at=? WHERE id=?",
+                                  (json.dumps(sorted(new)), row["bingo_at"] if has_bingo(new) else None, row["id"]))
+                result["changed"].append(self._card(
+                    self.conn.execute("SELECT * FROM cards WHERE id=?", (row["id"],)).fetchone()))
+            self.conn.commit()
+        return result
+
     # ── summaries ─────────────────────────────────────────────────────
+
+    def rounds(self, limit: int = 20) -> List[dict]:
+        """Most recent rounds first (open or closed)."""
+        with self._lock:
+            rows = self.conn.execute("SELECT * FROM rounds ORDER BY id DESC LIMIT ?", (int(limit),)).fetchall()
+        return [dict(r) for r in rows]
+
+    def card_list(self, round_id: int) -> List[dict]:
+        """Compact view of every card in a round for the control page."""
+        return [{"id": c["id"], "login": c["login"], "display": c["display"], "seq": c["seq"],
+                 "price": c["price"], "marked": len(c["marks"]), "to_bingo": c["to_bingo"],
+                 "bingo": c["bingo_at"] is not None, "created_at": c["created_at"]}
+                for c in self.all_cards(round_id)]
 
     def leaders(self, round_id: int, limit: int = 5) -> List[dict]:
         """Closest cards to bingo (fewest squares missing), one per player."""

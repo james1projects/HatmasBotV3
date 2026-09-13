@@ -107,7 +107,9 @@ BINGO START / BINGO END open and close a Stream Bingo round. Manual squares are
 called with `bingo_call.bat <square_id>`: make one key per square you call
 often (no_mana, blames_jungle, water, ...) by putting the id in the Open
 action's arguments; the full list with buttons lives on the dashboard at
-`http://localhost:8069/bingo`, handy on the second monitor.
+`http://localhost:8069/bingo`, handy on the second monitor. That page also
+undoes a mis-pressed call, forces an auto square the detector missed, edits the
+square pool (add your own, change weights) and shows past rounds.
 
 VOD REVIEW / VOD SEARCH open the Ask the VOD pages in the default browser:
 from the bot's public server (localhost:8070) when the bot is up, otherwise

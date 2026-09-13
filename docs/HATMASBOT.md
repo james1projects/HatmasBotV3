@@ -2711,3 +2711,144 @@ round opens).
 Verified 9/5 on the dev host from a browser: open round → free card → bought card
 (50 Hats, pot 525) → four calls marked live via the socket → fifth call: winner
 banner, round closed, 525 Hats credited to the fake balance.
+
+### Status (2026-09-06)
+
+On hold at James's request after the 9/5 build. Committed on `main` (`be7c097`,
+`b96fc81`), not pushed. The running bot predates the plugin, so `/bingo`, the
+dashboard control page and the deck buttons go live only after the next restart
+(SHIP IT or `run_bot.bat`). The auto squares have only seen simulated detector
+events; the first real round is the real test. `tools/bingo_devserver.py` (:8088)
+is the place to try it meanwhile.
+
+
+### Control page (2026-09-12)
+
+First hands-on pass since the 9/5 build. The running bot already has the
+plugin (dashboard `/api/bingo/status` answers on :8069) but has never opened a
+round: `data/bingo.db` holds no rounds. Changes:
+
+- **Card grid overflow fixed** (`public/bingo.html`): `repeat(5, 1fr)` let a long
+  label ("Presses the wrong deck button") widen its column past the card, and
+  `aspect-ratio` squares grew down out of the box. Now `minmax(0, 1fr)` columns,
+  `min-width: 0`, `overflow: hidden`, `overflow-wrap: anywhere`, a 4-line clamp
+  and a `title` tooltip for the full label; cards are `minmax(300px, 1fr)` and
+  `align-items: start`.
+- **Overlay theme** (`overlays/bingo.html`): it referenced `--panel` / `--accent`
+  etc., which `hatmas_theme.css` never defines (it uses `--hm-*`), so only the
+  hard-coded fallbacks ever rendered. Now on `--hm-bg`, `--hm-gold`,
+  `--hm-text-secondary`, `--hm-border-subtle`.
+- **`core/bingo_web.BingoControl`**: the dashboard's `/api/bingo/*` control routes
+  moved out of `core/webserver.py` into one class that the dashboard and
+  `tools/bingo_devserver.py` both mount, so the two can no longer drift. New
+  routes: `uncall?event=`, `simulate?event=&god=`, `history?limit=`, `pool`,
+  `pool/save` (JSON `{id?, label, source, weight}`), `pool/delete`, `pool/reload`.
+  `fire` accepts `&source=` (the page sends `dashboard`, the bats stay `deck`).
+- **Plugin**: `uncall(id)` deletes the call rows and rebuilds every card's marks from
+  the calls that remain (emits `bingo_uncall`, in the overlay rule and handled by the
+  public page with a reload), `simulate(kind)` drives the real `_on_kill` /
+  `_on_death` / `_on_assist` / `_on_multikill` / overlay-event listeners so the
+  per-match counters (first blood, 10 kills, 5 deaths, deathless, new god) are
+  testable without a match, `set_square` / `remove_square` / `reload_pool` edit
+  `pool.json` in place (ids slugged by `square_id`, `source: auto` only for the 14
+  ids in `AUTO_IDS`, removal refused while a round is open or below 24 squares),
+  `history(limit)` and `round_cards()`; `status()` carries them all.
+- **`overlays/bingo_admin.html` rebuilt** (dashboard `/bingo`, dev `/bingo/admin`):
+  round bar; this round (chips, persisted call log with time/source and an Undo per
+  call, cards in play per player); call a square (manual buttons, and the auto
+  squares as force buttons for a missed detection or a test); simulate the
+  detector (kill, death, assist, multikills, god name, win, loss + live match
+  counters); squares editor (inline label/weight/source edits, add with an
+  auto-slugged id, delete, reload from file); past rounds table. The 5 s refresh
+  pauses while a pool row is being edited.
+- Tests: `tests/test_bingo_control.py` (7: history/cards, slug, pool add/update/
+  validation, remove/reload rules, undo, simulate, the routes on an aiohttp test
+  client). `.claude/launch.json` gained `bingo-dev` (:8088) for the in-app preview.
+
+Verified 9/12 on the dev host: undo removed a call and both cards dropped a mark
+live; simulate kill called `kill` + `first_blood`; a custom square saved to
+`pool.json` and appeared in the manual grid. Still untested: a real round on
+stream (auto squares from the live detector, the MixItUp payout).
+
+## v2.14 Update — Ask the VOD for any Twitch channel (2026-09-06)
+
+Priority #1 of the productisation assessment: prove the detector and the VOD
+pipeline on streams that are not James's. Built as the real feature rather
+than a throwaway experiment. Add a channel by login; its archive VODs are
+downloaded to local disk, scanned by the same offline detector with a
+**per-channel detector profile**, transcribed, and indexed into the same
+`vod_index.db` with `recordings.channel = <login>`. Those rows are **local
+only, forever**: the Store refuses to publish them and visitors never see
+them, whatever the review page says. Downloading another creator's archives
+is for private analysis; never republish (Twitch's terms; sub-only VODs fail
+and are marked so).
+
+### Pieces
+
+| Path | Role |
+| --- | --- |
+| `core/twitch_app.py` | Helix client on an **app-access token** (client_credentials, cached at `VOD_APP_TOKEN_FILE`); never touches the bot's user tokens (Twitch rotates the user refresh token on every use, so a CLI refreshing it would break the running bot). `users`, `videos?type=archive` (paged, `since`), `games`, `streams`, `parse_duration("3h20m5s")` |
+| `vodsearch/channels.py` | `data/vod/channels.json` registry (`Channel`, `Registry`, `normalize_login`, `parse_tracks` — `cli.py` now imports it from here) |
+| `vodsearch/download.py` | yt-dlp download of one VOD (`best[height<=1080]/best`, concurrent fragments, `.part` resume) into `<root>/_inbox`, moved to `<root>/v<id>.mp4` on success + `v<id>.twitch.json` (title, created_at, duration...). Error kinds `sub_only | unavailable | network | other` |
+| `vodsearch/store.py` | `vods` table (download queue: queued -> downloading -> downloaded -> scanned -> indexed / error / evicted); `recordings.channel` (default `hatmaster`), `title`, `audio_streams`; `OWNER_CHANNEL`; `channel=` filter on search/browse/stats/gods/review_list/recording_ids; `_vis_sql` also requires the owner channel; `set_visibility(..., "public")` silently skips non-owner rows |
+| `vodsearch/indexer.py` | `IndexOptions.channel` / `primary_speaker`; `_inbox` and `_`-prefixed dirs skipped; `recorded_at`/`title` from the `.twitch.json` sidecar (or the `vods` row); `audio_streams` stored; `prune_missing` scoped to the run's channel |
+| `vodsearch/clips.py` | `tracks_for(configured, audio_streams)`: a 1-stream VOD gets `-map 0:a:0`, no `amix` (0 = legacy rows keep all four) |
+| `core/detector_profile.py` | `DetectorProfile`: the five region boxes (1080p coords), `group_mode`, `kda_field_windows`, `portrait_enabled`, `overlay_icons`/`reference_icons` (both **false** in a loaded profile so James's OBS art never matches another stream), `digit_templates_dir`. `default()` == today's globals; `crop_box()` of the default is exactly the old `VOD_CROP_*` literals |
+| `core/kda_reader.py`, `core/god_matcher.py` | regions are now **instance** state (`KdaReader(regions=, kda_field_windows=, template_dir=)`, `GodMatcher(portrait_region=)`); module constants remain the defaults, so `plugins/killdetector.py` is untouched |
+| `tools/vod_detector.py` | `VodDetector(..., profile=)`: ffmpeg crop from the profile, `_origin_for(img)`, `_build_coarse_vf()`, `_extract_frame_cmd()`. Two old bugs fixed: refinement reads now scale non-1080p sources to 1920x1080 like the coarse pass; the never-defined `_stream_raw_frames` branch is gone (`--no-seek-scan` = slow per-frame path) |
+| `tools/process_recordings.py` | `--profile`, `--group-mode`, `--god-*-icons-dir`, `--keep-stem` (keeps `v<id>`; `FileExistsError` on collision, never silently renames), `--keep-scanning` (a Twitch VOD holds several matches; the default stops ~2 min after the first one ends), `--no-move`; `<stem>.*.json` sidecars move with the video |
+| `tools/vod_calibrate.py` | `frames` (gridded 1080p sample frames to read coordinates off), `write` (boxes -> profile JSON), `preview` (boxes + 8x KDA crop + real reader/matcher output per frame) |
+| `tools/vod_channels.py` | `discover` (live SMITE 2 channels by viewers), `add`, `list`, `sync <login>|--all [--max N] [--since DATE] [--stage download|scan|index] [--dry-run] [--retry-errors]`, `status`, `remove`. Lock `data/vod/vod_sync.lock`; in-progress broadcasts (blank thumbnail) are skipped; missing profile -> stops after download and prints the calibration steps |
+| `streamdeck/vod_sync.bat` | `sync --all`, log in `data/vod_sync.log` |
+| `core/vod_web.py`, `public/vod.html`, `public/vod_review.html` | `?channel=` (absent = owner, `all` = every channel, **visitors always pinned to the owner**), `stats.channels[]`, channel select + channel badge + title on the page, speaker chip = the channel's display name or "Friends", "Local only" pill and no publish button for other channels on the review page, `refused` count on bulk publish |
+| `core/config.py` | `VOD_CHANNELS_FILE`, `VOD_CHANNELS_ROOT` (`D:\Recordings\channels`), `VOD_CHANNELS_QUALITY`, `_FRAGMENTS`, `_MAX_PER_SYNC`, `_KEEP` (20, oldest evicted), `_MIN_FREE_GB`, `VOD_APP_TOKEN_FILE` |
+| `tests/test_vod_channels.py`, `tests/test_detector_profile.py`, `tests/test_vodsearch.py` | registry / Helix (fake transport) / token cache / yt-dlp opts / vods table; profile load + validation, translated-region reads on the committed fixture, matcher custom region, crop math, keep_stem; migration, publish refusal, visitor isolation, channel filters, `tracks_for`, sidecar-dated indexing |
+
+### Layout and flow
+
+```
+D:\Recordings\channels\<login>\
+  _inbox\                 in-flight yt-dlp output (.part resumes next run)
+  v<id>.mp4 + .twitch.json downloaded, unprocessed (root level = the sorter's queue)
+  <God>\v<id>.mp4          filed by the sorter (+ .events.json + .twitch.json)
+data\vod\channels.json                 registry
+data\vod\channels\<login>\profile.json  detector profile (manual calibration)
+```
+
+`sync` = Helix list -> download newest N -> `process_recordings.py --source <root>
+--profile <p> --keep-stem` (subprocess) -> `vod_index.py index --recordings <root>
+--channel <login> --tracks 0:<login>` (subprocess) -> evict beyond `keep`.
+
+### Calibration (per channel, once)
+
+```
+python tools\vod_calibrate.py frames "D:\Recordings\channels\foo\v123.mp4"
+python tools\vod_calibrate.py write data\vod\channels\foo\profile.json --channel foo ^
+    --kda x1,y1,x2,y2 --portrait x1,y1,x2,y2 --hud-check ... --gameplay-check ... --overlay-check ... [--no-portrait]
+python tools\vod_calibrate.py preview "D:\Recordings\channels\foo\v123.mp4" --profile data\vod\channels\foo\profile.json
+```
+
+Loaded profiles default to `group_mode: gaps` (layout-agnostic digit grouping);
+set `portrait_enabled: false` when a facecam covers the portrait (events still
+detect, everything files under `unknown/`). If digits are visible in the 8x
+crop but distances are high (different HUD scale), give the profile its own
+`digit_templates_dir` and enrol there so the shared library stays clean.
+
+## Session log — 2026-09-04 → 2026-09-06
+
+What this stretch produced, newest last (each has its own section above):
+
+| Commit(s) | Work |
+| --- | --- |
+| v2.11 | Ask the VOD: `vodsearch/` package, `/vod` page, clip + thumb routes, multikill tiers, "Full recording from here", source path + offset for editing |
+| v2.12 (overnight branch, merged 9/5) | co-caster stage 1 (chat log, summariser, earpiece TTS), per-recording `visibility` + review page, transcript-line hide, local semantic search (nomic-embed-text), speaker relabel, death report |
+| `5c06dde` | Clip windows doubled and made event-centred; `?len=short|normal|long` + page selector |
+| `4171aa1`, `7b8ba58` | Stream Deck: VOD REVIEW / VOD SEARCH buttons + icons; vertical-tab fix in `tools/vod_index.py` |
+| `be7c097`, `b96fc81` | Stream Bingo (v2.13), on hold |
+| v2.14 (9/6, uncommitted) | Ask the VOD for any Twitch channel: downloader, per-channel detector profiles, channel-scoped index and page (local-only rows) |
+
+Standing state: `web_vod` and `cocaster` toggles OFF, every recording `private`,
+nothing pushed, bot not restarted since before v2.11 (restart needed to serve any of
+it publicly). Next topic opened 9/6: recording storage (D:\Recordings\Palworld holds
+every SMITE recording since spring; trim dead time vs. keep the K/D/A reader's inputs
+safe; see the storage section when it lands).

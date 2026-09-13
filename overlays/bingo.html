@@ -10,19 +10,19 @@
   #wrap { position: fixed; top: 40px; right: 40px; width: 360px; opacity: 0; transform: translateY(-8px);
     transition: opacity 0.25s ease, transform 0.25s ease; }
   #wrap.visible { opacity: 1; transform: translateY(0); }
-  .panel { background: var(--panel, rgba(26, 35, 46, 0.94)); color: var(--text, #F2F4F7);
+  .panel { background: var(--hm-bg, rgba(32, 44, 57, 0.94)); color: var(--hm-text, #FFFFFF);
     border-radius: 8px; overflow: hidden; }
   .head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px;
-    background: var(--accent, #E5A26B); color: var(--bg, #202C39);
+    background: var(--hm-gold, #DFA06E); color: #202C39;
     font-family: 'BigNoodleTitling', 'Bebas Neue', 'Inter', sans-serif; font-size: 26px; letter-spacing: 0.06em; text-transform: uppercase; }
   .head .pot { font-size: 18px; }
-  .row { display: flex; justify-content: space-between; padding: 8px 14px; font-size: 15px; border-top: 1px solid rgba(255,255,255,0.06); }
-  .row .k { color: var(--text-dim, #A9B4C0); }
-  .call { padding: 12px 14px; font-size: 22px; line-height: 1.2; border-top: 1px solid rgba(255,255,255,0.06); }
-  .call small { display: block; font-size: 12px; color: var(--text-dim, #A9B4C0); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; }
-  .lead { padding: 8px 14px 12px; font-size: 14px; color: var(--text-dim, #A9B4C0); border-top: 1px solid rgba(255,255,255,0.06); }
-  .lead b { color: var(--text, #F2F4F7); }
-  #wrap.win .head { background: var(--green, #4CC38A); }
+  .row { display: flex; justify-content: space-between; padding: 8px 14px; font-size: 15px; border-top: 1px solid var(--hm-border-subtle, rgba(223,160,110,0.08)); }
+  .row .k { color: var(--hm-text-secondary, #AFC2C9); }
+  .call { padding: 12px 14px; font-size: 22px; line-height: 1.2; border-top: 1px solid var(--hm-border-subtle, rgba(223,160,110,0.08)); }
+  .call small { display: block; font-size: 12px; color: var(--hm-text-secondary, #AFC2C9); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; }
+  .lead { padding: 8px 14px 12px; font-size: 14px; color: var(--hm-text-secondary, #AFC2C9); border-top: 1px solid var(--hm-border-subtle, rgba(223,160,110,0.08)); }
+  .lead b { color: var(--hm-text, #FFFFFF); }
+  #wrap.win .head { background: var(--hm-gold-bright, #E8B583); }
   #win { display: none; padding: 16px 14px; font-family: 'BigNoodleTitling', 'Bebas Neue', 'Inter', sans-serif; font-size: 34px; letter-spacing: 0.04em; text-transform: uppercase; text-align: center; }
   #wrap.win #win { display: block; }
 </style>

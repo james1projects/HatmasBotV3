@@ -5,74 +5,310 @@
 <title>Bingo control</title>
 <link rel="stylesheet" href="/overlays/hatmas_theme.css">
 <style>
-  body { margin: 0; padding: 18px; background: var(--bg, #202C39); color: var(--text, #F2F4F7);
-    font-family: 'Inter', 'Segoe UI', sans-serif; }
-  h1 { font-family: 'BigNoodleTitling', 'Bebas Neue', 'Inter', sans-serif; text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 10px; font-size: 32px; }
-  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
-  .btn { font: inherit; font-weight: 700; padding: 10px 14px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.12);
-    background: var(--panel, #1a232e); color: var(--text, #F2F4F7); cursor: pointer; }
-  .btn:hover { border-color: rgba(255,255,255,0.3); }
-  .btn.start { background: var(--green, #4CC38A); color: #102; border-color: transparent; }
-  .btn.end { background: var(--red, #E0605E); color: #fff; border-color: transparent; }
-  .status { font-family: 'JetBrains Mono', Consolas, monospace; font-size: 13px; color: var(--text-dim, #A9B4C0); }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
-  .sq { font: inherit; text-align: left; padding: 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1);
-    background: var(--panel, #1a232e); color: var(--text, #F2F4F7); cursor: pointer; }
-  .sq:hover { border-color: var(--accent, #E5A26B); }
+  /* Second-monitor control page for Stream Bingo (localhost:8069/bingo).
+     Sections: round bar, this round (calls + cards), call a square,
+     simulate the detector, squares (pool editor), past rounds. */
+  :root { --bg: #202C39; --panel: #1a232e; --panel-hi: #243040; --border: rgba(223,160,110,0.18);
+    --border-soft: rgba(255,255,255,0.08); --text: #FFFFFF; --dim: #AFC2C9; --muted: #8FA6AF;
+    --accent: #DFA06E; --accent-hi: #E8B583; --green: #4CC38A; --red: #DF2935; --mono: 'JetBrains Mono', Consolas, monospace; }
+  body { margin: 0; padding: 18px 20px 60px; background: var(--bg); color: var(--text);
+    font-family: 'Inter', 'Segoe UI', sans-serif; font-size: 14px; }
+  h1 { font-family: 'BigNoodleTitling', 'Bebas Neue', 'Inter', sans-serif; text-transform: uppercase; letter-spacing: 0.04em; margin: 0; font-size: 32px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--dim); margin: 26px 0 10px; display: flex; align-items: center; gap: 10px; }
+  h2 .sub { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--muted); }
+  .top { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 6px; }
+  .top .links { margin-left: auto; font-size: 12px; color: var(--muted); }
+  .top .links a { color: var(--dim); }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .btn { font: inherit; font-weight: 700; padding: 9px 14px; border-radius: 6px; border: 1px solid var(--border-soft);
+    background: var(--panel); color: var(--text); cursor: pointer; }
+  .btn:hover { border-color: var(--accent); }
+  .btn.start { background: var(--green); color: #102; border-color: transparent; }
+  .btn.end { background: var(--red); color: #fff; border-color: transparent; }
+  .btn.small { padding: 4px 9px; font-size: 12px; font-weight: 600; }
+  .btn.ghost { background: transparent; }
+  .btn.danger:hover { border-color: var(--red); color: var(--red); }
+  .btn[disabled] { opacity: 0.4; cursor: default; }
+  .status { font-family: var(--mono); font-size: 13px; color: var(--dim); }
+  .status b { color: var(--accent); font-weight: 600; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
+  .sq { font: inherit; text-align: left; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border-soft);
+    background: var(--panel); color: var(--text); cursor: pointer; position: relative; }
+  .sq:hover { border-color: var(--accent); }
   .sq.called { opacity: 0.45; border-style: dashed; }
-  .sq small { display: block; font-size: 11px; color: var(--text-dim, #A9B4C0); margin-top: 4px; font-family: Consolas, monospace; }
-  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim, #A9B4C0); margin: 18px 0 8px; }
-  .auto { color: var(--text-dim, #A9B4C0); font-size: 13px; }
-  .log { margin-top: 14px; font-size: 13px; color: var(--text-dim, #A9B4C0); max-height: 160px; overflow: auto; }
-  .flash { color: var(--green, #4CC38A); }
+  .sq small { display: block; font-size: 11px; color: var(--muted); margin-top: 3px; font-family: var(--mono); }
+  .sq .tag { position: absolute; top: 8px; right: 10px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { .two { grid-template-columns: 1fr; } }
+  .box { background: var(--panel); border: 1px solid var(--border-soft); border-radius: 8px; padding: 12px 14px; }
+  .box h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; font-weight: 600; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; padding: 4px 6px; border-bottom: 1px solid var(--border-soft); }
+  td { padding: 5px 6px; border-bottom: 1px solid var(--border-soft); vertical-align: middle; }
+  td.mono, th.mono { font-family: var(--mono); font-size: 12px; }
+  td.num { text-align: right; font-family: var(--mono); }
+  th.num { text-align: right; }
+  tr.bingo td { color: var(--accent); font-weight: 600; }
+  .empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+  .chip { background: var(--panel); border: 1px solid var(--border-soft); border-radius: 6px; padding: 6px 12px; font-size: 13px; color: var(--dim); }
+  .chip b { font-family: var(--mono); color: var(--text); font-weight: 600; margin-left: 4px; }
+  .chip.pot b { color: var(--accent); }
+  input, select { font: inherit; font-size: 13px; padding: 5px 8px; border-radius: 4px; border: 1px solid var(--border-soft); background: var(--bg); color: var(--text); }
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+  input.label { width: 100%; box-sizing: border-box; }
+  input.weight { width: 64px; text-align: right; font-family: var(--mono); }
+  input.id { width: 150px; font-family: var(--mono); font-size: 12px; }
+  .pool-row.dirty td { background: rgba(223,160,110,0.06); }
+  .log { margin-top: 12px; font-size: 12px; color: var(--dim); max-height: 140px; overflow: auto; font-family: var(--mono); }
+  .log .good { color: var(--green); }
+  .log .bad { color: var(--red); }
+  .note { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+  .note code { font-family: var(--mono); color: var(--dim); }
+  .toast { position: fixed; right: 18px; bottom: 18px; background: var(--panel-hi); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 14px; font-size: 13px; opacity: 0; transform: translateY(6px); transition: opacity .2s, transform .2s; pointer-events: none; max-width: 420px; }
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .toast.bad { border-color: var(--red); }
 </style>
 </head>
 <body>
-  <h1>Stream Bingo</h1>
+  <div class="top">
+    <h1>Stream Bingo</h1>
+    <span class="status" id="status">loading</span>
+    <span class="links">viewer page: <a href="/bingo" target="_blank" id="public-link">hatmaster.tv/bingo</a> &nbsp;|&nbsp; overlay: <a href="/overlays/bingo.html" target="_blank">overlays/bingo.html</a></span>
+  </div>
   <div class="bar">
     <button type="button" class="btn start" id="start">Start round</button>
     <button type="button" class="btn end" id="end">End round (no winner)</button>
-    <span class="status" id="status">loading</span>
+    <span class="note" id="round-note"></span>
   </div>
-  <h2>Manual squares (press when it happens)</h2>
+
+  <h2>This round <span class="sub" id="round-sub"></span></h2>
+  <div class="chips" id="chips"></div>
+  <div class="two">
+    <div class="box">
+      <h3>Calls, newest first <span style="font-weight:400;color:var(--muted)">(Undo fixes a mis-press: the call goes and every card is re-marked)</span></h3>
+      <div id="calls"></div>
+    </div>
+    <div class="box">
+      <h3>Cards in play</h3>
+      <div id="cards"></div>
+    </div>
+  </div>
+
+  <h2>Call a square <span class="sub">manual squares are yours to judge; auto squares fire by themselves, press one to force it (detector missed it, or to test)</span></h2>
   <div class="grid" id="manual"></div>
-  <h2>Automatic squares</h2>
-  <div class="auto" id="auto"></div>
+  <h2 style="margin-top:14px">Auto squares</h2>
+  <div class="grid" id="auto"></div>
+
+  <h2>Simulate the detector <span class="sub">runs the real listeners, so first blood / 10 kills / 5 deaths / deathless / new god count up like a match</span></h2>
+  <div class="bar" id="sim"></div>
+  <p class="note" id="match"></p>
+
+  <h2>Squares <span class="sub" id="pool-sub">edit labels and weights in place (higher weight = on more cards), add your own, delete when no round is open</span></h2>
+  <div class="box">
+    <table id="pool-table">
+      <thead><tr><th>Label</th><th class="mono">id</th><th>Source</th><th class="num">Weight</th><th></th></tr></thead>
+      <tbody id="pool"></tbody>
+      <tfoot>
+        <tr class="pool-row">
+          <td><input class="label" id="new-label" placeholder="New square, e.g. Says &quot;one more game&quot;"></td>
+          <td><input class="id" id="new-id" placeholder="auto from label"></td>
+          <td>manual</td>
+          <td class="num"><input class="weight" id="new-weight" type="number" step="0.5" min="0.5" value="3"></td>
+          <td><button type="button" class="btn small" id="add">Add</button></td>
+        </tr>
+      </tfoot>
+    </table>
+    <p class="note">Saved to <code id="pool-file"></code>. Edit the file by hand and press <button type="button" class="btn small ghost" id="reload">Reload from file</button>. Weights are relative: a 10 lands on roughly twice as many cards as a 5. New squares only land on cards claimed after you add them. Only these ids can be automatic: <code id="auto-ids"></code>. Deck key: <code>streamdeck\bingo_call.bat &lt;id&gt;</code>.</p>
+  </div>
+
+  <h2>Past rounds</h2>
+  <div class="box"><div id="history"></div></div>
+
   <div class="log" id="log"></div>
+  <div class="toast" id="toast"></div>
+
   <script>
     const $ = (id) => document.getElementById(id);
     let state = null;
-    function esc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
-    async function api(path, method) {
-      const r = await fetch(path, { method: method || "GET" });
-      return r.json();
+    const dirty = new Set();       // pool rows edited but not saved
+
+    function esc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+    function hhmm(ts) { return ts ? new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : ""; }
+    function dmy(ts) { return ts ? new Date(ts * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : ""; }
+    function slug(s) { return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40); }
+
+    async function api(path, method, body) {
+      const opts = { method: method || "GET", cache: "no-store" };
+      if (body) { opts.headers = { "Content-Type": "application/json" }; opts.body = JSON.stringify(body); }
+      const r = await fetch(path, opts);
+      let j; try { j = await r.json(); } catch (_) { j = { ok: false, error: "HTTP " + r.status }; }
+      if (j.ok === undefined) j.ok = r.ok;
+      return j;
     }
-    function log(text, good) {
+    let toastTimer = null;
+    function toast(text, bad) {
+      const t = $("toast"); t.textContent = text; t.className = "toast show" + (bad ? " bad" : "");
+      clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.className = "toast"; }, bad ? 5000 : 2500);
+      log(text, bad ? "bad" : "");
+    }
+    function log(text, cls) {
       const d = document.createElement("div"); d.textContent = new Date().toLocaleTimeString() + "  " + text;
-      if (good) d.className = "flash";
+      if (cls) d.className = cls;
       $("log").prepend(d);
+      while ($("log").children.length > 60) $("log").lastChild.remove();
     }
+
+    // ── render ──
     function render() {
       const r = state.round;
-      $("status").textContent = r
-        ? `round ${r.round_id} open: ${r.cards} cards, ${r.players} players, pot ${r.pot} Hats, ${r.calls.length} calls`
-        : (state.last && state.last.winner ? `no open round (last won by ${state.last.winner.display})` : "no open round");
       const called = new Set(r ? r.called_ids : []);
-      $("manual").innerHTML = (state.manual_squares || []).map((sq) =>
-        `<button type="button" class="sq ${called.has(sq.id) ? "called" : ""}" data-id="${esc(sq.id)}">${esc(sq.label)}<small>${esc(sq.id)}${called.has(sq.id) ? " (called)" : ""}</small></button>`).join("");
-      $("auto").textContent = (state.auto_squares || []).map((sq) => sq.label + (called.has(sq.id) ? " (called)" : "")).join("  |  ");
+      $("status").innerHTML = r
+        ? `round <b>${r.round_id}</b> open &middot; ${r.cards} cards &middot; ${r.players} players &middot; pot <b>${r.pot}</b> Hats &middot; ${r.calls.length} calls`
+        : (state.last && state.last.winner
+            ? `no open round &middot; last round ${state.last.round_id} won by <b>${esc(state.last.winner.display)}</b> (${state.last.winner.prize} Hats)`
+            : "no open round");
+      $("start").textContent = r ? "Start a new round (closes this one)" : "Start round";
+      $("end").disabled = !r;
+      $("round-note").textContent = state.enabled === false ? "The bingo feature toggle is OFF: the site page 404s and nothing gets marked." : "";
+      $("round-sub").textContent = r ? "opened " + dmy(r.started_at) : "";
+
+      // chips
+      $("chips").innerHTML = r ? [
+        ["pot", "Pot", r.pot + " Hats"], ["", "Base", r.base_prize], ["", "Sales", r.sales + " Hats"],
+        ["", "Cards", r.cards], ["", "Players", r.players], ["", "Calls", r.calls.length],
+      ].map((c) => `<span class="chip ${c[0]}">${c[1]}<b>${esc(c[2])}</b></span>`).join("") : "";
+
+      // calls
+      const calls = r ? r.calls.slice().reverse() : [];
+      $("calls").innerHTML = calls.length
+        ? `<table><thead><tr><th>Time</th><th>Square</th><th>Source</th><th></th></tr></thead><tbody>` +
+          calls.map((c) => `<tr><td class="mono">${hhmm(c.ts)}</td><td>${esc(c.label)}<small style="color:var(--muted);font-family:var(--mono)"> ${esc(c.event_id)}</small></td><td class="mono">${esc(c.source)}</td>` +
+            `<td style="text-align:right">${r.winner ? "" : `<button type="button" class="btn small ghost danger" data-uncall="${esc(c.event_id)}">Undo</button>`}</td></tr>`).join("") +
+          `</tbody></table>`
+        : `<div class="empty">${r ? "Nothing called yet." : "No open round."}</div>`;
+
+      // cards
+      const cards = state.round_cards || [];
+      $("cards").innerHTML = cards.length
+        ? `<table><thead><tr><th>Player</th><th class="num">Card</th><th class="num">Paid</th><th class="num">Marked</th><th class="num">To go</th></tr></thead><tbody>` +
+          cards.map((c) => `<tr class="${c.bingo ? "bingo" : ""}"><td>${esc(c.display || c.login)}</td><td class="num">#${c.seq}</td><td class="num">${c.price || "free"}</td><td class="num">${c.marked}/25</td><td class="num">${c.bingo ? "BINGO" : c.to_bingo}</td></tr>`).join("") +
+          `</tbody></table>`
+        : `<div class="empty">${r ? "No cards yet. Viewers claim them at hatmaster.tv/bingo." : "No open round."}</div>`;
+
+      // square buttons
+      const btn = (sq, tag) => `<button type="button" class="sq ${called.has(sq.id) ? "called" : ""}" data-fire="${esc(sq.id)}" ${r ? "" : "disabled"}>` +
+        `${esc(sq.label)}${tag ? `<span class="tag">${tag}</span>` : ""}<small>${esc(sq.id)}${called.has(sq.id) ? " (called)" : ""}</small></button>`;
+      $("manual").innerHTML = (state.manual_squares || []).map((sq) => btn(sq, "")).join("") || `<div class="empty">No manual squares in the pool.</div>`;
+      $("auto").innerHTML = (state.auto_squares || []).map((sq) => btn(sq, "auto")).join("") || `<div class="empty">No auto squares in the pool.</div>`;
+
+      // simulate
+      const sims = state.simulated_events || [];
+      $("sim").innerHTML = sims.map((k) => k === "god"
+        ? `<span class="bar"><input id="sim-god" placeholder="god name" style="width:120px" value="${esc(($("sim-god") || {}).value || "")}"><button type="button" class="btn" data-sim="god" ${r ? "" : "disabled"}>God detected</button></span>`
+        : `<button type="button" class="btn" data-sim="${k}" ${r ? "" : "disabled"}>${k.replace("_", " ")}</button>`).join("");
+      const m = state.match || {};
+      $("match").textContent = `Match counters: ${m.open ? "match open" : "no match open"}, kills ${m.kills || 0}, deaths ${m.deaths || 0}, gods this round: ${(m.gods_this_round || []).join(", ") || "none"}. ` +
+        `Auto squares mark only while a round is open; kills/deaths reset when a god is detected, win/loss/deathless settle on match end.`;
+
+      renderPool();
+      renderHistory();
     }
-    async function refresh() { try { state = await api("/api/bingo/status"); render(); } catch (e) { $("status").textContent = "bot unreachable"; } }
-    $("start").addEventListener("click", async () => { const r = await api("/api/bingo/start", "POST"); log("round started, pot " + (r.pot || 0)); refresh(); });
-    $("end").addEventListener("click", async () => { if (confirm("Close the round with no winner?")) { await api("/api/bingo/end", "POST"); log("round closed"); refresh(); } });
-    $("manual").addEventListener("click", async (e) => {
-      const b = e.target.closest("[data-id]"); if (!b) return;
-      const r = await api("/api/bingo/fire?event=" + encodeURIComponent(b.dataset.id), "POST");
-      if (r.ok) log(`${r.label}: ${r.changed} cards marked` + (r.already ? " (already called)" : "") + (r.winners && r.winners.length ? "  BINGO " + r.winners[0].display : ""), r.winners && r.winners.length);
-      else log("error: " + r.error);
-      refresh();
+
+    function renderPool() {
+      const autoIds = new Set(state.auto_ids || []);
+      const open = !!state.round;
+      const pool = (state.manual_squares || []).concat(state.auto_squares || []);
+      const order = new Map(); (state.pool_order || []).forEach((id, i) => order.set(id, i));
+      pool.sort((a, b) => (a.source === b.source ? 0 : a.source === "manual" ? -1 : 1) || a.label.localeCompare(b.label));
+      $("pool").innerHTML = pool.map((sq) =>
+        `<tr class="pool-row ${dirty.has(sq.id) ? "dirty" : ""}" data-id="${esc(sq.id)}">` +
+          `<td><input class="label" data-f="label" value="${esc(sq.label)}"></td>` +
+          `<td class="mono">${esc(sq.id)}</td>` +
+          `<td>${autoIds.has(sq.id) ? `<select data-f="source"><option value="auto" ${sq.source === "auto" ? "selected" : ""}>auto</option><option value="manual" ${sq.source === "manual" ? "selected" : ""}>manual</option></select>` : "manual"}</td>` +
+          `<td class="num"><input class="weight" data-f="weight" type="number" step="0.5" min="0.5" value="${esc(sq.weight)}"></td>` +
+          `<td style="white-space:nowrap;text-align:right"><button type="button" class="btn small" data-save="${esc(sq.id)}">Save</button> ` +
+          `<button type="button" class="btn small ghost danger" data-del="${esc(sq.id)}" ${open ? 'disabled title="close the round first"' : ""}>Delete</button></td>` +
+        `</tr>`).join("");
+      $("pool-file").textContent = state.pool_file || "data/bingo/pool.json";
+      $("auto-ids").textContent = (state.auto_ids || []).join(" ");
+      $("pool-sub").textContent = `${pool.length} squares (${(state.manual_squares || []).length} manual, ${(state.auto_squares || []).length} auto); a card uses 24`;
+    }
+
+    function renderHistory() {
+      const rows = (state.history || []).filter((h) => !state.round || h.round_id !== state.round.round_id);
+      $("history").innerHTML = rows.length
+        ? `<table><thead><tr><th class="num">#</th><th>Started</th><th>Ended</th><th class="num">Cards</th><th class="num">Players</th><th class="num">Calls</th><th class="num">Pot</th><th>Winner</th><th>Last call</th></tr></thead><tbody>` +
+          rows.map((h) => `<tr class="${h.winner ? "bingo" : ""}"><td class="num">${h.round_id}</td><td>${dmy(h.started_at)}</td><td>${h.ended_at ? dmy(h.ended_at) : "open"}</td>` +
+            `<td class="num">${h.cards}</td><td class="num">${h.players}</td><td class="num">${h.calls.length}</td><td class="num">${h.pot}</td>` +
+            `<td>${h.winner ? esc(h.winner.display) + " (" + h.winner.prize + " Hats)" : "<span style='color:var(--muted);font-weight:400'>no winner</span>"}</td>` +
+            `<td>${h.calls.length ? esc(h.calls[h.calls.length - 1].label) : ""}</td></tr>`).join("") +
+          `</tbody></table>`
+        : `<div class="empty">No past rounds yet.</div>`;
+    }
+
+    // ── actions ──
+    async function refresh() {
+      try { state = await api("/api/bingo/status"); if (!state.ok && state.error) throw new Error(state.error); render(); }
+      catch (e) { $("status").textContent = "bot unreachable: " + e.message; }
+    }
+    async function act(path, method, body, onOk) {
+      const r = await api(path, method || "POST", body);
+      if (r.ok) onOk(r); else toast("error: " + (r.error || "unknown"), true);
+      await refresh();
+    }
+
+    $("start").addEventListener("click", () => {
+      if (state && state.round && !confirm("A round is open. Close it with no winner and start a new one?")) return;
+      act("/api/bingo/start", "POST", null, (r) => toast(`round ${r.round_id} started, pot ${r.pot} Hats`));
     });
-    refresh(); setInterval(refresh, 5000);
+    $("end").addEventListener("click", () => { if (confirm("Close the round with no winner?")) act("/api/bingo/end", "POST", null, () => toast("round closed, no winner")); });
+
+    document.body.addEventListener("click", (e) => {
+      const fire = e.target.closest("[data-fire]");
+      if (fire) return act("/api/bingo/fire?event=" + encodeURIComponent(fire.dataset.fire) + "&source=dashboard", "POST", null,
+        (r) => toast(`${r.label}: ${r.changed} cards marked` + (r.already ? " (already called)" : "") + (r.winners && r.winners.length ? "  BINGO " + r.winners[0].display : "")));
+      const un = e.target.closest("[data-uncall]");
+      if (un) return act("/api/bingo/uncall?event=" + encodeURIComponent(un.dataset.uncall), "POST", null,
+        (r) => toast(`undone: ${r.label} (${r.changed} cards unmarked)`));
+      const sim = e.target.closest("[data-sim]");
+      if (sim) {
+        const god = sim.dataset.sim === "god" ? ($("sim-god").value || "") : "";
+        return act("/api/bingo/simulate?event=" + sim.dataset.sim + "&god=" + encodeURIComponent(god), "POST", null,
+          (r) => toast(`simulated ${r.simulated}: ${r.new_calls} new call${r.new_calls === 1 ? "" : "s"} (match kills ${r.match.kills}, deaths ${r.match.deaths})`));
+      }
+      const save = e.target.closest("[data-save]");
+      if (save) {
+        const tr = save.closest("tr");
+        const get = (f) => { const el = tr.querySelector(`[data-f="${f}"]`); return el ? el.value : undefined; };
+        const body = { id: save.dataset.save, label: get("label"), weight: get("weight"), source: get("source") || "manual" };
+        return act("/api/bingo/pool/save", "POST", body, (r) => { dirty.delete(r.square.id); toast(`saved ${r.square.label} (weight ${r.square.weight}, ${r.square.source})`); });
+      }
+      const del = e.target.closest("[data-del]");
+      if (del && confirm(`Delete square "${del.dataset.del}" from the pool?`)) {
+        return act("/api/bingo/pool/delete", "POST", { id: del.dataset.del }, (r) => toast(`deleted ${r.removed}; ${r.pool_size} squares left`));
+      }
+    });
+    document.body.addEventListener("input", (e) => {
+      const tr = e.target.closest("tr.pool-row[data-id]");
+      if (tr) { dirty.add(tr.dataset.id); tr.classList.add("dirty"); }
+      if (e.target === $("new-label") && !$("new-id").dataset.touched) $("new-id").value = slug(e.target.value);
+    });
+    $("new-id").addEventListener("input", () => { $("new-id").dataset.touched = $("new-id").value ? "1" : ""; });
+    $("add").addEventListener("click", () => {
+      const label = $("new-label").value.trim();
+      if (!label) return toast("type a label first", true);
+      act("/api/bingo/pool/save", "POST", { id: $("new-id").value || slug(label), label, weight: $("new-weight").value || 3, source: "manual" },
+        (r) => { $("new-label").value = ""; $("new-id").value = ""; $("new-id").dataset.touched = ""; toast(`${r.created ? "added" : "updated"} ${r.square.label} (${r.square.id})`); });
+    });
+    $("reload").addEventListener("click", () => act("/api/bingo/pool/reload", "POST", null, (r) => { dirty.clear(); toast(`pool reloaded: ${r.pool_size} squares`); }));
+
+    // The public page link: on the dashboard (8069) the viewer page lives on the public server.
+    if (location.port === "8069") $("public-link").href = "https://hatmaster.tv/bingo";
+
+    refresh();
+    setInterval(() => { if (!dirty.size) refresh(); }, 5000);   // do not clobber edits in progress
   </script>
 </body>
 </html>

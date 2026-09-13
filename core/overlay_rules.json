@@ -133,6 +133,7 @@
       "bingo_open",
       "bingo_call",
       "bingo_win",
+      "bingo_uncall",
       "card_added"
     ],
     "hide_on": [

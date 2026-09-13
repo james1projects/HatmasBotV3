@@ -23,6 +23,7 @@ from datetime import datetime
 from aiohttp import web
 from pathlib import Path
 
+from core.bingo_web import BingoControl
 from core.config import (
     WEB_HOST, WEB_PORT, OVERLAY_DIR, DATA_DIR, BASE_DIR,
     TITLE_TEMPLATE_GOD, TITLE_TEMPLATE_LOBBY,
@@ -120,12 +121,7 @@ class WebServer:
         self.app.router.add_get("/api/death_count", self.handle_death_count)
         self.app.router.add_get("/api/cocaster/status", self.handle_cocaster_status)
         self.app.router.add_get("/bingo", self.handle_bingo_admin)
-        self.app.router.add_get("/api/bingo/status", self.handle_bingo_status)
-        for _path, _h in (("/api/bingo/start", self.handle_bingo_start),
-                          ("/api/bingo/end", self.handle_bingo_end),
-                          ("/api/bingo/fire", self.handle_bingo_fire)):
-            self.app.router.add_get(_path, _h)
-            self.app.router.add_post(_path, _h)
+        BingoControl(self._bingo).register(self.app.router)   # /api/bingo/* control routes
         self.app.router.add_post("/api/cocaster/test", self.handle_cocaster_test)
         self.app.router.add_get("/api/cocaster/test", self.handle_cocaster_test)
         self.app.router.add_get("/overlay/deaths", self.handle_deaths_overlay)
@@ -554,43 +550,6 @@ class WebServer:
         """GET /bingo — the manual-square button page for the second monitor."""
         return web.FileResponse(OVERLAY_DIR / "bingo_admin.html",
                                 headers={"Cache-Control": "no-cache"})
-
-    async def handle_bingo_status(self, request):
-        b = self._bingo()
-        if b is None or b.store is None:
-            return web.json_response({"error": "bingo plugin not loaded"}, status=404)
-        return web.json_response(b.status())
-
-    async def handle_bingo_start(self, request):
-        """GET/POST /api/bingo/start — open a round (Stream Deck friendly)."""
-        b = self._bingo()
-        if b is None or b.store is None:
-            return web.json_response({"error": "bingo plugin not loaded"}, status=404)
-        return web.json_response(await b.start_round())
-
-    async def handle_bingo_end(self, request):
-        b = self._bingo()
-        if b is None or b.store is None:
-            return web.json_response({"error": "bingo plugin not loaded"}, status=404)
-        out = await b.end_round("manual")
-        return web.json_response(out or {"ok": False, "error": "no open round"})
-
-    async def handle_bingo_fire(self, request):
-        """GET/POST /api/bingo/fire?event=<square id> — call a square."""
-        b = self._bingo()
-        if b is None or b.store is None:
-            return web.json_response({"error": "bingo plugin not loaded"}, status=404)
-        event = (request.query.get("event") or "").strip().lower()
-        if not event and request.can_read_body:
-            try:
-                body = await request.json()
-                event = str(body.get("event") or "").strip().lower()
-            except Exception:
-                event = ""
-        if not event:
-            return web.json_response({"ok": False, "error": "event is required"}, status=400)
-        res = await b.fire(event, source="deck")
-        return web.json_response(res, status=200 if res.get("ok") else 400)
 
     # ── co-caster (plugins/cocaster/) ──
     def _cocaster(self):

@@ -50,15 +50,24 @@
   .hint { color: var(--text-dim); font-size: 13px; }
   .err { color: var(--red); font-size: 13px; }
 
-  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
-  .card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 12px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; align-items: start; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 12px; min-width: 0; }
   .card.bingo { border-color: var(--green); box-shadow: 0 0 0 2px var(--green-bg); }
   .card h3 { margin: 0 0 8px; font-family: var(--font-display); text-transform: uppercase; font-size: 16px; letter-spacing: 0.04em; display: flex; justify-content: space-between; }
   .card h3 span { font-family: var(--font-mono); font-size: 12px; color: var(--text-dim); text-transform: none; }
-  .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
-  .sq { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; text-align: center;
-    padding: 4px; font-size: 10px; line-height: 1.15; border-radius: var(--radius-sm);
+  /* Five equal columns that can never grow past the card: minmax(0, 1fr)
+     plus min-width: 0 stop a long label ("Presses the wrong deck button")
+     from widening its column, and overflow-wrap breaks a word that still
+     will not fit. Squares are square by aspect-ratio; text that outgrows
+     one is clipped rather than pushing the grid out of the card. */
+  .grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+  .sq { aspect-ratio: 1 / 1; min-width: 0; min-height: 0; box-sizing: border-box; overflow: hidden;
+    display: flex; align-items: center; justify-content: center; text-align: center;
+    padding: 3px; font-size: 10.5px; line-height: 1.15; border-radius: var(--radius-sm);
+    overflow-wrap: anywhere; hyphens: auto;
     background: var(--bg-2); color: var(--text-dim); border: 1px solid var(--border); }
+  .sq span { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+  .sq.free { font-family: var(--font-display); font-size: 15px; letter-spacing: 0.06em; }
   .sq.marked { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 700; }
   .sq.free { background: var(--panel-hi); color: var(--text); font-weight: 700; }
   .sq.free.marked { background: var(--accent); color: var(--bg); }
@@ -162,7 +171,7 @@
     return '<div class="card' + (c.bingo ? ' bingo' : '') + '" data-id="' + c.id + '">' +
       '<h3>Card ' + c.seq + (c.bingo ? ' BINGO' : '') + '<span>' + (c.to_bingo === 0 ? 'won' : c.to_bingo + ' to go') + '</span></h3>' +
       '<div class="grid">' + c.squares.map((s, i) =>
-        '<div class="sq' + (s.marked ? ' marked' : '') + (s.free ? ' free' : '') + (line.has(i) ? ' line' : '') + '" data-sq="' + esc(s.id) + '">' + esc(s.label) + '</div>').join('') +
+        '<div class="sq' + (s.marked ? ' marked' : '') + (s.free ? ' free' : '') + (line.has(i) ? ' line' : '') + '" data-sq="' + esc(s.id) + '" title="' + esc(s.label) + '"><span>' + esc(s.label) + '</span></div>').join('') +
       '</div></div>';
   }
   function renderCards() { $("cards").innerHTML = myCards.map(cardHtml).join(''); }
@@ -200,6 +209,7 @@
         }
       }
       else if (msg.event === "bingo_win") { if (state) state.round = d; renderRound(); loadMe(); }
+      else if (msg.event === "bingo_uncall") { if (state) state.round = d; renderRound(); loadMe(); }
       else if (msg.event === "bingo_closed") { if (state) { state.round = null; state.last = d; } renderRound(); loadMe(); }
       else if (msg.event === "card_added") { if (state) state.round = d; renderRound(); }
     };

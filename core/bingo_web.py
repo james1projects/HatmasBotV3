@@ -153,3 +153,122 @@ class BingoWeb:
         finally:
             self._clients.discard(ws)
         return ws
+
+
+class BingoControl:
+    """Control routes for the dashboard (localhost:8069) and the dev
+    server. Not for the public site: no auth beyond being local.
+
+        GET|POST /api/bingo/status              plugin.status(): round, squares, history
+        GET|POST /api/bingo/start | /end        open / close (no winner) a round
+        GET|POST /api/bingo/fire?event=<id>     call a square (deck: bingo_call.bat <id>)
+        GET|POST /api/bingo/uncall?event=<id>   undo a call in the open round
+        GET|POST /api/bingo/simulate?event=<k>  fake detector/economy event (&god=<name>)
+        GET      /api/bingo/history?limit=20    past rounds, newest first
+        GET      /api/bingo/pool                the square pool
+        POST     /api/bingo/pool/save           {id?, label, source, weight} add or update
+        POST     /api/bingo/pool/delete?id=<id> remove a square (round must be closed)
+        POST     /api/bingo/pool/reload         re-read pool.json after a hand edit
+
+    `get_plugin` returns the BingoPlugin (or None while the bot is starting).
+    """
+
+    def __init__(self, get_plugin):
+        self._get_plugin = get_plugin
+
+    def register(self, router) -> None:
+        both = (("/api/bingo/status", self.handle_status), ("/api/bingo/start", self.handle_start),
+                ("/api/bingo/end", self.handle_end), ("/api/bingo/fire", self.handle_fire),
+                ("/api/bingo/uncall", self.handle_uncall), ("/api/bingo/simulate", self.handle_simulate))
+        for path, h in both:
+            router.add_get(path, h)
+            router.add_post(path, h)
+        router.add_get("/api/bingo/history", self.handle_history)
+        router.add_get("/api/bingo/pool", self.handle_pool)
+        router.add_post("/api/bingo/pool/save", self.handle_pool_save)
+        router.add_post("/api/bingo/pool/delete", self.handle_pool_delete)
+        router.add_post("/api/bingo/pool/reload", self.handle_pool_reload)
+
+    def _plugin(self):
+        p = self._get_plugin()
+        if p is None or getattr(p, "store", None) is None:
+            raise web.HTTPNotFound(text=json.dumps({"ok": False, "error": "bingo plugin not loaded"}),
+                                   content_type="application/json")
+        return p
+
+    @staticmethod
+    async def _params(request: web.Request) -> dict:
+        """Query string first, then a JSON body (deck bats use the query)."""
+        out = dict(request.query)
+        if request.method == "POST" and request.can_read_body:
+            try:
+                body = await request.json()
+                if isinstance(body, dict):
+                    for k, v in body.items():
+                        out.setdefault(k, v)
+            except Exception:
+                pass
+        return out
+
+    @staticmethod
+    def _reply(res: dict, ok_status: int = 200):
+        return web.json_response(res, status=ok_status if res.get("ok", True) else 400,
+                                 headers={"Cache-Control": "no-store"})
+
+    async def handle_status(self, request):
+        return self._reply(self._plugin().status())
+
+    async def handle_start(self, request):
+        return self._reply(await self._plugin().start_round())
+
+    async def handle_end(self, request):
+        out = await self._plugin().end_round("manual")
+        return self._reply(out or {"ok": False, "error": "no open round"})
+
+    async def handle_fire(self, request):
+        p = self._plugin()
+        q = await self._params(request)
+        event = str(q.get("event") or "").strip().lower()
+        if not event:
+            return self._reply({"ok": False, "error": "event is required"})
+        return self._reply(await p.fire(event, source=str(q.get("source") or "deck")[:20]))
+
+    async def handle_uncall(self, request):
+        p = self._plugin()
+        q = await self._params(request)
+        event = str(q.get("event") or "").strip().lower()
+        if not event:
+            return self._reply({"ok": False, "error": "event is required"})
+        return self._reply(await p.uncall(event))
+
+    async def handle_simulate(self, request):
+        p = self._plugin()
+        q = await self._params(request)
+        return self._reply(await p.simulate(str(q.get("event") or ""), str(q.get("god") or q.get("value") or "")))
+
+    async def handle_history(self, request):
+        p = self._plugin()
+        try:
+            limit = max(1, min(200, int(request.query.get("limit") or 20)))
+        except ValueError:
+            limit = 20
+        return self._reply({"ok": True, "rounds": p.history(limit)})
+
+    async def handle_pool(self, request):
+        p = self._plugin()
+        return self._reply({"ok": True, "squares": p.pool, "auto_ids": p.auto_ids(),
+                            "file": str(p._pool_path())})
+
+    async def handle_pool_save(self, request):
+        p = self._plugin()
+        q = await self._params(request)
+        return self._reply(p.set_square(str(q.get("id") or ""), str(q.get("label") or ""),
+                                        str(q.get("source") or "manual"), q.get("weight", 1)))
+
+    async def handle_pool_delete(self, request):
+        p = self._plugin()
+        q = await self._params(request)
+        return self._reply(p.remove_square(str(q.get("id") or "")))
+
+    async def handle_pool_reload(self, request):
+        return self._reply(self._plugin().reload_pool())
