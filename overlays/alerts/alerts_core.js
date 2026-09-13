@@ -35,8 +35,8 @@
   // load falls back to the kind's synthesised sound.
   const SOUNDS_BASE = '/assets/sounds/kenney/';
   const SOUNDS = {
-    // soft low clicks (~340-570 Hz); the tick_00x samples were the brightest clicks in the packs and read as harsh
-    spin_tick:      ['interface-sounds/click_001', 'ui-audio/click2'],
+    // James's pick on /sounds (2026-09-13): a chip stack per tick, rate 0.9-1.15, gain 0.45 (set in spin.js)
+    spin_tick:      ['casino-audio/chips-stack-5'],
     spin_land:      ['interface-sounds/confirmation_002'],
     gamble_shake:   ['casino-audio/dice-shake-1', 'casino-audio/dice-shake-2', 'casino-audio/dice-shake-3'],
     gamble_throw:   ['casino-audio/dice-throw-1', 'casino-audio/dice-throw-2', 'casino-audio/dice-throw-3'],
