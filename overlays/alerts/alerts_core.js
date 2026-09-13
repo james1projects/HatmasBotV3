@@ -27,6 +27,51 @@
   const kinds = {};
   let audioCtx = null;
 
+  // ── sound samples (assets/sounds/README.md) ──
+  // Real recordings instead of synthesised beeps: CC0 packs by Kenney
+  // (kenney.nl), served from /assets/sounds/. Every kind plays a ROLE
+  // from this table and one of the role's variants is picked at random,
+  // so swapping a sound is a one-line edit here. A role that fails to
+  // load falls back to the kind's synthesised sound.
+  const SOUNDS_BASE = '/assets/sounds/kenney/';
+  const SOUNDS = {
+    spin_tick:      ['interface-sounds/tick_001', 'interface-sounds/tick_002', 'interface-sounds/tick_004'],
+    spin_land:      ['interface-sounds/confirmation_002'],
+    gamble_shake:   ['casino-audio/dice-shake-1', 'casino-audio/dice-shake-2', 'casino-audio/dice-shake-3'],
+    gamble_throw:   ['casino-audio/dice-throw-1', 'casino-audio/dice-throw-2', 'casino-audio/dice-throw-3'],
+    gamble_jackpot: ['casino-audio/chips-stack-1', 'casino-audio/chips-stack-2', 'casino-audio/chips-stack-3',
+                     'casino-audio/chips-stack-4', 'casino-audio/chips-stack-5', 'casino-audio/chips-stack-6'],
+    gamble_fanfare: ['interface-sounds/confirmation_004'],
+    gamble_big_win: ['casino-audio/chips-collide-1', 'casino-audio/chips-collide-2', 'casino-audio/chips-collide-3'],
+    gamble_win:     ['casino-audio/chip-lay-1', 'casino-audio/chip-lay-2', 'casino-audio/chip-lay-3'],
+    gamble_win_tone: ['interface-sounds/select_003'],
+    gamble_loss:    ['interface-sounds/error_004'],
+    gamble_loss_card: ['casino-audio/card-shove-1', 'casino-audio/card-shove-2'],
+    bingo_claim:    ['interface-sounds/confirmation_003'],
+    bingo_prize:    ['casino-audio/chips-stack-4', 'casino-audio/chips-stack-5'],
+    burn_boom:      ['impact-sounds/impactSoft_heavy_000', 'impact-sounds/impactSoft_heavy_001', 'impact-sounds/impactSoft_heavy_002'],
+    burn_crackle:   ['impact-sounds/impactMetal_heavy_000', 'impact-sounds/impactMetal_heavy_003'],
+    burn_record:    ['interface-sounds/confirmation_004'],
+  };
+  const loaded = {};    // name -> AudioBuffer (decoded, ready to play now)
+  const loading = {};   // name -> Promise
+  function loadSample(name) {
+    if (loaded[name]) return Promise.resolve(loaded[name]);
+    if (!loading[name]) {
+      const ac = getAudioCtx();
+      loading[name] = (!ac ? Promise.resolve(null)
+        : fetch(SOUNDS_BASE + name + '.ogg')
+            .then(r => r.ok ? r.arrayBuffer() : Promise.reject(new Error('HTTP ' + r.status)))
+            .then(b => ac.decodeAudioData(b))
+            .then(buf => { loaded[name] = buf; return buf; }))
+        .catch(e => { console.warn('[alerts] sound missing:', name, e && e.message); return null; });
+    }
+    return loading[name];
+  }
+  function preloadRoles(roles) {
+    (roles || Object.keys(SOUNDS)).forEach(role => (SOUNDS[role] || []).forEach(loadSample));
+  }
+
   function getAudioCtx() {
     if (!audioCtx) {
       try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) { audioCtx = null; }
@@ -76,6 +121,28 @@
       const gain = ac.createGain(); gain.gain.value = volume; gain.connect(ac.destination);
       return {ctx: ac, gain};
     };
+    /** Play one variant of a SOUNDS role through the kind's volume.
+     *  o = {gain (0..1, default 1), rate (playback rate, default 1), at (seconds from now)}.
+     *  Returns true when a decoded sample played NOW; false when sound is
+     *  off, the sample is not loaded yet (a load is started for next time)
+     *  or the role is unknown, so the caller can fall back to synth. */
+    ctx.play = function (role, o) {
+      o = o || {};
+      const names = SOUNDS[role] || [];
+      if (!audible || !names.length) return false;
+      const ac = getAudioCtx();
+      if (!ac) return false;
+      const name = names[Math.floor(Math.random() * names.length)];
+      const buf = loaded[name];
+      if (!buf) { loadSample(name); return false; }
+      const src = ac.createBufferSource(); src.buffer = buf;
+      src.playbackRate.value = o.rate || 1;
+      const g = ac.createGain(); g.gain.value = volume * (o.gain == null ? 1 : o.gain);
+      src.connect(g); g.connect(ac.destination);
+      src.start(ac.currentTime + Math.max(0, o.at || 0));
+      return true;
+    };
+    ctx.hasSound = function (role) { return (SOUNDS[role] || []).some(n => !!loaded[n]); };
     return ctx;
   }
 
@@ -96,6 +163,11 @@
     },
     kinds() { return Object.keys(kinds); },
     esc, style,
+    /** The sound table (role -> sample names under /assets/sounds/kenney/). */
+    SOUNDS, SOUNDS_BASE,
+    /** Decode samples ahead of the first alert; kinds call this at load. No-op without WebAudio. */
+    preload(roles) { try { preloadRoles(roles); } catch (_) {} },
+    soundsLoaded() { return Object.keys(loaded).length; },
     /** Render `kind` into `el`; returns the module's cleanup function (or null). */
     render(kind, el, data, opts) {
       const ctx = makeCtx(Object.assign({kind}, opts || {}));

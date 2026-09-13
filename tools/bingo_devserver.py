@@ -165,6 +165,8 @@ def main() -> int:
 
     server.app.router.add_get("/ws/overlays", overlay_ws)
     server.app.router.add_static("/overlays/", OVERLAYS)          # bingo.html, alerts/*.js, theme, client
+    if (REPO_ROOT / "assets" / "sounds").is_dir():
+        server.app.router.add_static("/assets/sounds/", REPO_ROOT / "assets" / "sounds")
 
     async def me(request):
         return web.json_response({"logged_in": bool(args.login), "login": args.login,

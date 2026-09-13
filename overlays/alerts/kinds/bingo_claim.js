@@ -12,8 +12,9 @@ HatmasAlerts.define('bingo_claim', {
           (w.paid === false ? '<br><small>Hats owed (balance service down)</small>' : '') + '</div>' +
         '<div class="hm-alert-row"><span class="k">Cards in play</span><span class="v">' + esc(d.cards != null ? d.cards : '') + '</span></div>' +
       '</div>';
-    // a short rising chime, generated: no asset to ship
+    // real samples first (alerts_core SOUNDS: bingo_claim / bingo_prize), the old chime as fallback
     const s = ctx.synth();
+    if (s && ctx.play('bingo_claim', {gain: 0.9})) { ctx.play('bingo_prize', {gain: 0.8, at: 0.5}); return; }
     if (s) {
       const now = s.ctx.currentTime;
       [523, 659, 784, 1047, 1319].forEach((f, i) => {
@@ -27,3 +28,4 @@ HatmasAlerts.define('bingo_claim', {
     }
   }
 });
+HatmasAlerts.preload(['bingo_claim', 'bingo_prize']);

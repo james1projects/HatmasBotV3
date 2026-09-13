@@ -16,6 +16,7 @@ from core import tls_trust  # noqa: F401
 BASE_DIR = Path(__file__).parent.parent
 DATA_DIR = BASE_DIR / "data"
 OVERLAY_DIR = BASE_DIR / "overlays"
+SOUNDS_DIR = BASE_DIR / "assets" / "sounds"   # served at /assets/sounds/ (alert box samples, CC0 Kenney packs)
 CUSTOM_GOD_ICONS_DIR = BASE_DIR / "assets" / "Custom God Icons"
 GOD_ICONS_DIR = DATA_DIR / "god_icons"
 DATA_DIR.mkdir(exist_ok=True)

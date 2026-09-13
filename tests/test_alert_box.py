@@ -16,6 +16,27 @@ class _Overlay:
     async def broadcast(self, name, action, data=None): self.sent.append((name, action, data))
     def client_count(self, name): return 0
 
+def test_sound_table_files_exist():
+    """Every sample the alert box's SOUNDS table names must exist under
+    assets/sounds/kenney (a typo there is a silent alert on stream)."""
+    import re
+    core = (REPO_ROOT / "overlays" / "alerts" / "alerts_core.js").read_text(encoding="utf-8")
+    block = core.split("const SOUNDS = {", 1)[1].split("};", 1)[0]
+    names = re.findall(r"'([a-z-]+/[A-Za-z0-9_-]+)'", block)
+    assert len(names) >= 20, names
+    missing = [n for n in names if not (REPO_ROOT / "assets" / "sounds" / "kenney" / (n + ".ogg")).is_file()]
+    assert not missing, missing
+    # and each kind that plays a role preloads only roles the table knows
+    roles = set(re.findall(r"^\s*([a-z_]+):\s*\[", block, re.M))
+    for kind in (REPO_ROOT / "overlays" / "alerts" / "kinds").glob("*.js"):
+        text = kind.read_text(encoding="utf-8")
+        used = set(re.findall(r"ctx\.(?:play|hasSound)\('([a-z_]+)'", text))
+        if "HatmasAlerts.preload(" in text:
+            used |= set(re.findall(r"'([a-z_]+)'", text.split("HatmasAlerts.preload(", 1)[1].split(")", 1)[0]))
+        for role in used:
+            assert role in roles, f"{kind.name} uses unknown sound role {role}"
+
+
 def test_default_config_and_kinds():
     cfg = AB.default_config()
     assert 'boxes' in cfg

@@ -3153,3 +3153,18 @@ copy of the real economy.db), and `_ledger()` only treats a UNIQUE
 violation as "duplicate ref" - any other integrity error undoes the
 balance move and raises. Adding a reason is now: append to `REASONS`,
 restart. Test: `test_ledger_check_migration` in tests/test_wallet.py.
+
+## v2.21 — Real sound samples for the alert box (2026-09-13)
+
+James: the synthesised alert sounds were "generic sounds used by Claude
+in any and every application". Replaced with CC0 recordings from four
+Kenney packs (casino, impact, UI, interface; every file kept under
+`assets/sounds/kenney/`, 3.5 MB, README with the licence and contents)
+served at `/assets/sounds/` by the dashboard server and the bingo dev
+server. One `SOUNDS` role table in alerts_core.js, `ctx.play()` in the
+kinds, synth kept as fallback, tripwire test for missing files. Spin
+ticks are now interface tick samples pitched per tick; gamble is a dice
+shake, a throw, then chips / a fanfare / an error tone by outcome; bingo
+is a confirmation plus a chip stack; burn is a soft heavy impact pitched
+down plus metal, with the fanfare on a record. Details: docs/ALERT_BOX.md
+"Sounds".

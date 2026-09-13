@@ -243,3 +243,20 @@ their placements; sticky feed took three trades into one panel; eye, live
 preview, drag, save; a viewer's line showed the Bingo! button, the opt-in
 put the card on the carousel, the press paid and closed the round and fired
 the claim alert. Not yet: a real round on stream, OBS audio through the box.
+
+## Sounds (2026-09-13)
+
+The kinds that make noise (gamble, spin, bingo_claim, burn) play real
+recordings instead of synthesised tones: CC0 packs by Kenney under
+`assets/sounds/kenney/` (see `assets/sounds/README.md`), served at
+`/assets/sounds/`. `overlays/alerts/alerts_core.js` holds one `SOUNDS`
+table, role -> sample names; a kind calls `ctx.play(role, {gain, rate,
+at})`, a random variant plays through the kind's volume slider, and
+`HatmasAlerts.preload([...])` at the bottom of each kind file decodes
+the samples when the box loads. A sample that fails to load logs a
+console warning and `ctx.play` returns false, so each kind keeps its old
+synthesised sound as the fallback. Roles today: spin_tick / spin_land,
+gamble_shake / throw / jackpot / fanfare / big_win / win / win_tone /
+loss / loss_card, bingo_claim / bingo_prize, burn_boom / crackle /
+record. To change a sound, edit the table; `tests/test_alert_box.py`
+fails on a name that is not on disk.

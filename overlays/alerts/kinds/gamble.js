@@ -50,8 +50,10 @@ HatmasAlerts.define('gamble', {
 
     player.textContent = (d.player || '') + ' is rolling...';
     roll.textContent = Math.floor(Math.random() * 100) + 1;
+    // real samples first (alerts_core SOUNDS: gamble_*), the old synth as fallback
+    const shaking = !!(s && ctx.play('gamble_shake', {gain: 0.8}));
     const tick = () => {
-      if (!s) return;
+      if (!s || shaking) return;
       const now = s.ctx.currentTime, o = s.ctx.createOscillator(), g = s.ctx.createGain();
       o.type = 'sine'; o.frequency.setValueAtTime(800 + Math.random() * 400, now);
       g.gain.setValueAtTime(0.06, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
@@ -76,19 +78,33 @@ HatmasAlerts.define('gamble', {
     function playResult(t) {
       if (!s) return;
       const now = s.ctx.currentTime;
+      ctx.play('gamble_throw', {gain: 0.9});
       if (t === 'jackpot') {
+        if (ctx.hasSound('gamble_jackpot')) {
+          for (let i = 0; i < 6; i++) ctx.play('gamble_jackpot', {gain: 0.8, at: 0.25 + i * 0.22, rate: 0.95 + Math.random() * 0.1});
+          ctx.play('gamble_fanfare', {gain: 0.9, at: 0.4});
+          return;
+        }
         const notes = [523, 659, 784, 1047, 1319, 1568];
         notes.forEach((f, i) => tone(f, now + i * 0.1, 0.6, 'sine', 0.3));
         const st = now + notes.length * 0.1 + 0.1;
         [1047, 1319, 1568, 2093].forEach((f) => tone(f, st, 1.5, 'triangle', 0.2, true));
         for (let i = 0; i < 20; i++) tone(2000 + Math.random() * 3000, st + 0.2 + Math.random(), 0.15, 'sine', 0.08 + Math.random() * 0.08);
       } else if (t === 'big_win') {
+        if (ctx.hasSound('gamble_big_win')) {
+          for (let i = 0; i < 3; i++) ctx.play('gamble_big_win', {gain: 0.8, at: 0.25 + i * 0.2});
+          ctx.play('gamble_win_tone', {gain: 0.8, at: 0.3});
+          return;
+        }
         [523, 659, 784, 1047].forEach((f, i) => tone(f, now + i * 0.12, 0.4, 'square', 0.15));
       } else if (t === 'win') {
+        if (ctx.hasSound('gamble_win')) { ctx.play('gamble_win', {gain: 0.8, at: 0.25}); ctx.play('gamble_win_tone', {gain: 0.7, at: 0.3}); return; }
         [784, 1047].forEach((f, i) => tone(f, now + i * 0.15, 0.4, 'sine', 0.2));
       } else {
+        if (ctx.hasSound('gamble_loss')) { ctx.play('gamble_loss_card', {gain: 0.7, at: 0.25}); ctx.play('gamble_loss', {gain: 0.6, at: 0.35}); return; }
         [440, 370, 330].forEach((f, i) => tone(f, now + i * 0.2, 0.5, 'sine', 0.15));
       }
     }
   }
 });
+HatmasAlerts.preload(['gamble_shake', 'gamble_throw', 'gamble_jackpot', 'gamble_fanfare', 'gamble_big_win', 'gamble_win', 'gamble_win_tone', 'gamble_loss', 'gamble_loss_card']);

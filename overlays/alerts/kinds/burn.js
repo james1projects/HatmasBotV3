@@ -75,9 +75,13 @@ HatmasAlerts.define('burn', {
       root.appendChild(s); setTimeout(() => s.remove(), 1800);
     }, 140);
 
-    // sound: a low boom, then a rising shimmer for a record
+    // sound: a low boom, then a rising shimmer for a record. Real samples
+    // first (alerts_core SOUNDS: burn_boom / burn_crackle / burn_record), the synth as fallback.
     const s = ctx.synth();
-    if (s) {
+    if (s && ctx.play('burn_boom', {gain: 1, rate: 0.6})) {
+      ctx.play('burn_crackle', {gain: 0.35, rate: 0.7, at: 0.08});
+      if (record || streamRec) ctx.play('burn_record', {gain: 0.9, at: 0.9});
+    } else if (s) {
       const now = s.ctx.currentTime;
       const o = s.ctx.createOscillator(), g = s.ctx.createGain();
       o.type = 'sine'; o.frequency.setValueAtTime(110, now); o.frequency.exponentialRampToValueAtTime(38, now + 0.9);
@@ -101,3 +105,4 @@ HatmasAlerts.define('burn', {
     return () => { cancelAnimationFrame(raf); clearInterval(embers); };
   }
 });
+HatmasAlerts.preload(['burn_boom', 'burn_crackle', 'burn_record']);

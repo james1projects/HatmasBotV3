@@ -220,6 +220,10 @@ class WebServer:
         self.app.router.add_post(
             "/api/vod_processor/stop", self.handle_vod_stop)
         self.app.router.add_static("/overlays/", OVERLAY_DIR)
+        # Sound samples for the alert box (assets/sounds/README.md)
+        from core.config import SOUNDS_DIR
+        if SOUNDS_DIR.is_dir():
+            self.app.router.add_static("/assets/sounds/", SOUNDS_DIR)
         # Serve god icon directories for overlays
         from core.config import CUSTOM_GOD_ICONS_DIR, GOD_ICONS_DIR
         if CUSTOM_GOD_ICONS_DIR.exists():
