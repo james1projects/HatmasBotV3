@@ -2438,12 +2438,54 @@ class PublicWebServer:
             return bool(bot.is_feature_enabled(name))
         return True
 
+    def _login_host_bounce(self, request: web.Request):
+        """A login must START on the host the OAuth redirect_uri points
+        at, or the state cookie is set on one host (localhost:8070, a
+        LAN address) and the provider sends the browser back to another
+        (hatmaster.tv) where that cookie does not exist — every such
+        login died with "state mismatch" until 2026-09-16. Returns a
+        redirect to the same path on the right host, query preserved,
+        or None when the request is already there."""
+        want = urlsplit(self._allowed_origin).netloc.lower()
+        if (request.host or "").lower() == want:
+            return None
+        qs = request.query_string
+        return web.HTTPFound(
+            f"{self._allowed_origin}{request.path}" + (f"?{qs}" if qs else ""))
+
+    def _oauth_callback_problem(self, request: web.Request,
+                                provider: str) -> Optional[str]:
+        """Why an OAuth callback cannot be honoured, as a sentence for
+        the user, or None when state/cookie/code all check out. The
+        three failure shapes used to share one "state mismatch" text."""
+        site = urlsplit(self._allowed_origin).netloc
+        err = (request.query.get("error") or "").strip()
+        state = request.query.get("state", "")
+        cookie_state = request.cookies.get(_ws.OAUTH_STATE_COOKIE, "")
+        code = request.query.get("code", "")
+        if err:
+            return (f"{provider} login was cancelled ({err[:40]}). "
+                    f"Return to {site} and try again.")
+        if not cookie_state:
+            return (f"This login did not start on {site}, or took longer "
+                    f"than 10 minutes. Open {site} and click Log in there.")
+        if not state or state != cookie_state:
+            return ("Login state mismatch (stale or replayed login link). "
+                    f"Return to {site} and try logging in again.")
+        if not code:
+            return (f"{provider} sent no login code. "
+                    f"Return to {site} and try again.")
+        return None
+
     async def _handle_auth_login(self, request: web.Request):
         """GET /auth/login — redirect to Twitch authorize with a
         state nonce bound to a short-lived cookie."""
         if not self._login_enabled:
             return web.Response(
                 status=503, text="Login is not configured on this site.")
+        bounce = self._login_host_bounce(request)
+        if bounce is not None:
+            return bounce
         if not self._ip_rate_ok(request):
             return web.Response(status=429, text="Too many requests.")
         state = _ws.make_state()
@@ -2476,17 +2518,13 @@ class PublicWebServer:
         if not self._ip_rate_ok(request):
             return web.Response(status=429, text="Too many requests.")
 
+        problem = self._oauth_callback_problem(request, "Twitch")
+        if problem:
+            # No retry logic on purpose — the user just clicks Log in
+            # again, on the right host this time.
+            return web.Response(status=403, text=problem)
         state = request.query.get("state", "")
-        cookie_state = request.cookies.get(_ws.OAUTH_STATE_COOKIE, "")
         code = request.query.get("code", "")
-        if not state or not cookie_state or state != cookie_state \
-                or not code:
-            # Stale bookmark or replayed login URL. No retry logic on
-            # purpose — the user just clicks Log in again.
-            return web.Response(
-                status=403,
-                text="Login state mismatch. Return to hatmaster.tv "
-                     "and try logging in again.")
 
         try:
             timeout = aiohttp.ClientTimeout(total=10)
@@ -2565,6 +2603,9 @@ class PublicWebServer:
             return web.Response(
                 status=503,
                 text="YouTube login is not configured on this site.")
+        bounce = self._login_host_bounce(request)
+        if bounce is not None:
+            return bounce
         if not self._ip_rate_ok(request):
             return web.Response(status=429, text="Too many requests.")
 
@@ -2624,15 +2665,11 @@ class PublicWebServer:
         if not self._ip_rate_ok(request):
             return web.Response(status=429, text="Too many requests.")
 
+        problem = self._oauth_callback_problem(request, "YouTube")
+        if problem:
+            return web.Response(status=403, text=problem)
         state = request.query.get("state", "")
-        cookie_state = request.cookies.get(_ws.OAUTH_STATE_COOKIE, "")
         code = request.query.get("code", "")
-        if not state or not cookie_state or state != cookie_state \
-                or not code:
-            return web.Response(
-                status=403,
-                text="Login state mismatch. Return to hatmaster.tv "
-                     "and try logging in again.")
 
         try:
             timeout = aiohttp.ClientTimeout(total=10)

@@ -397,10 +397,13 @@ async def test_logout_clears_cookie():
         await h.client.close()
 
 
+SITE_HOST = {"Host": "hatmaster.tv"}   # logins must start on the redirect_uri host
+
+
 async def test_auth_login_redirects_to_twitch():
     h = await make_harness()
     try:
-        r = await h.client.get("/auth/login", allow_redirects=False)
+        r = await h.client.get("/auth/login", headers=SITE_HOST, allow_redirects=False)
         assert r.status == 302, r.status
         loc = r.headers.get("Location", "")
         assert loc.startswith("https://id.twitch.tv/oauth2/authorize")
@@ -418,6 +421,48 @@ async def test_callback_state_mismatch_403():
             headers={"Cookie": f"{ws.OAUTH_STATE_COOKIE}=different"},
             allow_redirects=False)
         assert r.status == 403, r.status
+        assert "state mismatch" in (await r.text())
+    finally:
+        await h.client.close()
+
+
+async def test_auth_login_bounces_to_site_host():
+    """Started on localhost (or a LAN address): the state cookie would be
+    set there while Twitch sends the browser back to hatmaster.tv, so
+    the login is redirected to the site host first, query preserved."""
+    h = await make_harness()
+    try:
+        r = await h.client.get("/auth/login?next=/bingo",
+                               headers={"Host": "localhost:8070"}, allow_redirects=False)
+        assert r.status == 302, r.status
+        assert r.headers.get("Location") == f"{ORIGIN}/auth/login?next=/bingo", r.headers.get("Location")
+        assert ws.OAUTH_STATE_COOKIE not in r.headers.get("Set-Cookie", "")
+        r = await h.client.get("/auth/google/login",
+                               headers={"Host": "192.168.1.20:8070"}, allow_redirects=False)
+        assert r.status == 302 and r.headers.get("Location") == f"{ORIGIN}/auth/google/login"
+    finally:
+        await h.client.close()
+
+
+async def test_callback_explains_missing_cookie_and_cancel():
+    h = await make_harness()
+    try:
+        # No state cookie at all: the login started on another host or expired.
+        r = await h.client.get("/auth/twitch/callback?code=abc&state=x", allow_redirects=False)
+        assert r.status == 403, r.status
+        body = await r.text()
+        assert "did not start on hatmaster.tv" in body, body
+        assert "mismatch" not in body
+        # Provider error (user pressed cancel on Twitch).
+        r = await h.client.get(
+            "/auth/twitch/callback?error=access_denied&state=x",
+            headers={"Cookie": f"{ws.OAUTH_STATE_COOKIE}=x"}, allow_redirects=False)
+        assert r.status == 403 and "cancelled" in (await r.text())
+        # Matching state but no code.
+        r = await h.client.get(
+            "/auth/twitch/callback?state=x",
+            headers={"Cookie": f"{ws.OAUTH_STATE_COOKIE}=x"}, allow_redirects=False)
+        assert r.status == 403 and "no login code" in (await r.text())
     finally:
         await h.client.close()
 
