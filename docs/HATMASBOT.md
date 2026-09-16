@@ -179,7 +179,7 @@ KillDeathDetector so the kill detector's `on_death` callback can call
 9. KillDeathDetector - real-time kill/death/assist detection via OBS screenshot analysis + template matching
 10. VoiceLinePlugin - channel point redemptions for god-specific jokes, taunts, and laughs with optional MP4 animations (receives token_manager)
 11. EconomyPlugin - stock-market-style god economy with live price ticking, dividends, trading, and 7 websocket overlays (receives token_manager)
-12. YouTubeRewardsPlugin - polls YouTube Data API v3 for new commenters on "Full Gameplay" videos and grants free shares of the featured god
+12. YouTubeRewardsPlugin - polls YouTube Data API v3 for new commenters on "Full Gameplay" videos and grants free shares of the featured god. Uploads the title parser can't read are tagged (or skipped) on the broadcaster-only /admin/videos page, which pays existing commenters the moment a video is tagged (docs/YOUTUBE_VIDEO_ADMIN.md)
 13. StreamStatusPlugin - polls Twitch /helix/streams every 60s and emits stream_live / stream_offline events to the overlay manager (receives token_manager + web_server)
 14. YouTubeLiveBadgePlugin - listens for stream_live / stream_offline and shells out to tools/youtube_live_badge.py to apply/revert LIVE badges on the last 8 YouTube thumbnails
 15. BackupManagerPlugin - daily gzipped snapshots of economy.db to data/backups/ (configurable via BACKUP_INTERVAL_HOURS / BACKUP_RETENTION_DAYS)
@@ -303,7 +303,7 @@ tools/
   seed_economy.py           Seeds economy DB with realistic price history from tracker.gg stats. Usage: python tools/seed_economy.py [gods...] [--force]
   vod_detector.py           Offline VOD scan engine. Wraps core/kda_reader.py + core/god_matcher.py with a coarse-scan + binary-search refinement loop, streaming ffmpeg frame extraction, optional NVIDIA/CUDA HEVC hwaccel, lobby fast-skip, overlap event merging, and per-frame god portrait identification. Imported by extract_events.py and process_recordings.py — not run directly.
   extract_events.py         CLI that scans a folder of Smite 2 OBS recordings (1920x1080 60fps HEVC .mp4) and writes sibling <name>.events.json files consumed by HighlightBuilder.cs (Sony Vegas script). Supports --include, --no-refine, --hwaccel, --no-merge-overlaps, --enroll-templates, --workers N, --overwrite, --dry-run.
-  process_recordings.py     End-of-stream orchestrator. Scans HatmasBot\recordings\ for unprocessed .mp4s, runs the detector, writes each <name>.events.json, and sorts the .mp4 + JSON pair into recordings\<God Name>\, recordings\mixed\, or recordings\unknown\ depending on which god(s) appeared. Renames to <stem>-N.<ext> using lowest-unused-integer per folder. Defaults are tuned for the daily flow (--hwaccel cuda, --include deaths) so a Stream Deck button can run it with no arguments.
+  process_recordings.py     End-of-stream orchestrator. Scans D:\Recordings\ (config.RECORDINGS_DIR) for unprocessed .mp4s, runs the detector, writes each <name>.events.json, and sorts the .mp4 + JSON pair into recordings\<God Name>\, recordings\mixed\, or recordings\unknown\ depending on which god(s) appeared. Renames to <stem>-N.<ext> using lowest-unused-integer per folder. Defaults are tuned for the daily flow (--hwaccel cuda, --include deaths) so a Stream Deck button can run it with no arguments.
   check_kda_region.py       One-off helper for visually verifying KDA crop coordinates against a reference frame.
   test_kda_fixture.py       Regression runner for the KDA reader. Walks data/test_fixtures/kda/, runs read_kda_with_details on each .png, diffs against the sidecar .json (kda tuple must match exactly; distance/margin numbers must stay within configurable slack). Prints PASS/FAIL per fixture, exits non-zero on any mismatch. Use --verbose for per-digit margins, --save-binary to dump the binarised 8x crop next to each fixture, or pass a substring to filter. New fixtures: drop a 1920x1080 frame + sidecar JSON (copy atlas_4_0_0_live_1080p.json as a template). Wire into a Stream Deck button to sanity-check the pipeline whenever a binarisation/threshold knob changes.
   capture_god_reference.py  Pulls a clean god-portrait crop out of a recording and saves it as a custom-overlay reference icon under Portrait_Source/. Used to permanently fix borderline matcher cases — if a recording lands in recordings/unknown/ because NVDEC subtly shifts pixel values vs software decode, capture one reference frame from the same decode pipeline and the matcher correlates near-1.0 on future scans.
@@ -688,10 +688,11 @@ A one-button workflow that takes the VOD pipeline above and wraps it for daily e
 ### Folder layout
 
 ```
-HatmasBot\recordings\                  Drop folder. New recordings go here.
-HatmasBot\recordings\<God Name>\       Single-god recordings, e.g. Ymir\Ymir-1.mp4 + Ymir-1.events.json
-HatmasBot\recordings\mixed\            Multi-game sessions covering 2+ gods.
-HatmasBot\recordings\unknown\          Recordings where no god was confirmed (short clips, demos, menus).
+D:\Recordings\                        Drop folder = OBS record path (config.RECORDINGS_DIR; was HatmasBot\recordings\ until 2026-09-15).
+D:\Recordings\<God Name>\             Single-god recordings, e.g. Ymir\Ymir-1.mp4 + Ymir-1.events.json
+D:\Recordings\mixed\                  Multi-game sessions covering 2+ gods.
+D:\Recordings\unknown\                Recordings where no god was confirmed (short clips, demos, menus).
+D:\Recordings\channels\<login>\       Other creators' VODs (Ask the VOD); skipped by the sorter and indexer.
 ```
 
 Anything sitting in the `recordings\` root is treated as unprocessed. Anything in a subfolder is considered already sorted and ignored — no marker files needed, the directory structure IS the marker.

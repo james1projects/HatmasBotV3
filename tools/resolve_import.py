@@ -44,9 +44,13 @@ import sys
 import time
 from pathlib import Path
 
-# --- configuration -----------------------------------------------------------
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
-RECORDINGS_DIR = Path(r"C:\Projects\HatmasBot\recordings")
+from core.config import RECORDINGS_DIR  # noqa: E402
+
+# --- configuration -----------------------------------------------------------
 
 # OBS track order -> Resolve audio track names (A1..A4).
 AUDIO_TRACK_NAMES = ["Game", "Mic", "Discord", "Misc"]

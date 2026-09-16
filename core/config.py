@@ -18,6 +18,12 @@ DATA_DIR = BASE_DIR / "data"
 OVERLAY_DIR = BASE_DIR / "overlays"
 SOUNDS_DIR = BASE_DIR / "assets" / "sounds"   # served at /assets/sounds/ (alert box samples, CC0 Kenney packs)
 CUSTOM_GOD_ICONS_DIR = BASE_DIR / "assets" / "Custom God Icons"
+# OBS records straight into this folder (RecFilePath in the OBS profile
+# must match). Loose files in the root are unprocessed; the sorter files
+# them into <God>/, mixed/, unknown/. channels/ holds other creators'
+# VODs (VOD_CHANNELS_ROOT) and is skipped by the sorter and indexer.
+# Moved off C: on 2026-09-15 (tools/migrate_recordings.py).
+RECORDINGS_DIR = Path(r"D:\Recordings")
 GOD_ICONS_DIR = DATA_DIR / "god_icons"
 DATA_DIR.mkdir(exist_ok=True)
 
@@ -514,7 +520,7 @@ FACTORIO_CARD_MAP = {
 # the PC. Access: the local browser always sees everything (and the
 # /vod/review page); tunneled visitors see only recordings marked public,
 # and only while the "web_vod" toggle is on. New recordings are private.
-VOD_RECORDINGS_DIR = BASE_DIR / "recordings"
+VOD_RECORDINGS_DIR = RECORDINGS_DIR
 VOD_DB_PATH = DATA_DIR / "vod" / "vod_index.db"
 VOD_CLIPS_DIR = DATA_DIR / "vod" / "clips"
 VOD_WHISPER_MODEL = "large-v3"          # faster-whisper model id (large-v3 ~10x realtime on the 5090)

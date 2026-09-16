@@ -47,6 +47,7 @@ sys.path.insert(0, str(REPO_ROOT))
 # Windows' lazily-populated root-CA store may lack the roots Spotify chains
 # to; the shim points OpenSSL at certifi's bundle (see core/tls_trust.py).
 from core import tls_trust  # noqa: E402,F401
+from core.config import RECORDINGS_DIR  # noqa: E402
 
 # Force unbuffered output so the .bat wrapper shows results in real time.
 try:
@@ -66,7 +67,6 @@ OBS_WS_PORT = 4455
 
 # Paths
 DATA_DIR = REPO_ROOT / "data"
-RECORDINGS_DIR = REPO_ROOT / "recordings"
 GOD_ICONS_DIR = DATA_DIR / "god_icons"
 GOD_CARDS_DIR = DATA_DIR / "god_cards"
 WIKI_HTML = REPO_ROOT / "assets" / "smite2_wiki" / "Gods - SMITE 2 Wiki.html"

@@ -7,7 +7,7 @@ REM
 REM Drag this file's path into a Stream Deck "System: Open" button (or
 REM "Multimedia: Run") and you'll get one-click end-of-stream cleanup:
 REM
-REM   1. Scans every .mp4 sitting in HatmasBot\recordings\
+REM   1. Scans every .mp4 sitting in D:\Recordings\ (config.RECORDINGS_DIR)
 REM   2. Writes its sibling .events.json (kills + deaths)
 REM   3. Sorts the .mp4 + .events.json into recordings\<God>\,
 REM      recordings\mixed\, or recordings\unknown\ depending on which

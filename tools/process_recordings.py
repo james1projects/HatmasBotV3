@@ -4,7 +4,7 @@ process_recordings.py
 =====================
 One-button workflow for end-of-stream recording cleanup.
 
-Walks a recordings folder (default ``HatmasBot/recordings``), runs the
+Walks a recordings folder (default ``config.RECORDINGS_DIR``), runs the
 KDA + portrait scanner over every ``.mp4`` that doesn't already have a
 sibling ``.events.json``, and then sorts each file into a per-god
 subfolder based on which god(s) appeared in the recording:
@@ -70,6 +70,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from core.config import RECORDINGS_DIR
 from core.detector_profile import DetectorProfile, ProfileError
 from core.kda_reader import KdaReader
 from tools.vod_detector import (
@@ -86,7 +87,7 @@ from tools.extract_events import (
 
 # --- Defaults --------------------------------------------------------------
 
-DEFAULT_SOURCE = _REPO_ROOT / "recordings"
+DEFAULT_SOURCE = RECORDINGS_DIR
 DEFAULT_DATA_DIR = _REPO_ROOT / "data"
 DEFAULT_TESSERACT_WIN = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
@@ -1003,7 +1004,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.reprocess_all:
             mp4s = find_mp4s_recursive(
                 args.source,
-                skip_folder_names={"processed", "replays"},
+                skip_folder_names={"processed", "replays", "channels"},
             )
         else:
             mp4s = find_mp4s(args.source)

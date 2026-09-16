@@ -54,7 +54,7 @@ class IndexOptions:
     force: bool = False
     limit: Optional[int] = None
     include_root: bool = False
-    skip_dirs: Tuple[str, ...] = (".tiktok_bg", "processed", "replays", "_inbox")
+    skip_dirs: Tuple[str, ...] = (".tiktok_bg", "processed", "replays", "_inbox", "channels")
     channel: str = OWNER_CHANNEL           # recordings.channel for every row this run writes
     primary_speaker: Optional[str] = None  # the streamer's track label; default = channel
     dry_run: bool = False
@@ -65,7 +65,7 @@ class IndexOptions:
 
 
 def discover(recordings_dir: Path, include_root: bool = False,
-             skip_dirs: Tuple[str, ...] = (".tiktok_bg", "_inbox")) -> List[Path]:
+             skip_dirs: Tuple[str, ...] = (".tiktok_bg", "_inbox", "channels")) -> List[Path]:
     """All .mp4 files under `recordings_dir`, newest first. Root-level
     files are unsorted drop-folder recordings and are skipped unless
     `include_root` (the sorter will move them into a god folder later

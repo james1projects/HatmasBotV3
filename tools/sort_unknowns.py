@@ -57,13 +57,14 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from core.config import RECORDINGS_DIR
 from core.god_matcher import GodMatcher, PORTRAIT_REGION
 from tools.extract_events import render_events_json, find_mp4s
 from tools.process_recordings import next_index
 
 
-DEFAULT_SOURCE = _REPO_ROOT / "recordings" / "unknown"
-DEFAULT_TARGET_ROOT = _REPO_ROOT / "recordings"
+DEFAULT_SOURCE = RECORDINGS_DIR / "unknown"
+DEFAULT_TARGET_ROOT = RECORDINGS_DIR
 DEFAULT_DATA_DIR = _REPO_ROOT / "data"
 DEFAULT_OVERLAY_ICONS_DIR = _REPO_ROOT / "assets" / "Custom God Icons"
 DEFAULT_REFERENCE_ICONS_DIR = _REPO_ROOT / "assets" / "Portrait_Source"
