@@ -559,6 +559,26 @@ VOD_CHANNELS_KEEP = 20                                    # VODs kept on disk pe
 VOD_CHANNELS_MIN_FREE_GB = 25                             # refuse to download below this much free space on the root drive
 VOD_APP_TOKEN_FILE = DATA_DIR / "twitch_app_token.json"   # cached client-credentials token (not a user token)
 
+# --- Trim (hatmaster.tv/vod/trim, LOCAL ONLY; vodsearch/trim.py) ---
+# Free disk by keeping the plays and dropping the full recordings: the
+# page lists recordings largest-first with their kill moments (tiers from
+# the index), James keeps/skips each, kept moments render to full-res
+# subclips under TRIM_CLIPS_DIR (all OBS audio tracks copied through so
+# Resolve still gets Game/Mic/Discord/Misc), and only a recording whose
+# every kept moment has a verified clip can be moved to TRIM_TRASH_DIR.
+# Nothing is deleted until "Empty trash" on the page. Both folders are
+# skipped by the sorter and the indexer (clips/ by name, _trash/ by the
+# underscore rule).
+TRIM_CLIPS_DIR = RECORDINGS_DIR / "clips"
+TRIM_TRASH_DIR = RECORDINGS_DIR / "_trash"
+TRIM_PRE_S = 15.0                       # context before the (first) kill of a moment
+TRIM_POST_S = 10.0                      # after the last kill; streaks get +5 s per extra kill
+TRIM_MAX_CLIP_S = 180.0
+TRIM_ENCODER = "hevc_nvenc"             # falls back to libx264 automatically
+TRIM_CQ = 22                            # NVENC constant quality (lower = bigger/better); ~20 Mbps at 1080p60
+TRIM_MAXRATE = "30M"
+TRIM_DEFAULT_KEEP_TIER = 2              # multi-kills pre-checked, single kills unchecked
+
 # === CO-CASTER (plugins/cocaster/) ===
 # Stage 1 of the AI co-caster. Two channels, both gated by the "cocaster"
 # feature toggle (default OFF):

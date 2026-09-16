@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#202C39">
+<meta name="robots" content="noindex">
+<title>Trim: Hatmaster.tv</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="stylesheet" href="/theme.css">
+<style>
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 16px 14px 120px; }
+  .brand-band {
+    display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 1px solid var(--border); padding: 8px 0 12px; margin-bottom: 20px;
+    font-family: var(--font-sans); font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim);
+  }
+  .brand-band a.left { color: var(--accent); font-weight: 700; }
+  .brand-hat { height: 16px; vertical-align: -3px; margin-right: 6px; }
+  .right-cluster { display: flex; gap: 10px; }
+  h1 { font-family: var(--font-display); text-transform: uppercase; font-size: 40px; line-height: 1; margin: 0 0 6px; }
+  .sub { color: var(--text-dim); font-size: 14px; margin: 0 0 14px; max-width: 760px; }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .stat { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
+  .stat .k { font-family: var(--font-sans); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); }
+  .stat .v { font-family: var(--font-mono); font-size: 20px; margin-top: 2px; }
+  .stat.good .v { color: var(--green); }
+  .stat.warn .v { color: var(--red); }
+
+  .player {
+    position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 8px 0 10px;
+    border-bottom: 1px solid var(--border); margin-bottom: 14px;
+  }
+  .player[hidden] { display: none; }
+  .player .box { display: grid; grid-template-columns: minmax(280px, 640px) 1fr; gap: 14px; align-items: start; }
+  .player video { width: 100%; aspect-ratio: 16/9; background: #000; border-radius: var(--radius); display: block; }
+  .player .meta .god { font-family: var(--font-display); text-transform: uppercase; font-size: 22px; letter-spacing: 0.04em; }
+  .player .meta .mono { display: block; margin-top: 4px; }
+  .player .meta .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .player .state { font-family: var(--font-mono); font-size: 11px; color: var(--text-fade); margin-top: 6px; }
+  @media (max-width: 720px) { .player .box { grid-template-columns: 1fr; } }
+
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+  .toolbar select, .toolbar input {
+    font: inherit; font-size: 13px; padding: 7px 10px; background: var(--panel); color: var(--text);
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+  }
+  .toolbar .spacer { flex: 1; }
+  .btn {
+    font: inherit; font-size: 12px; font-weight: 600; padding: 7px 12px; cursor: pointer;
+    background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  }
+  .btn:hover { border-color: var(--border-hi); }
+  .btn:disabled { opacity: 0.45; cursor: default; }
+  .btn.go { background: var(--green-bg); color: var(--green); border-color: transparent; }
+  .btn.danger { background: var(--red-bg); color: var(--red); border-color: transparent; }
+  .btn.small { font-size: 11px; padding: 4px 9px; }
+  .count { font-family: var(--font-mono); font-size: 12px; color: var(--text-fade); }
+  .notice { padding: 10px 12px; border-radius: var(--radius); font-size: 13px; margin-bottom: 14px; border: 1px solid var(--border); background: var(--bg-2); color: var(--text-dim); }
+  .notice.busy { border-color: var(--accent); color: var(--text); }
+  .notice.bad { background: var(--red-bg); color: var(--red); border-color: var(--red); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; font-family: var(--font-sans); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 10px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr.ready td { background: rgba(0, 200, 120, 0.05); }
+  tr.whole td { background: rgba(120, 140, 200, 0.06); }
+  .thumb { width: 112px; aspect-ratio: 16/9; background: var(--bg-2); border-radius: var(--radius-sm); overflow: hidden; }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .god { font-family: var(--font-display); text-transform: uppercase; font-size: 15px; letter-spacing: 0.04em; }
+  .mono { font-family: var(--font-mono); font-size: 12px; color: var(--text-dim); }
+  .size { font-family: var(--font-mono); font-size: 15px; }
+  .pill { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: var(--radius-sm); white-space: nowrap; }
+  .pill.ready { background: var(--green-bg); color: var(--green); }
+  .pill.pending { background: var(--bg-2); color: var(--text-dim); border: 1px dashed var(--border-hi); }
+  .pill.whole { background: var(--panel-hi); color: var(--text); }
+  .pill.replay { background: var(--bg-2); color: var(--text-fade); }
+
+  .moments { display: flex; flex-wrap: wrap; gap: 6px; max-width: 520px; }
+  .moment {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 4px 8px 4px 6px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 999px; cursor: pointer; user-select: none;
+  }
+  .moment:hover { border-color: var(--border-hi); }
+  .moment.keep { border-color: var(--accent); }
+  .moment.done { border-color: var(--green); }
+  .moment input { margin: 0; cursor: pointer; }
+  .moment .t { font-family: var(--font-mono); color: var(--text-dim); }
+  .moment .lbl { font-weight: 700; }
+  .moment.tier-2 .lbl { color: var(--accent); }
+  .moment.tier-3 .lbl { color: var(--accent-hi); }
+  .moment.tier-4 .lbl, .moment.tier-5 .lbl { color: var(--red); }
+  .moment .play { font-size: 11px; color: var(--text-fade); }
+  .moment.playing { background: var(--panel-hi); }
+  .none { color: var(--text-fade); font-size: 12px; }
+  .row-actions { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+  label.whole { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; color: var(--text-dim); cursor: pointer; }
+  .empty { padding: 30px 0; color: var(--text-dim); }
+  @media (max-width: 860px) { .hide-sm { display: none; } }
+</style>
+</head>
+<body>
+  <div class="wrap" role="main">
+    <div class="brand-band" role="banner">
+      <a class="left" href="/"><img class="brand-hat" src="/hat.png" alt="">HATMASTER.TV</a>
+      <div class="right-cluster">
+        <a href="/vod" class="icon-toggle" style="text-decoration: none;">Search</a>
+        <a href="/vod/review" class="icon-toggle" style="text-decoration: none;">Review</a>
+      </div>
+    </div>
+
+    <h1>Trim</h1>
+    <p class="sub">Keep the plays, drop the recording. Largest recordings first. Tick the kills worth keeping (multi-kills start ticked), render them to full-quality clips, then trash the recording. Nothing is deleted until you empty the trash. Replay-buffer clips are never trashed.</p>
+
+    <div class="stats" id="stats"></div>
+    <div class="notice" id="notice">Loading</div>
+
+    <div class="player" id="player" hidden>
+      <div class="box">
+        <video id="video" controls playsinline preload="none"></video>
+        <div class="meta">
+          <div class="god" id="p-god"></div>
+          <span class="mono" id="p-file"></span>
+          <span class="mono" id="p-moment"></span>
+          <div class="actions">
+            <button type="button" class="btn small" id="p-keep">Keep this</button>
+            <button type="button" class="btn small" id="p-skip">Skip this</button>
+            <button type="button" class="btn small" id="p-prev">Previous</button>
+            <button type="button" class="btn small" id="p-next">Next</button>
+            <button type="button" class="btn small" id="p-close">Close</button>
+          </div>
+          <div class="state" id="p-state">Keys: space = keep/skip, n = next, p = previous, esc = close</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <select id="god"><option value="">All gods</option></select>
+      <select id="show">
+        <option value="">Everything</option>
+        <option value="pending">Needs review or render</option>
+        <option value="ready">Ready to trash</option>
+        <option value="whole">Kept whole</option>
+      </select>
+      <input id="filter" type="search" placeholder="filter by file name" aria-label="Filter">
+      <span class="spacer"></span>
+      <span class="count" id="count"></span>
+      <button type="button" class="btn go" id="render-shown">Render kept (shown)</button>
+      <button type="button" class="btn danger" id="trash-shown">Trash ready (shown)</button>
+      <button type="button" class="btn danger" id="empty-trash">Empty trash</button>
+    </div>
+
+    <div id="list"></div>
+  </div>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  let rows = [], data = {}, order = [], cur = -1, pollTimer = null;
+  function esc(s) { return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+  function gb(b) { return (b / 1e9).toFixed(b >= 100e9 ? 0 : 1) + " GB"; }
+  function post(url, body) {
+    return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then(async (r) => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || ("HTTP " + r.status)); return j; });
+  }
+
+  async function load() {
+    try {
+      const r = await fetch("/api/vod/trim", { headers: { Accept: "application/json" } });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      data = await r.json();
+      rows = data.recordings || [];
+      const gods = [...new Set(rows.map((x) => x.god).filter(Boolean))].sort();
+      const sel = $("god"); const curGod = sel.value;
+      sel.innerHTML = '<option value="">All gods</option>' + gods.map((g) => '<option value="' + esc(g) + '">' + esc(g) + "</option>").join("");
+      sel.value = curGod;
+      renderStats();
+      renderNotice();
+      render();
+      schedulePoll();
+    } catch (e) {
+      $("notice").className = "notice bad";
+      $("notice").textContent = "Could not load: " + e.message;
+    }
+  }
+
+  function renderStats() {
+    const t = data.totals || {}, c = data.clips || {}, tr = data.trash || {};
+    const cards = [
+      ["Recordings on disk", gb(t.bytes || 0) + " / " + (t.recordings || 0), ""],
+      ["Ready to trash now", gb(t.trashable_bytes || 0), t.trashable_bytes ? "good" : ""],
+      ["Kept, not rendered", String(t.pending_render || 0) + " moments", t.pending_render ? "warn" : ""],
+      ["Clips rendered", (c.clips || 0) + " / " + gb(c.bytes || 0), ""],
+      ["In trash", gb(tr.bytes || 0) + " / " + (tr.files || 0) + " files", tr.bytes ? "warn" : ""],
+    ];
+    $("stats").innerHTML = cards.map((k) => '<div class="stat ' + k[2] + '"><div class="k">' + esc(k[0]) + '</div><div class="v">' + esc(k[1]) + "</div></div>").join("");
+    $("empty-trash").disabled = !(tr.bytes > 0);
+  }
+
+  function renderNotice() {
+    const n = $("notice"), st = data.render || {};
+    if (!data.ready) { n.className = "notice bad"; n.textContent = "No index yet. Run the overnight rescan (streamdeck\\rescan_all.bat) first."; return; }
+    if (st.running) {
+      n.className = "notice busy";
+      n.textContent = "Rendering " + (st.done + st.failed) + " of " + st.total + (st.current ? ": " + st.current : "") + (st.failed ? " (" + st.failed + " failed)" : "");
+      return;
+    }
+    if (st.total) {
+      n.className = st.failed ? "notice bad" : "notice";
+      n.textContent = "Last render: " + st.done + " clips done" + (st.failed ? ", " + st.failed + " failed: " + st.errors.map((e) => e.clip + " (" + e.error + ")").join("; ") : "") + ". Clips are in " + (data.clips_dir || "the clips folder") + ".";
+      return;
+    }
+    n.className = "notice";
+    n.textContent = "Clips render to " + (data.clips_dir || "the clips folder") + " at full resolution with every OBS audio track. Trash lives in " + (data.trash_dir || "_trash") + " until you empty it.";
+  }
+
+  function schedulePoll() {
+    clearTimeout(pollTimer);
+    if (data.render && data.render.running) pollTimer = setTimeout(load, 4000);
+  }
+
+  function shown() {
+    const g = $("god").value, s = $("show").value, f = $("filter").value.trim().toLowerCase();
+    return rows.filter((r) => (!g || r.god === g) &&
+      (!s || (s === "ready" && r.can_trash) || (s === "whole" && r.keep_whole) ||
+              (s === "pending" && !r.can_trash && !r.keep_whole && !r.replay)) &&
+      (!f || String(r.stem || "").toLowerCase().includes(f) || String(r.folder || "").toLowerCase().includes(f)));
+  }
+
+  function statusPill(r) {
+    if (r.keep_whole) return '<span class="pill whole">Kept whole</span>';
+    if (r.replay) return '<span class="pill replay">Replay clip</span>';
+    if (r.can_trash) return '<span class="pill ready">' + (r.kept ? r.kept + " clip" + (r.kept === 1 ? "" : "s") + " ready" : "Nothing kept") + "</span>";
+    return '<span class="pill pending">' + r.kept_rendered + " / " + r.kept + " rendered</span>";
+  }
+
+  function render() {
+    const list = shown();
+    $("count").textContent = list.length + " of " + rows.length + " shown, " + gb(list.reduce((a, r) => a + (r.size_bytes || 0), 0));
+    if (!list.length) { $("list").innerHTML = '<div class="empty">No recordings match.</div>'; return; }
+    let html = "<table><thead><tr><th></th><th>Recording</th><th>Size</th><th class='hide-sm'>Length</th><th>Kills (tick to keep, click to watch)</th><th>State</th><th></th></tr></thead><tbody>";
+    for (const r of list) {
+      const moments = r.moments.length
+        ? r.moments.map((m) => {
+            const keep = m.effective === "keep";
+            return '<span class="moment tier-' + m.tier + (keep ? " keep" : "") + (m.clip_path ? " done" : "") + '" data-ev="' + m.event_id + '" data-rec="' + r.id + '" title="' + esc(m.clip_path ? "Rendered: " + m.clip_path : "Click to watch from here") + '">' +
+              '<input type="checkbox"' + (keep ? " checked" : "") + (m.clip_path ? " disabled" : "") + ' aria-label="Keep">' +
+              '<span class="t">' + esc(m.clock) + '</span><span class="lbl">' + esc(m.label) + "</span>" +
+              (m.clip_path ? '<span class="play">saved</span>' : '<span class="play">play</span>') + "</span>";
+          }).join("")
+        : '<span class="none">No kills detected</span>';
+      html += '<tr class="' + (r.keep_whole ? "whole" : r.can_trash && !r.replay ? "ready" : "") + '" data-id="' + r.id + '">' +
+        '<td><div class="thumb">' + (r.thumb_url ? '<img loading="lazy" src="' + esc(r.thumb_url) + '" alt="">' : "") + "</div></td>" +
+        '<td><div class="god">' + esc(r.god || r.folder || "Unknown") + '</div><div class="mono">' + esc(r.stem || "") + '.mp4</div><div class="mono">' + esc(r.date || "") + "</div></td>" +
+        '<td class="size">' + gb(r.size_bytes || 0) + "</td>" +
+        '<td class="mono hide-sm">' + esc(r.clock) + "</td>" +
+        '<td><div class="moments">' + moments + "</div></td>" +
+        "<td>" + statusPill(r) + "</td>" +
+        '<td class="row-actions">' +
+          '<label class="whole"><input type="checkbox" class="keep-whole"' + (r.keep_whole ? " checked" : "") + "> keep whole</label>" +
+          (r.pending_render ? '<button type="button" class="btn small go" data-act="render">Render ' + r.pending_render + "</button>" : "") +
+          (r.can_trash && !r.keep_whole && !r.replay ? '<button type="button" class="btn small danger" data-act="trash">Trash ' + gb(r.size_bytes || 0) + "</button>" : "") +
+        "</td></tr>";
+    }
+    $("list").innerHTML = html + "</tbody></table>";
+  }
+
+  // ── decisions ──
+  async function decide(eventIds, decision) {
+    try { await post("/api/vod/trim/decide", { event_ids: eventIds, decision: decision }); await load(); }
+    catch (e) { alert("Could not save: " + e.message); }
+  }
+
+  $("list").addEventListener("change", async (e) => {
+    const cb = e.target;
+    if (cb.classList.contains("keep-whole")) {
+      const id = parseInt(cb.closest("tr").dataset.id, 10);
+      try { await post("/api/vod/trim/decide", { recording_id: id, keep_whole: cb.checked }); await load(); }
+      catch (err) { alert("Could not save: " + err.message); }
+      return;
+    }
+    const chip = cb.closest(".moment");
+    if (chip && cb.type === "checkbox") decide([parseInt(chip.dataset.ev, 10)], cb.checked ? "keep" : "skip");
+  });
+
+  $("list").addEventListener("click", async (e) => {
+    const b = e.target.closest("button[data-act]");
+    if (b) {
+      const id = parseInt(b.closest("tr").dataset.id, 10);
+      if (b.dataset.act === "render") return startRender([id]);
+      if (b.dataset.act === "trash") {
+        const r = rows.find((x) => x.id === id);
+        if (confirm("Move " + (r ? r.stem : id) + ".mp4 (" + gb(r ? r.size_bytes : 0) + ") to the trash? Its " + (r ? r.kept : "") + " kept clips stay.")) return trash([id]);
+      }
+      return;
+    }
+    const chip = e.target.closest(".moment");
+    if (chip && e.target.tagName !== "INPUT") play(parseInt(chip.dataset.rec, 10), parseInt(chip.dataset.ev, 10));
+  });
+
+  // ── player ──
+  function play(recId, evId) {
+    order = [];
+    for (const r of shown()) for (const m of r.moments) order.push({ rec: r, m: m });
+    cur = order.findIndex((o) => o.m.event_id === evId);
+    if (cur < 0) return;
+    showCurrent();
+  }
+  function showCurrent() {
+    const o = order[cur]; if (!o) return;
+    document.querySelectorAll(".moment.playing").forEach((x) => x.classList.remove("playing"));
+    const chip = document.querySelector('.moment[data-ev="' + o.m.event_id + '"]');
+    if (chip) { chip.classList.add("playing"); chip.scrollIntoView({ block: "nearest" }); }
+    const v = $("video");
+    $("player").hidden = false;
+    $("p-god").textContent = o.rec.god || o.rec.folder || "Unknown";
+    $("p-file").textContent = (o.rec.stem || "") + ".mp4, " + gb(o.rec.size_bytes || 0);
+    $("p-moment").textContent = o.m.clock + "  " + o.m.label + (o.m.note ? " (" + o.m.note + ")" : "") + "  " + (cur + 1) + " of " + order.length;
+    $("p-keep").disabled = !!o.m.clip_path; $("p-skip").disabled = !!o.m.clip_path;
+    $("p-state").textContent = "Loading from " + o.m.clock + " (full recording streams from here)";
+    v.pause(); v.src = o.m.stream_url; v.load();
+    v.play().then(() => { $("p-state").textContent = "Keys: space = keep/skip, n = next, p = previous, esc = close"; })
+      .catch(() => { $("p-state").textContent = "Press play"; });
+  }
+  function step(d) { if (!order.length) return; cur = Math.min(order.length - 1, Math.max(0, cur + d)); showCurrent(); }
+  function closePlayer() { const v = $("video"); v.pause(); v.removeAttribute("src"); v.load(); $("player").hidden = true; document.querySelectorAll(".moment.playing").forEach((x) => x.classList.remove("playing")); }
+  async function decideCurrent(decision) {
+    const o = order[cur]; if (!o || o.m.clip_path) return;
+    await decide([o.m.event_id], decision);
+    const r = rows.find((x) => x.id === o.rec.id); const m = r && r.moments.find((x) => x.event_id === o.m.event_id);
+    if (m) { o.m = m; o.rec = r; }
+    step(1);
+  }
+  $("p-keep").addEventListener("click", () => decideCurrent("keep"));
+  $("p-skip").addEventListener("click", () => decideCurrent("skip"));
+  $("p-next").addEventListener("click", () => step(1));
+  $("p-prev").addEventListener("click", () => step(-1));
+  $("p-close").addEventListener("click", closePlayer);
+  document.addEventListener("keydown", (e) => {
+    if ($("player").hidden || /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
+    if (e.key === " ") { e.preventDefault(); const o = order[cur]; if (o) decideCurrent(o.m.effective === "keep" ? "skip" : "keep"); }
+    else if (e.key === "n") step(1);
+    else if (e.key === "p") step(-1);
+    else if (e.key === "Escape") closePlayer();
+  });
+
+  // ── render / trash ──
+  async function startRender(ids) {
+    try { const j = await post("/api/vod/trim/render", { recording_ids: ids }); if (!j.queued) alert("Nothing to render: every kept moment already has a clip."); await load(); }
+    catch (e) { alert("Could not start render: " + e.message); }
+  }
+  async function trash(ids) {
+    try {
+      const j = await post("/api/vod/trim/trash", { recording_ids: ids });
+      if (j.refused && j.refused.length) alert(j.refused.length + " recording(s) were not ready (render every kept kill first).");
+      await load();
+    } catch (e) { alert("Could not trash: " + e.message); }
+  }
+  $("render-shown").addEventListener("click", () => {
+    const ids = shown().filter((r) => r.pending_render).map((r) => r.id);
+    if (!ids.length) { alert("Nothing shown needs rendering."); return; }
+    startRender(ids);
+  });
+  $("trash-shown").addEventListener("click", () => {
+    const list = shown().filter((r) => r.can_trash && !r.keep_whole && !r.replay);
+    if (!list.length) { alert("Nothing shown is ready to trash."); return; }
+    const bytes = list.reduce((a, r) => a + (r.size_bytes || 0), 0);
+    if (confirm("Move " + list.length + " recording(s), " + gb(bytes) + ", to the trash? Their kept clips stay.")) trash(list.map((r) => r.id));
+  });
+  $("empty-trash").addEventListener("click", async () => {
+    const tr = data.trash || {};
+    if (!confirm("Permanently delete " + (tr.files || 0) + " file(s), " + gb(tr.bytes || 0) + ", from the trash? This cannot be undone.")) return;
+    try { await post("/api/vod/trim/empty_trash", {}); await load(); } catch (e) { alert("Could not empty trash: " + e.message); }
+  });
+
+  ["god", "show"].forEach((id) => $(id).addEventListener("change", render));
+  $("filter").addEventListener("input", render);
+  load();
+})();
+</script>
+</body>
+</html>

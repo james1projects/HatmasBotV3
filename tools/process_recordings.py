@@ -1004,7 +1004,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.reprocess_all:
             mp4s = find_mp4s_recursive(
                 args.source,
-                skip_folder_names={"processed", "replays", "channels"},
+                skip_folder_names={"processed", "replays", "channels", "clips"},
             )
         else:
             mp4s = find_mp4s(args.source)

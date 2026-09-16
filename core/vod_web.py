@@ -24,6 +24,15 @@ Routes
     POST /api/vod/review            LOCAL ONLY: {"ids": [..], "visibility": "public"|"private"}
     POST /api/vod/hide              LOCAL ONLY: {"segment_id": N, "hidden": true|false}
                                     redact one transcript line from every visitor view
+    GET /vod/trim                   LOCAL ONLY: keep the plays, trash the recording (vodsearch/trim.py)
+    GET /api/vod/trim               LOCAL ONLY: recordings largest-first with kill moments + decisions
+    POST /api/vod/trim/decide       LOCAL ONLY: {"event_ids": [..], "decision": "keep"|"skip"}
+                                    or {"recording_id": N, "keep_whole": true|false}
+    POST /api/vod/trim/render       LOCAL ONLY: {"recording_ids": [..]} render every kept moment
+                                    without a clip yet (one background job; GET .../status)
+    POST /api/vod/trim/trash        LOCAL ONLY: {"recording_ids": [..]} move fully-rendered
+                                    recordings (+ sidecars) to TRIM_TRASH_DIR, drop from index
+    POST /api/vod/trim/empty_trash  LOCAL ONLY: permanently delete the trash folder's contents
 
 Access model (2026-09-05, James's privacy call):
   * A loopback browser (James at localhost) always gets the whole
@@ -55,9 +64,12 @@ from core.config import (
     VOD_CLIP_ENCODER, VOD_CLIP_HEIGHT, VOD_CLIP_MAX_CONCURRENT, VOD_DB_PATH,
     VOD_EMBED_HOST, VOD_EMBED_MODEL, VOD_FFMPEG, VOD_SEMANTIC_MIN_SCORE,
     VOD_STREAM_MAX_CONCURRENT, VOD_STREAM_MAX_S,
-    VOD_CHANNELS_FILE,
+    VOD_CHANNELS_FILE, VOD_FFPROBE,
+    TRIM_CLIPS_DIR, TRIM_TRASH_DIR, TRIM_PRE_S, TRIM_POST_S, TRIM_MAX_CLIP_S,
+    TRIM_ENCODER, TRIM_CQ, TRIM_MAXRATE, TRIM_DEFAULT_KEEP_TIER,
 )
 from vodsearch import clips as clips_mod
+from vodsearch import trim as trim_mod
 from vodsearch.embed import OllamaEmbedder, top_k
 from vodsearch.channels import Registry
 from vodsearch.store import OWNER_CHANNEL, Store
@@ -118,6 +130,10 @@ class VodWeb:
         self._emb_ids = None
         self._emb_mat = None
         self._emb_lock = asyncio.Lock()
+        # Trim renders: one background job at a time, progress polled by the page.
+        self._trim_task: Optional[asyncio.Task] = None
+        self._trim_status: Dict[str, Any] = {"running": False, "total": 0, "done": 0,
+                                             "failed": 0, "current": None, "errors": []}
 
     # ── wiring ────────────────────────────────────────────────────────
 
@@ -133,6 +149,13 @@ class VodWeb:
         r.add_get("/api/vod/review", self.handle_review_list)
         r.add_post("/api/vod/review", self.handle_review_set)
         r.add_post("/api/vod/hide", self.handle_hide)
+        r.add_get("/vod/trim", self.handle_trim_page)
+        r.add_get("/api/vod/trim", self.handle_trim_list)
+        r.add_get("/api/vod/trim/status", self.handle_trim_status)
+        r.add_post("/api/vod/trim/decide", self.handle_trim_decide)
+        r.add_post("/api/vod/trim/render", self.handle_trim_render)
+        r.add_post("/api/vod/trim/trash", self.handle_trim_trash)
+        r.add_post("/api/vod/trim/empty_trash", self.handle_trim_empty_trash)
 
     def _toggle_on(self) -> bool:
         try:
@@ -725,6 +748,177 @@ class VodWeb:
             return web.json_response({"error": "need segment_id and hidden"}, status=400)
         n = await self._with_store(lambda s: s.set_hidden([seg_id], hidden))
         return web.json_response({"ok": n > 0, "segment_id": seg_id, "hidden": hidden})
+
+    # ── trim (local only) ─────────────────────────────────────────────
+
+    async def handle_trim_page(self, request: web.Request):
+        if not self._is_local(request):
+            raise web.HTTPNotFound()
+        return web.FileResponse(PUBLIC_DIR / "trim.html",
+                                headers={"Cache-Control": "no-cache"})
+
+    @staticmethod
+    def _trim_rows(store: Store) -> List[dict]:
+        rows = store.trim_list(OWNER_CHANNEL)
+        for r in rows:
+            trim_mod.annotate(r, TRIM_DEFAULT_KEEP_TIER)
+        return rows
+
+    async def handle_trim_list(self, request: web.Request):
+        if not self._is_local(request):
+            raise web.HTTPNotFound()
+        files, tbytes = await asyncio.to_thread(trim_mod.trash_contents, TRIM_TRASH_DIR)
+        if not self._index_ready():
+            return web.json_response({"recordings": [], "totals": {}, "clips": {},
+                                      "trash": {"files": files, "bytes": tbytes},
+                                      "render": self._trim_status, "ready": False})
+
+        def _load(store: Store):
+            return self._trim_rows(store), trim_mod.clip_totals(store)
+
+        rows, clips = await self._with_store(_load)
+        total_bytes = trashable = pending = 0
+        for r in rows:
+            r["date"] = (r.get("recorded_at") or "")[:10]
+            r["clock"] = _fmt_clock(r.get("duration_s") or 0)
+            total_bytes += int(r.get("size_bytes") or 0)
+            if r.get("can_trash"):
+                trashable += int(r.get("size_bytes") or 0)
+            pending += int(r.get("pending_render") or 0)
+            top = next((m for m in r["moments"] if m.get("effective") == "keep"), None) \
+                or (r["moments"][0] if r["moments"] else None)
+            r["thumb_url"] = f"/api/vod/thumb/e{top['event_id']}.jpg" if top else None
+            for m in r["moments"]:
+                key = f"e{m['event_id']}"
+                m["key"] = key
+                m["clock"] = _fmt_clock(m["ts_s"])
+                m["stream_url"] = f"/api/vod/stream/{key}.mp4"
+                m["clip_url"] = f"/api/vod/clip/{key}.mp4"
+        return web.json_response({
+            "ready": True, "recordings": rows,
+            "totals": {"recordings": len(rows), "bytes": total_bytes,
+                       "trashable_bytes": trashable, "pending_render": pending},
+            "clips": clips, "clips_dir": str(TRIM_CLIPS_DIR), "trash_dir": str(TRIM_TRASH_DIR),
+            "trash": {"files": files, "bytes": tbytes},
+            "render": self._trim_status,
+            "default_keep_tier": TRIM_DEFAULT_KEEP_TIER,
+        }, headers={"Cache-Control": "no-cache"})
+
+    async def handle_trim_decide(self, request: web.Request):
+        if not self._is_local(request):
+            raise web.HTTPNotFound()
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "bad json"}, status=400)
+        if "keep_whole" in body:
+            try:
+                rec_id = int(body.get("recording_id"))
+            except (TypeError, ValueError):
+                return web.json_response({"error": "need recording_id"}, status=400)
+            keep = bool(body.get("keep_whole"))
+            await self._with_store(lambda s: s.trim_keep_whole(rec_id, keep))
+            return web.json_response({"ok": True, "recording_id": rec_id, "keep_whole": keep})
+        decision = str(body.get("decision") or "").lower()
+        if decision not in ("keep", "skip"):
+            return web.json_response({"error": "decision must be keep or skip"}, status=400)
+        try:
+            ids = [int(i) for i in (body.get("event_ids") or [])][:5000]
+        except (TypeError, ValueError):
+            return web.json_response({"error": "bad event_ids"}, status=400)
+        n = await self._with_store(lambda s: s.trim_decide(ids, decision))
+        return web.json_response({"ok": True, "changed": n, "decision": decision})
+
+    async def handle_trim_status(self, request: web.Request):
+        if not self._is_local(request):
+            raise web.HTTPNotFound()
+        return web.json_response(self._trim_status, headers={"Cache-Control": "no-cache"})
+
+    async def handle_trim_render(self, request: web.Request):
+        if not self._is_local(request):
+            raise web.HTTPNotFound()
+        if self._trim_task is not None and not self._trim_task.done():
+            return web.json_response({"error": "a render is already running",
+                                      "render": self._trim_status}, status=409)
+        try:
+            body = await request.json()
+            ids = {int(i) for i in (body.get("recording_ids") or [])}
+            everything = bool(body.get("all"))
+        except Exception:
+            return web.json_response({"error": "bad json"}, status=400)
+
+        def _plan(store: Store) -> List[dict]:
+            jobs: List[dict] = []
+            for r in self._trim_rows(store):
+                if not everything and r["id"] not in ids:
+                    continue
+                jobs += trim_mod.plan_jobs(r, TRIM_CLIPS_DIR, TRIM_PRE_S, TRIM_POST_S,
+                                           TRIM_MAX_CLIP_S, TRIM_DEFAULT_KEEP_TIER)
+            return jobs
+
+        jobs = await self._with_store(_plan)
+        self._trim_status = {"running": bool(jobs), "total": len(jobs), "done": 0, "failed": 0,
+                             "current": None, "errors": [], "started_at": time.time()}
+        if jobs:
+            self._trim_task = asyncio.create_task(self._trim_run(jobs))
+        return web.json_response({"ok": True, "queued": len(jobs), "render": self._trim_status})
+
+    async def _trim_run(self, jobs: List[dict]) -> None:
+        st = self._trim_status
+        try:
+            for job in jobs:
+                st["current"] = Path(job["out"]).name
+                res = await asyncio.to_thread(
+                    trim_mod.render_job, job, VOD_FFMPEG, VOD_FFPROBE,
+                    TRIM_ENCODER, TRIM_CQ, TRIM_MAXRATE)
+                if res["ok"]:
+                    await self._with_store(lambda s, r=res: trim_mod.record_clip(s, r))
+                    st["done"] += 1
+                else:
+                    st["failed"] += 1
+                    st["errors"].append({"clip": Path(job["out"]).name, "error": res["error"]})
+                    print(f"[VodWeb] trim render failed {job['out']}: {res['error']}")
+        finally:
+            st["running"] = False
+            st["current"] = None
+            st["finished_at"] = time.time()
+
+    async def handle_trim_trash(self, request: web.Request):
+        if not self._is_local(request):
+            raise web.HTTPNotFound()
+        try:
+            body = await request.json()
+            ids = [int(i) for i in (body.get("recording_ids") or [])][:5000]
+        except Exception:
+            return web.json_response({"error": "bad json"}, status=400)
+
+        def _apply(store: Store) -> dict:
+            by_id = {r["id"]: r for r in self._trim_rows(store)}
+            moved, refused, freed = [], [], 0
+            for rid in ids:
+                rec = by_id.get(rid)
+                if rec is None or not rec.get("can_trash"):
+                    refused.append(rid)
+                    continue
+                try:
+                    res = trim_mod.trash_recording(store, rec, TRIM_TRASH_DIR)
+                except (OSError, PermissionError) as e:
+                    refused.append(rid)
+                    print(f"[VodWeb] trim trash failed {rec.get('path')}: {e}")
+                    continue
+                moved.append(rid)
+                freed += res["moved_bytes"]
+            return {"moved": moved, "refused": refused, "moved_bytes": freed}
+
+        res = await self._with_store(_apply)
+        res["ok"] = True
+        return web.json_response(res)
+
+    async def handle_trim_empty_trash(self, request: web.Request):
+        if not self._is_local(request):
+            raise web.HTTPNotFound()
+        files, nbytes = await asyncio.to_thread(trim_mod.empty_trash, TRIM_TRASH_DIR)
+        return web.json_response({"ok": True, "deleted_files": files, "deleted_bytes": nbytes})
 
     async def handle_thumb(self, request: web.Request):
         if not self._enabled(request) or not self._index_ready():

@@ -3169,3 +3169,73 @@ shake, a throw, then chips / a fanfare / an error tone by outcome; bingo
 is a confirmation plus a chip stack; burn is a soft heavy impact pitched
 down plus metal, with the fanfare on a record. Details: docs/ALERT_BOX.md
 "Sounds".
+
+## v2.19 Update — Recordings on D: + Trim page (2026-09-15)
+
+Two pieces of the same problem: C: was at 92% with 793 GB of recordings,
+and OBS had been writing to `D:\Recordings\Palworld` since 7/19.
+
+### The move (tools/migrate_recordings.py, ran 2026-09-15)
+
+- `core/config.py` **`RECORDINGS_DIR = D:\Recordings`** is the only place
+  the library path lives. `VOD_RECORDINGS_DIR` aliases it;
+  `process_recordings`, `sort_unknowns`, `check_stream_ready` and
+  `resolve_import` import it (five hardcoded paths gone).
+- `channels/` (other creators' VODs) and `clips/` (Trim output) are
+  skipped by the sorter's `--reprocess-all` and by the indexer's
+  `discover`; `_trash/` is skipped by the existing underscore rule.
+- The migration script is kept as the record: dry-run default,
+  `--execute` lifts Palworld, sweeps junk (Vegas `.sfk`, `.tiktok_bg`,
+  `_rescan_diff.json`, recordings under 10 s = James's false-start
+  rule, replay clips whose window sits inside a full recording), deletes
+  every sidecar and every hatmaster index row (transcripts redone
+  overnight), robocopies with `/COPY:DAT`, verifies every file by size,
+  and only then deletes the C: tree. 792 GB moved in 3.5 h.
+- `streamdeck\rescan_all.bat` = `process_recordings.py --reprocess-all`
+  then `vod_index.py index`, for the night after (~8 h GPU).
+- Replay-clip duplicate rule: OBS names a replay by its save time and the
+  buffer runs backwards, so a replay is a duplicate only when
+  `[save - length, save]` sits inside a full recording's
+  `[start, start + duration]` (sorted files: end = mtime). Only 3 of 198
+  were. Report: `data/vod/replay_overlap_report.json`.
+
+### Trim: keep the plays, drop the recording (/vod/trim, LOCAL ONLY)
+
+`vodsearch/trim.py` + `public/trim.html` + routes in `core/vod_web.py`.
+Recordings largest-first, each with its **kill moments** from the index
+(kills and multikills only; deaths are not trim material, James 9/15).
+
+1. **Review.** Tick a moment to keep it; multi-kills start ticked
+   (`TRIM_DEFAULT_KEEP_TIER = 2`), single kills unticked. Click a chip to
+   watch the full recording from that moment in a sticky player (the
+   existing `/api/vod/stream/e<id>.mp4` route); space toggles keep/skip,
+   n/p step, esc closes. "Keep whole" pins a recording so it can never
+   be trashed.
+2. **Render.** Kept moments without a clip render to
+   `TRIM_CLIPS_DIR/<God>/<stem>_<mm>m<ss>s_<tier>.mp4` at the source
+   resolution and frame rate, `hevc_nvenc -cq 22 -maxrate 30M`
+   (fallbacks: CPU decode + NVENC, then libx264 crf 18), **every OBS
+   audio stream copied through** so Resolve still sees Game/Mic/Discord/
+   Misc. Window = max(detector's own, 15 s before / 10 s after) + 5 s per
+   extra kill in a streak, capped at 180 s. A clip counts only if ffprobe
+   reads back within 1.5 s of the asked length. One background job at a
+   time; the page polls `/api/vod/trim/status`.
+3. **Trash.** A recording is trashable only when it is not kept whole,
+   is not a `*_Replay.mp4`, and every kept moment has a verified clip
+   (zero kept moments also qualifies). Trashing moves the `.mp4` and its
+   sidecar to `TRIM_TRASH_DIR/<folder>/` and drops the recording from the
+   index (its transcript pointed at a file that is gone). **Nothing is
+   deleted until "Empty trash".**
+
+Tables (all in `vod_index.db`): `trim_decisions` (per event id),
+`trim_recordings` (keep_whole), `trim_clips` (durable record of every
+rendered clip: source path, god, stem, time, tier, size; survives both
+the source's deletion and an index rebuild). Decisions are keyed by
+index event id, so a rebuilt index starts the review over on purpose.
+
+Verified 9/15 on a seeded index against throwaway copies: decisions
+persist, keep-whole blocks trash, render produced 1440p60 HEVC clips
+with all four AAC tracks, trash moved and refused correctly, empty trash
+deleted. `tests/test_trim.py` (11 tests, hermetic). Bot restart needed
+to serve the page; `.claude/launch.json` "vod-dev" serves it at
+`http://localhost:8078/vod/trim` without the bot.

@@ -152,6 +152,42 @@ CREATE TABLE IF NOT EXISTS vods (
     updated_at  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_vods_channel ON vods(channel, status);
+
+-- Trim page (vodsearch/trim.py, /vod/trim). Decisions are per index
+-- event id, so a rebuilt index starts the review over (by design: the
+-- moments themselves are re-detected). trim_clips is the durable record
+-- of every subclip rendered, keyed by the file, and survives both the
+-- source recording's deletion and an index rebuild.
+CREATE TABLE IF NOT EXISTS trim_decisions (
+    event_id     INTEGER PRIMARY KEY,
+    recording_id INTEGER NOT NULL,
+    decision     TEXT NOT NULL,        -- keep | skip
+    updated_at   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_trim_decisions_rec ON trim_decisions(recording_id);
+CREATE TABLE IF NOT EXISTS trim_recordings (
+    recording_id INTEGER PRIMARY KEY,
+    keep_whole   INTEGER DEFAULT 0,    -- 1 = never trash this recording
+    updated_at   TEXT
+);
+CREATE TABLE IF NOT EXISTS trim_clips (
+    id             INTEGER PRIMARY KEY,
+    clip_path      TEXT NOT NULL UNIQUE,
+    recording_id   INTEGER,            -- index id at render time (may be gone later)
+    event_id       INTEGER,
+    recording_path TEXT,
+    god            TEXT,
+    stem           TEXT,
+    recorded_at    TEXT,
+    ts_s           REAL,
+    start_s        REAL,
+    end_s          REAL,
+    tier           INTEGER DEFAULT 1,
+    label          TEXT,
+    size_bytes     INTEGER DEFAULT 0,
+    rendered_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_trim_clips_rec ON trim_clips(recording_id);
 """
 
 
@@ -499,6 +535,104 @@ class Store:
             " VALUES (?,?,?,?,?,?,?,?,?)", rows)
         self.conn.commit()
         return len(rows)
+
+    # ── trim page ─────────────────────────────────────────────────────
+
+    def trim_list(self, channel: Optional[str] = OWNER_CHANNEL) -> List[dict]:
+        """Every done recording, largest first, with its kill moments
+        (kills and multikills only; deaths are not trim material, James's
+        call 2026-09-15). Each moment carries the explicit decision if
+        one was made and the rendered clip path if one exists."""
+        chan_sql, chan_params = self._chan_sql(channel)
+        recs = self.conn.execute(
+            "SELECT r.id, r.path, r.stem, r.folder, r.god, r.recorded_at, r.duration_s,"
+            " r.size_bytes, r.channel, r.audio_streams,"
+            " COALESCE(t.keep_whole, 0) AS keep_whole"
+            " FROM recordings r LEFT JOIN trim_recordings t ON t.recording_id = r.id"
+            " WHERE r.status = 'done'" + chan_sql +
+            " ORDER BY r.size_bytes DESC, r.id DESC", chan_params).fetchall()
+        out = [dict(r) for r in recs]
+        by_id = {r["id"]: r for r in out}
+        for r in out:
+            r["moments"] = []
+            r["clips_rendered"] = 0
+        evs = self.conn.execute(
+            "SELECT e.id, e.recording_id, e.ts_s, e.tier, e.note, e.pre_s, e.post_s,"
+            " d.decision, c.clip_path, c.size_bytes AS clip_bytes"
+            " FROM events e"
+            " LEFT JOIN trim_decisions d ON d.event_id = e.id"
+            " LEFT JOIN trim_clips c ON c.event_id = e.id"
+            " WHERE e.kind IN ('kill', 'multikill')"
+            " ORDER BY e.recording_id, e.ts_s").fetchall()
+        for e in evs:
+            rec = by_id.get(e["recording_id"])
+            if rec is None:
+                continue
+            tier = int(e["tier"] or 1)
+            rec["moments"].append({
+                "event_id": int(e["id"]), "ts_s": float(e["ts_s"]), "tier": tier,
+                "label": tier_label(tier), "note": e["note"] or "",
+                "pre_s": float(e["pre_s"] or 0), "post_s": float(e["post_s"] or 0),
+                "decision": e["decision"], "clip_path": e["clip_path"],
+                "clip_bytes": int(e["clip_bytes"] or 0),
+            })
+            if e["clip_path"]:
+                rec["clips_rendered"] += 1
+        return out
+
+    def trim_decide(self, event_ids: Iterable[int], decision: str) -> int:
+        if decision not in ("keep", "skip"):
+            raise ValueError("decision must be keep or skip")
+        ids = [int(i) for i in event_ids]
+        if not ids:
+            return 0
+        now = now_iso()
+        rows = self.conn.execute(
+            f"SELECT id, recording_id FROM events WHERE id IN ({','.join('?' * len(ids))})", ids
+        ).fetchall()
+        self.conn.executemany(
+            "INSERT INTO trim_decisions (event_id, recording_id, decision, updated_at)"
+            " VALUES (?,?,?,?) ON CONFLICT(event_id) DO UPDATE SET decision=excluded.decision,"
+            " updated_at=excluded.updated_at",
+            [(int(r["id"]), int(r["recording_id"]), decision, now) for r in rows])
+        self.conn.commit()
+        return len(rows)
+
+    def trim_keep_whole(self, rec_id: int, keep: bool) -> None:
+        self.conn.execute(
+            "INSERT INTO trim_recordings (recording_id, keep_whole, updated_at) VALUES (?,?,?)"
+            " ON CONFLICT(recording_id) DO UPDATE SET keep_whole=excluded.keep_whole,"
+            " updated_at=excluded.updated_at", (int(rec_id), 1 if keep else 0, now_iso()))
+        self.conn.commit()
+
+    def trim_add_clip(self, clip_path: Path | str, **meta: Any) -> int:
+        cols = {"recording_id", "event_id", "recording_path", "god", "stem", "recorded_at",
+                "ts_s", "start_s", "end_s", "tier", "label", "size_bytes"}
+        data = {k: v for k, v in meta.items() if k in cols}
+        data["clip_path"] = str(clip_path)
+        data["rendered_at"] = now_iso()
+        keys = list(data)
+        self.conn.execute(
+            f"INSERT INTO trim_clips ({','.join(keys)}) VALUES ({','.join('?' * len(keys))})"
+            f" ON CONFLICT(clip_path) DO UPDATE SET "
+            + ", ".join(f"{k}=excluded.{k}" for k in keys if k != "clip_path"),
+            [data[k] for k in keys])
+        self.conn.commit()
+        row = self.conn.execute("SELECT id FROM trim_clips WHERE clip_path=?",
+                                (data["clip_path"],)).fetchone()
+        return int(row[0])
+
+    def trim_clips(self, rec_id: Optional[int] = None) -> List[dict]:
+        if rec_id is None:
+            rows = self.conn.execute("SELECT * FROM trim_clips ORDER BY rendered_at DESC")
+        else:
+            rows = self.conn.execute("SELECT * FROM trim_clips WHERE recording_id=? ORDER BY ts_s",
+                                     (int(rec_id),))
+        return [dict(r) for r in rows]
+
+    def trim_forget_clip(self, clip_path: Path | str) -> None:
+        self.conn.execute("DELETE FROM trim_clips WHERE clip_path=?", (str(clip_path),))
+        self.conn.commit()
 
     def delete_recording(self, rec_id: int) -> None:
         self.conn.execute("DELETE FROM embeddings WHERE segment_id IN"
