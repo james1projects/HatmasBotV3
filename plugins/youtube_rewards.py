@@ -70,6 +70,7 @@ from core.config import (
 )
 from core import users as _users
 from core.youtube_parser import parse_my_god, load_known_gods
+from core import youtube_videos as _yv
 from core.youtube_schema import ensure_youtube_schema
 
 
@@ -172,6 +173,61 @@ class YouTubeRewardsPlugin:
             print("[YouTubeRewards] Cleaned up")
 
     # ──────────────────────────────────────────────────────────────────
+    #   ADMIN PAGE API (core/youtube_admin_web.py)
+    # ──────────────────────────────────────────────────────────────────
+
+    def is_ready(self) -> bool:
+        """True when the scanner can talk to YouTube (API key, channel
+        id, aiohttp session and DB all present)."""
+        return bool(self._enabled and self.session is not None
+                    and self._db is not None)
+
+    def known_gods(self) -> List[str]:
+        return list(self._known_gods)
+
+    async def refresh_videos(self, limit: Optional[int] = None) -> dict:
+        """Walk the uploads playlist (all of it by default), record every
+        video in youtube_videos and auto-tag any parseable title that
+        has no mapping yet. Returns {seen, added, auto_tagged}."""
+        if not self.is_ready():
+            raise RuntimeError("YouTube scanner is not running "
+                               "(API key / channel id missing?)")
+        if self._uploads_playlist_id is None:
+            self._uploads_playlist_id = await self._yt_uploads_playlist()
+        videos = await self._yt_recent_uploads(
+            self._uploads_playlist_id, limit)
+        added = auto_tagged = 0
+        for video_id, title, published in videos:
+            if await _yv.upsert_video(self._db, video_id, title, published):
+                added += 1
+            before = await self._get_video_god(video_id)
+            await self._ensure_video_god(video_id, title)
+            if before is None and await self._get_video_god(video_id):
+                auto_tagged += 1
+        await self._db.commit()
+        print(f"[YouTubeRewards] refresh: {len(videos)} uploads, "
+              f"{added} new, {auto_tagged} auto-tagged")
+        return {"seen": len(videos), "added": added,
+                "auto_tagged": auto_tagged}
+
+    async def scan_video(self, video_id: str) -> int:
+        """Walk one video's comments now and pay any commenter not yet
+        rewarded for it. Returns the number of new grants. Used right
+        after the broadcaster tags a video so older uploads pay out
+        retroactively instead of waiting for the next deep scan."""
+        if not self.is_ready():
+            raise RuntimeError("YouTube scanner is not running "
+                               "(API key / channel id missing?)")
+        god = await self._get_video_god(video_id)
+        if god is None:
+            return 0
+        granted = await self._scan_video_comments(video_id, god)
+        if granted:
+            print(f"[YouTubeRewards] {video_id} ({god}): granted "
+                  f"{granted} share(s) on demand")
+        return granted
+
+    # ──────────────────────────────────────────────────────────────────
     #   POLL LOOP
     # ──────────────────────────────────────────────────────────────────
 
@@ -256,9 +312,12 @@ class YouTubeRewardsPlugin:
             print(f"[YouTubeRewards] Deep scan: walking {len(videos)} "
                   f"videos (covers comments on older uploads)")
 
-        # Step 1: ensure each video has a god mapping (auto-tag if needed).
-        for video_id, title, _ in videos:
+        # Step 1: record every upload (feeds /admin/videos) and ensure
+        # each has a god mapping (auto-tag if the title parses).
+        for video_id, title, published in videos:
+            await _yv.upsert_video(self._db, video_id, title, published)
             await self._ensure_video_god(video_id, title)
+        await self._db.commit()
 
         # Step 2: for each video that has a god, scan comments and grant.
         total_granted = 0
@@ -296,7 +355,8 @@ class YouTubeRewardsPlugin:
                     f"{YOUTUBE_CHANNEL_ID}")
             return items[0]["contentDetails"]["relatedPlaylists"]["uploads"]
 
-    async def _yt_recent_uploads(self, playlist_id: str, limit: int
+    async def _yt_recent_uploads(self, playlist_id: str,
+                                 limit: Optional[int]
                                  ) -> List[Tuple[str, str, str]]:
         """
         Return [(video_id, title, published_at), ...] for up to `limit`
@@ -304,11 +364,12 @@ class YouTubeRewardsPlugin:
         uploads playlist with pageToken when limit > 50, so a deep
         scan covering hundreds of videos works the same as a quick
         25-video scan. Stops when the playlist runs out or the limit
-        is reached.
+        is reached. limit=None walks the entire playlist (the
+        /admin/videos "Refresh from YouTube" button).
         """
         out: List[Tuple[str, str, str]] = []
         page_token: Optional[str] = None
-        while len(out) < limit:
+        while limit is None or len(out) < limit:
             url = (f"{YT_API}/playlistItems?part=snippet"
                    f"&playlistId={playlist_id}"
                    f"&maxResults=50"
@@ -320,7 +381,7 @@ class YouTubeRewardsPlugin:
                 data = await resp.json()
 
             for item in data.get("items", []):
-                if len(out) >= limit:
+                if limit is not None and len(out) >= limit:
                     break
                 snippet = item.get("snippet", {})
                 vid = snippet.get("resourceId", {}).get("videoId")
@@ -405,6 +466,8 @@ class YouTubeRewardsPlugin:
         existing = await self._get_video_god(video_id)
         if existing is not None:
             return  # already mapped; don't touch
+        if await _yv.is_skipped(self._db, video_id):
+            return  # broadcaster said "no share" on /admin/videos
 
         god = parse_my_god(title, self._known_gods)
         if god is None:

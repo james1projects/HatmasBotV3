@@ -62,6 +62,7 @@ from core import aspect_roster
 from core.aspect_roster import display_god
 from core.vod_web import VodWeb
 from core.bingo_web import BingoWeb
+from core.youtube_admin_web import YouTubeAdminWeb
 from core import web_session as _ws
 from core import events_store as _events
 from core import config as _config
@@ -393,6 +394,9 @@ class PublicWebServer:
         VodWeb(self).register()
         # Stream Bingo (core/bingo_web.py) — page, API, /ws/bingo
         BingoWeb(self).register()
+        # /admin/videos — which god each YouTube upload pays out
+        # (core/youtube_admin_web.py, broadcaster-only like /admin/events)
+        YouTubeAdminWeb(self).register()
         self.app.router.add_get(
             "/Live",
             lambda r: web.HTTPMovedPermanently("/live"))

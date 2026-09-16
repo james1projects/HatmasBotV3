@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Videos Admin</title>
+<link rel="icon" href="/favicon-32.png" sizes="32x32">
+<link rel="stylesheet" href="/theme.css">
+<style>
+  .wrap { max-width: 900px; margin: 0 auto; padding: 24px 16px 60px; }
+  h1 { font-family: var(--font-display); letter-spacing: 1px; margin: 0; }
+  .sub { color: var(--text-dim); font-size: 14px; margin: 4px 0 24px; }
+  .me { color: var(--text-dim); font-size: 13px; float: right; margin-top: 8px; }
+  .field input[type="text"], .field select {
+    background: var(--bg-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 8px 10px; font: 13px var(--font-sans); }
+  .field input:focus { outline: none; border-color: var(--border-hi); }
+  .btnrow { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .btn { background: var(--green-bg); color: var(--accent);
+    border: 1px solid var(--accent); border-radius: var(--radius);
+    padding: 8px 16px; font: 600 12px var(--font-mono); cursor: pointer;
+    text-transform: uppercase; letter-spacing: 1px; }
+  .btn.ghost { background: transparent; color: var(--text-dim); border-color: var(--border); }
+  .btn.danger { background: var(--red-bg); color: var(--red); border-color: var(--red); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); overflow: hidden; }
+  td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  .badge { display: inline-block; font: 600 10px var(--font-mono);
+    text-transform: uppercase; letter-spacing: 1px;
+    border-radius: var(--radius-sm); padding: 2px 6px; }
+  .badge.auto { background: var(--bg-2); color: var(--text-dim); }
+  .badge.manual { background: var(--green-bg); color: var(--accent); }
+  .badge.web { background: rgba(245,243,187,0.12); color: #F5F3BB; }
+  .badge.skipped { background: var(--bg-2); color: var(--text-fade); }
+  .ttl { font-weight: 600; }
+  .dt { font-family: var(--font-mono); font-size: 12px; color: var(--text-dim); white-space: nowrap; }
+  .tcell { text-align: right; width: 300px; }
+  .tcell .btn { padding: 4px 10px; }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: var(--panel-hi); border: 1px solid var(--border-hi); color: var(--text);
+    border-radius: var(--radius); padding: 10px 18px; font-size: 14px;
+    opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+  .toast.err { border-color: var(--red); color: var(--red); }
+  .banner { border: 1px solid var(--accent); background: rgba(255,180,0,0.06);
+    padding: 10px 14px; border-radius: var(--radius); margin-bottom: 18px;
+    font-size: 13px; color: var(--text-dim); }
+  .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+  .search-input { flex: 1 1 180px; min-width: 120px; }
+  .thumb { width: 96px; height: auto; border-radius: var(--radius-sm); object-fit: cover; display: block; }
+  .god-input { background: var(--bg-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 4px 8px; font: 13px var(--font-sans); width: 140px; }
+  .god-input:focus { outline: none; border-color: var(--border-hi); }
+  .suggested-hint { font-size: 11px; color: var(--text-fade); margin-left: 4px; }
+  .god-icon-sm { width: 28px; height: 28px; border-radius: 50%; vertical-align: middle; margin-right: 6px; }
+  .inline-edit { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .god-input { flex: 1 1 140px; max-width: 220px; }
+  .badge.count { background: var(--bg-2); color: var(--text-dim); margin-left: 4px; }
+  .btn.tab .badge.count { background: rgba(0,0,0,0.25); color: inherit; }
+  .tcell .inline-edit { display: flex; justify-content: flex-end; }
+  .acts { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; margin-top: 6px; }
+  .badge { white-space: nowrap; }
+  .godline { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  @media (max-width: 640px) {
+    .tcell { width: auto; }
+  }
+  @media (max-width: 500px) {
+    .thumb { width: 64px; }
+    td { padding: 6px 8px; }
+    .god-input { width: 110px; }
+  }
+</style>
+</head>
+<body>
+<a class="skip-link" href="#maincontent">Skip to content</a>
+<div class="wrap" id="maincontent" role="main" tabindex="-1">
+  <span class="me" id="me"></span>
+  <h1>VIDEOS ADMIN</h1>
+  <p class="sub">Every commenter on an upload gets a share of that video's god. Titles starting "Full Gameplay: X vs Y" are tagged automatically; everything else waits here. Saving a god pays existing commenters immediately. Every change is audit-logged.</p>
+  <div id="banner" class="banner" hidden>The YouTube scanner is not running. Tags still save, but grants and refresh will wait until it is back.</div>
+  <div class="toolbar">
+    <div class="tabs" id="tabs"></div>
+    <input id="search" class="search-input field" type="text" placeholder="Search titles…">
+    <button class="btn" id="refresh">Refresh from YouTube</button>
+  </div>
+  <table id="rows">
+    <tbody></tbody>
+  </table>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+(function() {
+  'use strict';
+
+  var videos = [];
+  var counts = {};
+  var loaded = false;
+  var activeTab = 'uncategorized';
+  var pluginReady = true;
+
+  function esc(s) {
+    if (s == null) return '';
+    var d = document.createElement('div');
+    d.appendChild(document.createTextNode(String(s)));
+    return d.innerHTML;
+  }
+
+  function showToast(msg, isErr) {
+    var t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = 'toast show' + (isErr ? ' err' : '');
+    clearTimeout(t._timer);
+    t._timer = setTimeout(function() { t.className = 'toast'; }, isErr ? 5000 : 2600);
+  }
+
+  function apiFetch(url, opts) {
+    var o = Object.assign({ credentials: 'same-origin', headers: {} }, opts || {});
+    if (o.body && typeof o.body === 'object' && !(o.body instanceof FormData)) {
+      o.headers['Content-Type'] = 'application/json';
+      o.body = JSON.stringify(o.body);
+    }
+    return fetch(url, o).then(function(r) {
+      if (r.status === 404) {
+        // Logged out or not the broadcaster: the server hides the page.
+        document.getElementById('maincontent').innerHTML = '<p>Not found.</p>';
+        throw new Error('404');
+      }
+      return r.json().catch(function() { return null; }).then(function(d) {
+        if (!r.ok) throw new Error((d && d.error) || 'HTTP ' + r.status);
+        if (!d) throw new Error('Bad response');
+        return d;
+      });
+    });
+  }
+
+  function formatDate(iso) {
+    if (!iso) return '\u2014';
+    try { return iso.slice(0, 10); } catch(e) { return '\u2014'; }
+  }
+
+  function buildTabs() {
+    var container = document.getElementById('tabs');
+    container.innerHTML = '';
+    var tabs = [
+      { key: 'uncategorized', label: 'Uncategorized' },
+      { key: 'categorized', label: 'Categorized' },
+      { key: 'skipped', label: 'Skipped' }
+    ];
+    tabs.forEach(function(t) {
+      var btn = document.createElement('button');
+      btn.className = t.key === activeTab ? 'btn tab' : 'btn ghost tab';
+      btn.setAttribute('aria-pressed', t.key === activeTab ? 'true' : 'false');
+      var count = counts[t.key] || 0;
+      btn.textContent = t.label + ' ';
+      var cnt = document.createElement('span');
+      cnt.className = 'badge count';
+      cnt.textContent = String(count);
+      btn.appendChild(cnt);
+      btn.addEventListener('click', function() {
+        activeTab = t.key;
+        try { localStorage.setItem('videos_admin_tab', t.key); } catch(e) {}
+        buildTabs();
+        renderRows();
+      });
+      container.appendChild(btn);
+    });
+  }
+
+  function getFiltered() {
+    var q = document.getElementById('search').value.toLowerCase();
+    return videos.filter(function(v) {
+      if (v.status !== activeTab) return false;
+      if (q) {
+        var hay = (v.title + ' ' + (v.god || '') + ' ' + v.video_id).toLowerCase();
+        if (hay.indexOf(q) === -1) return false;
+      }
+      return true;
+    });
+  }
+
+  function renderRows() {
+    var tbody = document.querySelector('#rows tbody');
+    tbody.innerHTML = '';
+    var filtered = getFiltered();
+    if (filtered.length === 0) {
+      var tr = document.createElement('tr');
+      var td = document.createElement('td');
+      td.setAttribute('colspan', '3');
+      td.style.textAlign = 'center';
+      td.style.color = 'var(--text-fade)';
+      td.textContent = loaded ? 'Nothing here.' : 'Loading\u2026';
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+      return;
+    }
+
+    filtered.forEach(function(v) {
+      var tr = document.createElement('tr');
+
+      // Thumbnail cell
+      var tdThumb = document.createElement('td');
+      var img = document.createElement('img');
+      img.className = 'thumb';
+      img.src = v.thumb || '';
+      img.setAttribute('loading', 'lazy');
+      img.alt = '';
+      tdThumb.appendChild(img);
+      tr.appendChild(tdThumb);
+
+      // Title + meta cell
+      var tdTitle = document.createElement('td');
+      var a = document.createElement('a');
+      a.href = v.url;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.className = 'ttl';
+      a.textContent = v.title;
+      tdTitle.appendChild(a);
+      var dt = document.createElement('div');
+      dt.className = 'dt';
+      dt.textContent = formatDate(v.published_at) + '  ' + v.video_id;
+      tdTitle.appendChild(dt);
+      tr.appendChild(tdTitle);
+
+      // Action cell
+      var tdAction = document.createElement('td');
+      tdAction.className = 'tcell';
+
+      if (v.status === 'uncategorized') {
+        renderUncategorizedActions(tdAction, v);
+      } else if (v.status === 'categorized') {
+        renderCategorizedActions(tdAction, v);
+      } else if (v.status === 'skipped') {
+        renderSkippedActions(tdAction, v);
+      }
+
+      tr.appendChild(tdAction);
+      tbody.appendChild(tr);
+    });
+  }
+
+  function renderUncategorizedActions(container, v) {
+    var wrap = document.createElement('div');
+    wrap.className = 'inline-edit';
+
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.setAttribute('list', 'godlist');
+    input.className = 'god-input';
+    if (v.suggestion) {
+      input.value = v.suggestion;
+      var hint = document.createElement('span');
+      hint.className = 'suggested-hint';
+      hint.textContent = 'suggested';
+      wrap.appendChild(input);
+      wrap.appendChild(hint);
+    } else {
+      wrap.appendChild(input);
+    }
+
+    var acts = document.createElement('div');
+    acts.className = 'acts';
+    var saveBtn = document.createElement('button');
+    saveBtn.className = 'btn';
+    saveBtn.textContent = 'Save & grant';
+    saveBtn.addEventListener('click', function() { doSaveGod(v, input.value.trim(), saveBtn, skipBtn); });
+    acts.appendChild(saveBtn);
+
+    var skipBtn = document.createElement('button');
+    skipBtn.className = 'btn ghost';
+    skipBtn.textContent = 'Skip';
+    skipBtn.addEventListener('click', function() { doSkip(v, skipBtn); });
+    acts.appendChild(skipBtn);
+
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') { e.preventDefault(); doSaveGod(v, input.value.trim(), saveBtn, skipBtn); }
+    });
+
+    container.appendChild(wrap);
+    container.appendChild(acts);
+  }
+
+  function renderCategorizedActions(container, v) {
+    var wrap = document.createElement('div');
+    wrap.className = 'godline';
+    wrap.id = 'cat-wrap-' + v.video_id;
+
+    // God icon + name
+    var godCell = document.createElement('span');
+    godCell.id = 'god-cell-' + v.video_id;
+    if (v.god_icon) {
+      var gi = document.createElement('img');
+      gi.className = 'god-icon-sm';
+      gi.src = v.god_icon;
+      gi.alt = '';
+      godCell.appendChild(gi);
+    }
+    var gname = document.createElement('strong');
+    gname.textContent = v.god || '';
+    godCell.appendChild(gname);
+    wrap.appendChild(godCell);
+
+    // set_by badge
+    var badge = document.createElement('span');
+    badge.className = 'badge';
+    if (v.set_by === 'auto') {
+      badge.classList.add('auto');
+      badge.textContent = 'auto';
+    } else if (v.set_by === 'manual') {
+      badge.classList.add('manual');
+      badge.textContent = 'manual';
+    } else if (v.set_by && v.set_by.indexOf('web:') === 0) {
+      badge.classList.add('web');
+      badge.textContent = 'web \u00b7 ' + v.set_by.slice(4);
+    } else {
+      badge.textContent = v.set_by || '';
+    }
+    wrap.appendChild(badge);
+
+    // Grants count
+    var grantsSpan = document.createElement('span');
+    grantsSpan.className = 'dt';
+    grantsSpan.textContent = v.grants + (v.grants === 1 ? ' grant' : ' grants');
+    wrap.appendChild(grantsSpan);
+
+    container.appendChild(wrap);
+
+    var acts = document.createElement('div');
+    acts.className = 'acts';
+    container.appendChild(acts);
+
+    // Rescan button
+    var rescanBtn = document.createElement('button');
+    rescanBtn.className = 'btn ghost';
+    rescanBtn.textContent = 'Rescan';
+    rescanBtn.addEventListener('click', function() { doRescan(v, rescanBtn); });
+    acts.appendChild(rescanBtn);
+
+    // Change button
+    var changeBtn = document.createElement('button');
+    changeBtn.className = 'btn ghost';
+    changeBtn.textContent = 'Change';
+    if (v.grants > 0) {
+      changeBtn.disabled = true;
+      changeBtn.title = 'Already paid out \u2014 reassignment not supported yet';
+    } else {
+      changeBtn.addEventListener('click', function() { doChangeGod(v, changeBtn); });
+    }
+    acts.appendChild(changeBtn);
+  }
+
+  function renderSkippedActions(container, v) {
+    var badge = document.createElement('span');
+    badge.className = 'badge skipped';
+    badge.textContent = 'skipped';
+    container.appendChild(badge);
+
+    var unskipBtn = document.createElement('button');
+    unskipBtn.className = 'btn ghost';
+    unskipBtn.style.marginLeft = '8px';
+    unskipBtn.textContent = 'Unskip';
+    unskipBtn.addEventListener('click', function() { doUnskip(v, unskipBtn); });
+    container.appendChild(unskipBtn);
+  }
+
+  function doSaveGod(v, godName, saveBtn, skipBtn) {
+    if (!godName) { showToast('Enter a god name.', true); return; }
+    saveBtn.disabled = true;
+    if (skipBtn) skipBtn.disabled = true;
+    apiFetch('/api/admin/videos/' + encodeURIComponent(v.video_id) + '/god', {
+      method: 'POST',
+      body: { god: godName }
+    }).then(function(d) {
+      if (!d.ok) throw new Error(d.error || 'Save failed');
+      if (d.warning) {
+        showToast(d.warning, true);
+      } else {
+        showToast(d.god + ': granted ' + d.granted + ' share(s)', false);
+      }
+      reloadList();
+    }).catch(function(e) {
+      showToast(e.message, true);
+      saveBtn.disabled = false;
+      if (skipBtn) skipBtn.disabled = false;
+    });
+  }
+
+  function doSkip(v, btn) {
+    btn.disabled = true;
+    apiFetch('/api/admin/videos/' + encodeURIComponent(v.video_id) + '/skip', {
+      method: 'POST',
+      body: {}
+    }).then(function(d) {
+      if (!d.ok) throw new Error(d.error || 'Skip failed');
+      showToast('Skipped.', false);
+      reloadList();
+    }).catch(function(e) {
+      showToast(e.message, true);
+      btn.disabled = false;
+    });
+  }
+
+  function doRescan(v, btn) {
+    btn.disabled = true;
+    apiFetch('/api/admin/videos/' + encodeURIComponent(v.video_id) + '/rescan', {
+      method: 'POST',
+      body: {}
+    }).then(function(d) {
+      if (!d.ok) throw new Error(d.error || 'Rescan failed');
+      showToast(d.god + ': granted ' + d.granted + ' new share(s)', false);
+      reloadList();
+    }).catch(function(e) {
+      showToast(e.message, true);
+      btn.disabled = false;
+    });
+  }
+
+  function doChangeGod(v, changeBtn) {
+    var godCell = document.getElementById('god-cell-' + v.video_id);
+    if (!godCell) return;
+    var wrap = document.getElementById('cat-wrap-' + v.video_id);
+    if (!wrap) return;
+
+    // Replace god cell with inline edit
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.setAttribute('list', 'godlist');
+    input.className = 'god-input';
+    input.value = v.god || '';
+
+    var saveBtn = document.createElement('button');
+    saveBtn.className = 'btn';
+    saveBtn.textContent = 'Save';
+    saveBtn.addEventListener('click', function() {
+      doSaveGod(v, input.value.trim(), saveBtn, null);
+    });
+
+    var cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn ghost';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', function() { reloadList(); });
+
+    godCell.innerHTML = '';
+    godCell.appendChild(input);
+    var acts = changeBtn.parentNode;
+    acts.innerHTML = '';
+    acts.appendChild(saveBtn);
+    acts.appendChild(cancelBtn);
+    input.focus();
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') { e.preventDefault(); doSaveGod(v, input.value.trim(), saveBtn, null); }
+    });
+  }
+
+  function doUnskip(v, btn) {
+    btn.disabled = true;
+    apiFetch('/api/admin/videos/' + encodeURIComponent(v.video_id) + '/unskip', {
+      method: 'POST',
+      body: {}
+    }).then(function(d) {
+      if (!d.ok) throw new Error(d.error || 'Unskip failed');
+      showToast('Unskipped.', false);
+      reloadList();
+    }).catch(function(e) {
+      showToast(e.message, true);
+      btn.disabled = false;
+    });
+  }
+
+  function doRefresh() {
+    var btn = document.getElementById('refresh');
+    btn.disabled = true;
+    btn.textContent = 'Refreshing\u2026';
+    apiFetch('/api/admin/videos/refresh', { method: 'POST', body: {} }).then(function(d) {
+      if (!d.ok) throw new Error(d.error || 'Refresh failed');
+      showToast('Walked ' + d.seen + ' uploads, ' + d.added + ' new, ' + d.auto_tagged + ' auto-tagged', false);
+      return reloadList();
+    }).catch(function(e) {
+      showToast(e.message, true);
+    }).then(function() {
+      btn.disabled = false;
+      btn.textContent = 'Refresh from YouTube';
+    });
+  }
+
+  function reloadList() {
+    return apiFetch('/api/admin/videos').then(function(d) {
+      if (!d.ok) throw new Error(d.error || 'Load failed');
+      videos = d.videos;
+      counts = d.counts || {};
+      loaded = true;
+      pluginReady = d.plugin_ready !== false;
+      document.getElementById('banner').hidden = pluginReady;
+      document.getElementById('me').textContent = d.user || '';
+      buildTabs();
+      renderRows();
+    }).catch(function(e) {
+      showToast(e.message, true);
+    });
+  }
+
+  function init() {
+    try {
+      var saved = localStorage.getItem('videos_admin_tab');
+      if (saved && ['uncategorized','categorized','skipped'].indexOf(saved) !== -1) {
+        activeTab = saved;
+      }
+    } catch(e) {}
+
+    document.getElementById('refresh').addEventListener('click', doRefresh);
+    document.getElementById('search').addEventListener('input', renderRows);
+
+    Promise.all([
+      apiFetch('/api/admin/videos'),
+      apiFetch('/api/admin/videos/gods')
+    ]).then(function(results) {
+      var videoData = results[0];
+      var godsData = results[1];
+
+      if (!videoData.ok) throw new Error(videoData.error || 'Load failed');
+      videos = videoData.videos;
+      counts = videoData.counts || {};
+      loaded = true;
+      pluginReady = videoData.plugin_ready !== false;
+      document.getElementById('banner').hidden = pluginReady;
+      document.getElementById('me').textContent = videoData.user || '';
+
+      if (godsData.ok) {
+        var dl = document.getElementById('godlist');
+        if (!dl) {
+          dl = document.createElement('datalist');
+          dl.id = 'godlist';
+          document.body.appendChild(dl);
+        }
+        dl.innerHTML = '';
+        godsData.gods.forEach(function(g) {
+          var opt = document.createElement('option');
+          opt.value = g.name;
+          dl.appendChild(opt);
+        });
+      }
+
+      buildTabs();
+      renderRows();
+    }).catch(function(e) {
+      if (e.message === '404') return;
+      showToast(e.message, true);
+    });
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>
